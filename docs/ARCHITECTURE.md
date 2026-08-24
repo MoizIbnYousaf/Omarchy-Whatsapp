@@ -11,6 +11,12 @@
 
 The window can disappear without making the data path cold.
 
+Unread state has two independent layers. wacli's `unread_count` remains the
+authoritative WhatsApp value. OmaWhatsApp stores a mode-`0600` local
+acknowledgement snapshot and derives only the bar's new-message delta from it.
+Opening or dismissing never mutates WhatsApp; the labelled chat-menu action is
+the sole read-receipt path.
+
 ## Data boundary
 
 Read paths open wacli's SQLite mirror in URI read-only/query-only mode. Chat
@@ -44,6 +50,11 @@ passing the verified set to wacli.
 its companion socket. If that path is unavailable, the helper serializes a
 bounded fallback, briefly yields the user service, sends, and restarts sync in
 a `finally` block.
+
+The header's offline choice is persisted privately and maps to
+`systemctl --user disable --now wacli-sync.service`. Read paths remain usable;
+all WhatsApp mutations fail closed until the user explicitly returns online.
+Installer upgrades preserve that choice.
 
 ## Performance
 

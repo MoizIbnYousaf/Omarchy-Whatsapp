@@ -8,13 +8,13 @@ warm. These are reproducible local-path measurements, not marketing estimates.
 
 | Measurement | Result |
 |---|---:|
-| Load 217 supported chats, median / p95 (100 runs) | 64.79 / 68.91 ms |
-| Load 160 messages, median / p95 (100 runs) | 66.55 / 71.20 ms |
-| Local `status`, median / p95 (100 runs) | 78.36 / 83.86 ms |
-| Local `status` min–max | 63.29–100.62 ms |
-| Installed QML/source tree | 160,936 bytes |
-| Helper script | 52,516 bytes |
-| Warm `wacli sync --follow` RSS | 29,672 KiB |
+| Load 218 supported chats, median / p95 (100 runs) | 76.93 / 87.06 ms |
+| Load 160 messages, median / p95 (100 runs) | 79.90 / 91.49 ms |
+| Local `status`, median / p95 (100 runs) | 103.41 / 118.86 ms |
+| Local `status` min–max | 82.24–129.44 ms |
+| Installed QML/source tree | 167,066 bytes |
+| Helper script | 59,070 bytes |
+| Warm `wacli sync --follow` RSS | 49,736 KiB |
 | Browser/Electron runtime | none |
 
 The opening path reads only local state. Its first paint does not wait for a

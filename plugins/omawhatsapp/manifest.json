@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.moizibnyousaf.omawhatsapp",
   "name": "OmaWhatsApp",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": "MoizIbnYousaf",
   "license": "MIT",
   "description": "WhatsApp in Quickshell—not Chromium. Fast local chats, rich media, keyboard workflows, and Omarchy themes powered by wacli.",
@@ -27,10 +27,10 @@
       {
         "key": "showUnreadCount",
         "type": "enum",
-        "label": "Show unread count",
+        "label": "Show notification badge",
         "options": ["On", "Off"],
         "defaultValue": "On",
-        "description": "Show the total unread message count beside the WhatsApp icon."
+        "description": "Show new messages since the last local dismissal; this never sends read receipts."
       }
     ]
   }

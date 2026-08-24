@@ -54,7 +54,8 @@ button must remain reachable at every supported size.
 | Flow | Transport | App |
 |---|---|---|
 | Select chat | local mirror | done |
-| Mark read/unread | `chats mark-read/mark-unread` | building |
+| Local notification acknowledgement | private app preference | done |
+| Explicit mark read/unread | `chats mark-read/mark-unread` | done |
 | Pin/unpin | `chats pin/unpin` | building |
 | Mute/unmute | `chats mute/unmute` | building |
 | Archive/unarchive | `chats archive/unarchive` | building |
@@ -150,13 +151,15 @@ remaining selection can be recovered rather than silently duplicated.
 | Flow | Transport | App |
 |---|---|---|
 | Background sync | `sync --follow` service | done |
+| Offline archive mode | disabled sync service + read-only SQLite | done |
 | Writes through live companion | supported mutations | done |
 | Store-lock fallback | bounded service yield/restart | done |
 | On-demand media download | `media download` | done |
 | Expired-media recovery | `media retry` | planned |
 | Typing/paused indicator | `presence typing/paused` | planned |
 | Incoming typing indicator | not exposed | transport gap |
-| Desktop notifications | local new-message delta | planned |
+| Notification badge | local new-message delta; no receipt | done |
+| Desktop message popups | none by default | intentionally excluded |
 | Offline draft/error recovery | local UI state | building |
 | Audio/video calls | call events only | intentionally excluded |
 

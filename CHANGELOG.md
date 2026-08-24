@@ -1,7 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-08-24
 
+- Add a persistent online/offline toggle: offline mode disables and stops
+  background sync while keeping the read-only local archive fully available.
+- Split notification acknowledgement from WhatsApp read state. Opening a chat
+  or middle-clicking the bar clears only OmaWhatsApp's local new-message badge;
+  new arrivals reappear, while actual unread counts remain intact.
+- Make read receipts an explicit chat-menu action labelled
+  `Mark read · send receipt`; OmaWhatsApp emits no desktop message popups by
+  default, and its in-app confirmations auto-dismiss.
 - Adopt the permanent marketplace ID
   `io.github.moizibnyousaf.omawhatsapp` and migrate existing shell entries
   automatically during installation.

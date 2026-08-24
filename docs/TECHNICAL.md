@@ -30,6 +30,12 @@ does not retain the original local path. Keys include both chat and message ID,
 and missing/stale paths are ignored. Group mentions are likewise bounded and
 must resolve to a participant or known sender in the selected indexed group.
 
+`preferences.json` is another atomic mode-`0600` helper file. It stores only
+the online/offline preference and per-chat unread/timestamp acknowledgement
+snapshots. Acknowledgement affects the local notification delta, never
+`wacli.db`; read receipts use `wacli chats mark-read` only after an explicit
+chat-menu action.
+
 ## Writes while sync is live
 
 wacli's companion socket handles supported mutations without stopping sync.

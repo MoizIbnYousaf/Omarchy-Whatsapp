@@ -14,10 +14,12 @@ Item {
   property bool ready: false
   property bool authenticated: false
   property bool syncActive: false
+  property bool offlineMode: false
   property bool loadingChats: false
   property bool loadingMessages: false
   property bool loadingMembers: false
   property bool writing: false
+  property bool controlWriting: false
   property bool windowOpen: false
   property bool messagesPending: false
   property string activeWriteKind: ""
@@ -37,14 +39,20 @@ Item {
   readonly property int unreadCount: chats.reduce(function(total, chat) {
     return total + Number(chat.unread || 0)
   }, 0)
+  readonly property int notificationUnreadCount: chats.reduce(function(total, chat) {
+    return total + Number(chat.notification_unread || 0)
+  }, 0)
   readonly property string barTooltip: ready
-    ? "OmaWhatsApp · " + unreadCount + " unread"
+    ? (offlineMode ? "OmaWhatsApp · offline archive"
+      : "OmaWhatsApp · " + notificationUnreadCount + " new · middle-click to dismiss")
     : "OmaWhatsApp · reconnecting"
 
   signal textPasted(string text, string jid)
   signal attachmentPasted(string path, string jid)
   signal writeCompleted(string kind, string jid)
   signal writeFailed(string message, string jid)
+  signal controlCompleted(string kind)
+  signal controlFailed(string message)
 
   function parseJson(raw) {
     try { return JSON.parse(String(raw || "{}")) } catch (error) { return null }
@@ -87,6 +95,7 @@ Item {
   function selectChat(chat) {
     if (!chat || !chat.jid) return
     var next = String(chat.jid)
+    dismissNotifications(next)
     if (next === selectedChatJid) return
     selectedChatJid = next
     selectedChatName = String(chat.name || "WhatsApp chat")
@@ -108,6 +117,12 @@ Item {
   function selectItem(id) { selectedId = String(id || "") }
   function runWrite(kind, payload) {
     if (writing || writeProcess.running || selectedChatJid === "") return false
+    if (offlineMode && kind !== "paste") {
+      var message = "Offline mode is on. Go online before sending or changing WhatsApp state."
+      errorText = message
+      writeFailed(message, selectedChatJid)
+      return false
+    }
     writing = true
     activeWriteKind = kind
     activeWriteChatJid = selectedChatJid
@@ -203,6 +218,37 @@ Item {
       jid: selectedChatJid, action: String(action || "")
     })
   }
+  function clearNotificationCount(jid) {
+    var target = String(jid || "")
+    root.chats = root.chats.map(function(chat) {
+      if (target !== "" && String(chat.jid || "") !== target) return chat
+      var next = Object.assign({}, chat)
+      next.notification_unread = 0
+      return next
+    })
+  }
+  function dismissNotifications(jid) {
+    if (controlProcess.running) return false
+    var target = String(jid || "")
+    clearNotificationCount(target)
+    controlWriting = true
+    controlProcess.kind = "acknowledge"
+    controlProcess.payload = JSON.stringify({ jid: target })
+    controlProcess.command = [helper, "acknowledge"]
+    controlProcess.stdinEnabled = true
+    controlProcess.running = true
+    return true
+  }
+  function setOnline(online) {
+    if (controlProcess.running || writing) return false
+    controlWriting = true
+    controlProcess.kind = "sync-mode"
+    controlProcess.payload = JSON.stringify({ online: online === true })
+    controlProcess.command = [helper, "sync-mode"]
+    controlProcess.stdinEnabled = true
+    controlProcess.running = true
+    return true
+  }
 
   Timer {
     interval: 12000
@@ -236,6 +282,7 @@ Item {
       }
       root.authenticated = payload.authenticated === true
       root.syncActive = payload.sync_active === true
+      root.offlineMode = payload.offline_mode === true
       root.ready = root.authenticated && payload.database_ready === true
       if (root.ready) root.errorText = ""
     }
@@ -267,11 +314,45 @@ Item {
         root.query = ""
         root.messages = []
         root.members = []
+        if (root.windowOpen) root.dismissNotifications(root.selectedChatJid)
       }
       root.selectedChatName = String(selected.name || "WhatsApp chat")
       root.selectedChatKind = String(selected.kind || "unknown")
       if (root.messages.length === 0) root.refreshMessages()
       if (root.selectedChatKind === "group" && root.members.length === 0) root.refreshMembers()
+    }
+  }
+
+  Process {
+    id: controlProcess
+    property string kind: ""
+    property string payload: ""
+    command: []
+    stdinEnabled: true
+    stdout: StdioCollector { id: controlOutput }
+    stderr: StdioCollector { id: controlError }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      root.controlWriting = false
+      var finishedKind = kind
+      var payload = root.parseJson(controlOutput.text)
+      if (exitCode !== 0 || !payload || payload.ok !== true) {
+        var message = (payload && payload.error)
+          || String(controlError.text || "OmaWhatsApp could not change that setting.").trim()
+        root.errorText = message
+        root.controlFailed(message)
+        root.refreshStatus()
+        root.refreshChats()
+        return
+      }
+      root.errorText = ""
+      if (finishedKind === "sync-mode") {
+        root.offlineMode = payload.online !== true
+        root.syncActive = payload.online === true
+      }
+      root.controlCompleted(finishedKind)
+      root.refreshStatus()
+      root.refreshChats()
     }
   }
 

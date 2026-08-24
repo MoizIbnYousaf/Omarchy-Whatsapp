@@ -155,6 +155,39 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(self.backend.chats("Design%team")["chats"], [])
         self.assertEqual(self.backend.chats("design")["chats"][0]["jid"], "team@g.us")
 
+    def test_notification_dismissal_is_local_and_new_messages_reappear(self) -> None:
+        original = next(chat for chat in self.backend.chats()["chats"]
+                        if chat["jid"] == "team@g.us")
+        self.assertEqual(original["unread"], 3)
+        self.assertEqual(original["notification_unread"], 3)
+
+        with mock.patch.object(self.backend, "_write") as write:
+            self.backend.acknowledge_notifications("team@g.us")
+        write.assert_not_called()
+        dismissed = next(chat for chat in self.backend.chats()["chats"]
+                         if chat["jid"] == "team@g.us")
+        self.assertEqual(dismissed["unread"], 3)
+        self.assertEqual(dismissed["notification_unread"], 0)
+        preferences = self.root / "state" / "preferences.json"
+        self.assertEqual(preferences.stat().st_mode & 0o777, 0o600)
+
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE chats SET last_message_ts = 31, unread_count = 4 WHERE jid = ?",
+                ["team@g.us"],
+            )
+            connection.execute(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+                 from_me, text, reaction_to_id)
+                VALUES (?, 'Design team', 't3', 'member@s.whatsapp.net', 'Sam',
+                        31, 0, 'new', '')""",
+                ["team@g.us"],
+            )
+        updated = next(chat for chat in self.backend.chats()["chats"]
+                       if chat["jid"] == "team@g.us")
+        self.assertEqual(updated["notification_unread"], 1)
+
     def test_chat_surface_is_only_dms_and_standalone_groups(self) -> None:
         visible = {chat["jid"] for chat in self.backend.chats()["chats"]}
         self.assertEqual(visible, {"team@g.us", "alex@s.whatsapp.net", "archive@g.us"})
@@ -403,6 +436,31 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(command[command.index("--chat") + 1], "team@g.us")
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not supported"):
             self.backend.chat_action("team@g.us", "leave")
+
+    def test_mark_read_is_an_explicit_exact_receipt_command(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.chat_action("team@g.us", "read")
+        self.assertEqual(write.call_args.args[0], [
+            "--json", "chats", "mark-read", "--chat", "team@g.us"
+        ])
+
+    def test_offline_mode_persists_and_blocks_whatsapp_writes(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(backend_module.subprocess, "run", return_value=completed) as run:
+            result = self.backend.set_online(False)
+        self.assertFalse(result["online"])
+        self.assertFalse(self.backend.online())
+        self.assertIn("disable", run.call_args.args[0])
+        self.assertIn("--now", run.call_args.args[0])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Offline mode"):
+            self.backend._write(["--json", "chats", "mark-read"], timeout=10)
+
+        with mock.patch.object(backend_module.subprocess, "run", return_value=completed) as run:
+            result = self.backend.set_online(True)
+        self.assertTrue(result["online"])
+        self.assertTrue(self.backend.online())
+        self.assertIn("enable", run.call_args.args[0])
 
     def test_selectable_option_is_bounded(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")

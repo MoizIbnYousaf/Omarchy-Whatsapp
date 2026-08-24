@@ -33,6 +33,7 @@ MAX_MESSAGE = 4096
 MAX_FILE = 100 * 1024 * 1024
 MAX_ATTACHMENTS = 10
 MAX_SENT_MEDIA_HINTS = 2000
+PREFERENCES_VERSION = 1
 SUPPORTED_CHAT_WHERE = """(chats.kind = 'dm' OR (
   chats.kind = 'group'
   AND COALESCE(groups.is_parent, 0) = 0
@@ -85,6 +86,72 @@ class Backend:
         self.store_dir = store_dir
         self.state_dir = state_dir
         self.wacli = wacli
+
+    def _preferences(self) -> dict[str, Any]:
+        path = self.state_dir / "preferences.json"
+        default: dict[str, Any] = {
+            "version": PREFERENCES_VERSION,
+            "online": True,
+            "acknowledged_unread": {},
+        }
+        try:
+            if path.stat().st_size > 1024 * 1024:
+                return default
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return default
+        if not isinstance(value, dict):
+            return default
+        acknowledged = value.get("acknowledged_unread")
+        clean_acknowledged: dict[str, dict[str, int]] = {}
+        if isinstance(acknowledged, dict):
+            for jid, item in acknowledged.items():
+                if not isinstance(jid, str) or not isinstance(item, dict):
+                    continue
+                unread = bounded_int(item.get("unread"), 0, 0, 1_000_000_000)
+                timestamp = bounded_int(item.get("timestamp"), 0, 0, 9_999_999_999)
+                clean_acknowledged[jid[:160]] = {
+                    "unread": unread,
+                    "timestamp": timestamp,
+                }
+        return {
+            "version": PREFERENCES_VERSION,
+            "online": value.get("online") is not False,
+            "acknowledged_unread": clean_acknowledged,
+        }
+
+    def _write_preferences(self, value: dict[str, Any]) -> None:
+        self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(self.state_dir, 0o700)
+        descriptor, temporary = tempfile.mkstemp(prefix="preferences.", dir=self.state_dir)
+        try:
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(value, handle, ensure_ascii=False, separators=(",", ":"))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.state_dir / "preferences.json")
+        except Exception:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise
+
+    def _update_preferences(self, update: Any) -> dict[str, Any]:
+        self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(self.state_dir, 0o700)
+        lock_path = self.state_dir / "preferences.lock"
+        with lock_path.open("a+b") as handle:
+            os.chmod(lock_path, 0o600)
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            value = self._preferences()
+            update(value)
+            self._write_preferences(value)
+            return value
+
+    def online(self) -> bool:
+        return self._preferences().get("online") is not False
 
     @staticmethod
     def _media_hint_key(jid: str, message_id: str) -> str:
@@ -188,6 +255,8 @@ class Backend:
         return result.returncode == 0
 
     def _write(self, args: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+        if not self.online():
+            raise OmaWhatsAppError("Offline mode is on. Go online before sending or changing WhatsApp state.")
         # wacli delegates supported mutations to sync --follow's companion socket.
         result = self._run(args, timeout=timeout)
         if not self._locked(result):
@@ -296,11 +365,14 @@ class Backend:
                     "sync_active": False, "error": "wacli is not installed."}
         doctor = self._doctor()
         authenticated = doctor.get("authenticated") is True
+        online = self.online()
         return {
             "ok": True,
             "installed": True,
             "authenticated": authenticated,
             "sync_active": self._sync_active(),
+            "online": online,
+            "offline_mode": not online,
             "fts_enabled": doctor.get("fts_enabled") is True,
             "database_ready": self._database(doctor).is_file(),
             "error": clean_error(doctor.get("store_error"), "") if authenticated else "",
@@ -344,16 +416,81 @@ class Backend:
                 ).fetchall()
         except sqlite3.Error as exc:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
-        return {"ok": True, "query": cleaned, "chats": [{
-            "jid": str(row["jid"]), "name": str(row["name"]),
-            "kind": str(row["kind"] or "unknown"),
-            "timestamp": int(row["last_message_ts"] or 0),
-            "preview": " ".join(str(row["preview"] or "").split())[:512],
-            "last_from_me": bool(row["last_from_me"]),
-            "archived": bool(row["archived"]), "pinned": bool(row["pinned"]),
-            "muted": int(row["muted_until"] or 0) > int(time.time()),
-            "unread": int(row["unread_count"] or 0),
-        } for row in rows]}
+        acknowledged = self._preferences().get("acknowledged_unread", {})
+        chats: list[dict[str, Any]] = []
+        for row in rows:
+            jid = str(row["jid"])
+            timestamp = int(row["last_message_ts"] or 0)
+            unread = int(row["unread_count"] or 0)
+            notification_unread = unread
+            snapshot = acknowledged.get(jid) if isinstance(acknowledged, dict) else None
+            if isinstance(snapshot, dict):
+                acknowledged_at = int(snapshot.get("timestamp") or 0)
+                acknowledged_count = int(snapshot.get("unread") or 0)
+                if timestamp <= acknowledged_at or bool(row["last_from_me"]):
+                    notification_unread = 0
+                elif unread > 0:
+                    notification_unread = max(1, unread - acknowledged_count)
+            chats.append({
+                "jid": jid, "name": str(row["name"]),
+                "kind": str(row["kind"] or "unknown"),
+                "timestamp": timestamp,
+                "preview": " ".join(str(row["preview"] or "").split())[:512],
+                "last_from_me": bool(row["last_from_me"]),
+                "archived": bool(row["archived"]), "pinned": bool(row["pinned"]),
+                "muted": int(row["muted_until"] or 0) > int(time.time()),
+                "unread": unread,
+                "notification_unread": notification_unread,
+            })
+        return {"ok": True, "query": cleaned, "chats": chats}
+
+    def acknowledge_notifications(self, jid: str = "") -> dict[str, Any]:
+        target = jid.strip()
+        if target:
+            self._chat(target)
+        chats = self.chats(limit=500)["chats"]
+        selected = [chat for chat in chats if not target or chat["jid"] == target]
+        if target and not selected:
+            raise OmaWhatsAppError("That chat is not available in the local WhatsApp index.")
+
+        def update(value: dict[str, Any]) -> None:
+            acknowledged = value.setdefault("acknowledged_unread", {})
+            if not isinstance(acknowledged, dict):
+                acknowledged = {}
+                value["acknowledged_unread"] = acknowledged
+            for chat in selected:
+                if int(chat.get("unread") or 0) <= 0:
+                    acknowledged.pop(str(chat["jid"]), None)
+                    continue
+                acknowledged[str(chat["jid"])] = {
+                    "unread": int(chat.get("unread") or 0),
+                    "timestamp": int(chat.get("timestamp") or 0),
+                }
+
+        self._update_preferences(update)
+        return {"ok": True, "kind": "acknowledge", "count": len(selected)}
+
+    def set_online(self, online: bool) -> dict[str, Any]:
+        command = "enable" if online else "disable"
+        try:
+            result = subprocess.run(
+                [str(SYSTEMCTL), "--user", command, "--now", "wacli-sync.service"],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=20,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise OmaWhatsAppError("Background sync took too long to change mode.") from exc
+        if result.returncode != 0:
+            raise OmaWhatsAppError(clean_error(result.stderr, "Background sync mode could not be changed."))
+
+        def update(value: dict[str, Any]) -> None:
+            value["online"] = bool(online)
+
+        self._update_preferences(update)
+        return {"ok": True, "kind": "sync-mode", "online": bool(online)}
 
     def messages(self, jid: str, query: str = "", limit: int = 160) -> dict[str, Any]:
         chat = self._chat(jid)
@@ -978,7 +1115,11 @@ class Backend:
     def auth(self) -> int:
         result = subprocess.run([str(self.wacli), "auth"], check=False)
         if result.returncode == 0:
-            subprocess.run([str(SYSTEMCTL), "--user", "enable", "--now", "wacli-sync.service"], check=False)
+            command = "enable" if self.online() else "disable"
+            subprocess.run(
+                [str(SYSTEMCTL), "--user", command, "--now", "wacli-sync.service"],
+                check=False,
+            )
         return result.returncode
 
 
@@ -1004,6 +1145,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("forward")
     commands.add_parser("select")
     commands.add_parser("chat-action")
+    commands.add_parser("acknowledge")
+    commands.add_parser("sync-mode")
     commands.add_parser("auth")
     return value
 
@@ -1073,6 +1216,12 @@ def main() -> int:
         if args.command == "chat-action":
             return emit(backend.chat_action(str(payload.get("jid") or ""),
                                             str(payload.get("action") or "")))
+        if args.command == "acknowledge":
+            return emit(backend.acknowledge_notifications(str(payload.get("jid") or "")))
+        if args.command == "sync-mode":
+            if not isinstance(payload.get("online"), bool):
+                raise OmaWhatsAppError("Online mode must be true or false.")
+            return emit(backend.set_online(bool(payload["online"])))
     except OmaWhatsAppError as exc:
         return emit({"ok": False, "error": clean_error(exc, "OmaWhatsApp failed.")}, 1)
     return emit({"ok": False, "error": "Unknown command."}, 2)

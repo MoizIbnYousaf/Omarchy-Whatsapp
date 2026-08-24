@@ -10,6 +10,9 @@ must still be reviewed before push.
 
 Runtime data remains under `~/.local/state/`. Clipboard images use a private
 runtime file, pass through wacli, and are removed in a `finally` path.
+OmaWhatsApp's mode-`0600` preferences contain the offline choice and local
+notification acknowledgements. They never leave the machine and are never
+written into wacli's database.
 
 For screenshots, open `omawhatsapp` with `{"demo":true}`. Demo mode contains
 repository-owned sample data and performs no WhatsApp writes.

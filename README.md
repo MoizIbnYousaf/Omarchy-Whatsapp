@@ -11,9 +11,9 @@ Electron runtime, browser wrapper, or cloud backend is added.
 
 | Local path | Median | p95 |
 |---|---:|---:|
-| Load 217 chats | 64.79 ms | 68.91 ms |
-| Load 160 messages | 66.55 ms | 71.20 ms |
-| Read sync health | 78.36 ms | 83.86 ms |
+| Load 218 chats | 76.93 ms | 87.06 ms |
+| Load 160 messages | 79.90 ms | 91.49 ms |
+| Read sync health | 103.41 ms | 118.86 ms |
 
 Measured over 100 warm runs on the project XPS. See the reproducible
 [benchmark](docs/BENCHMARK.md).
@@ -22,6 +22,10 @@ Measured over 100 warm runs on the project XPS. See the reproducible
 
 - **Local-first opening.** Chats and messages render from SQLite immediately;
   network sync continues in a quiet user service.
+- **A real offline switch.** Pause and disable background sync from the header;
+  the complete local archive remains searchable and readable.
+- **Receipts stay deliberate.** Opening a chat or dismissing its badge is local
+  only. `Mark read · send receipt` is the explicit WhatsApp write.
 - **One native plugin.** The service, panel, and configurable bar item share a
   single Omarchy plugin lifecycle.
 - **No duplicate sync process.** Sends use wacli's live companion path and a
@@ -58,6 +62,9 @@ Measured over 100 warm runs on the project XPS. See the reproducible
   delete for you, and delete for everyone share the same action surface.
 - Keep a separate draft, reply/edit context, and pending attachment queue for
   every chat while switching between conversations.
+- Get a quiet bar badge without persistent desktop popups. Opening a chat
+  acknowledges that chat locally; middle-clicking the bar dismisses the current
+  batch. New incoming messages light it up again.
 
 The focused first release contains direct chats and standalone groups only.
 Channels/newsletters, calls, Community parents, and Community-linked subgroups
@@ -150,8 +157,12 @@ Add the `Super+Shift+W` binding from
 | `Left` / `Right` | Previous/next gallery item |
 | `+` / `-` / `0` | Zoom in/out/fit |
 | `Esc` | Close the current layer, then the app |
+| Header `online` / `offline` pill | Toggle background sync; local history stays available |
+| Chat menu `Mark read · send receipt` | Explicitly mark the chat read on WhatsApp |
 
-Middle-click the bar item to refresh. Its settings can hide the unread count.
+Middle-click the bar item to dismiss the current local notification batch;
+right-click refreshes. Neither action sends a read receipt. The widget setting
+can hide the notification badge entirely.
 
 ## Release quality
 
@@ -160,7 +171,7 @@ Middle-click the bar item to refresh. Its settings can hide the unread count.
 ./scripts/benchmark 100
 ```
 
-The release gate runs 36 backend boundary/write-path tests, 5 offscreen QML
+The release gate runs 39 backend boundary/write-path tests, 5 offscreen QML
 tests, an isolated installer preflight, manifest validation, QML lint, shell
 syntax checks, a diff check, and a heavyweight-runtime dependency guard.
 Installed verification and screenshot rules live in [testing](docs/TESTING.md);

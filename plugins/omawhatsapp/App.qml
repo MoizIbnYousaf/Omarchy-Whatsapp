@@ -42,6 +42,7 @@ Item {
   property string pendingWriteChatKey: ""
   property bool pollMultiple: false
   property bool copyToastVisible: false
+  property string toastText: ""
   property string demoSelectedJid: "demo-lab"
   property var demoChats: [
     { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", preview: "OmaWhatsApp is instant and native", timestamp: 1787539920, unread: 0, pinned: true },
@@ -200,6 +201,8 @@ Item {
     if (service) {
       service.windowOpen = true
       service.refresh()
+      if (service.selectedChatJid !== "")
+        service.dismissNotifications(service.selectedChatJid)
     }
     composerChatKey = currentChatKey()
     Qt.callLater(function() {
@@ -454,6 +457,11 @@ Item {
   }
 
   function showCopyToast() {
+    showToast("copied to clipboard")
+  }
+
+  function showToast(message) {
+    toastText = String(message || "")
     copyToastVisible = true
     copyToastTimer.restart()
   }
@@ -670,6 +678,14 @@ Item {
       root.pendingWriteChatKey = ""
       if (key === root.composerChatKey) composer.forceActiveFocus()
     }
+    function onControlCompleted(kind) {
+      if (kind === "sync-mode")
+        root.showToast(root.service && root.service.offlineMode
+          ? "offline · local archive stays available" : "online · background sync resumed")
+    }
+    function onControlFailed(message) {
+      root.showToast(String(message || "setting could not be changed"))
+    }
   }
 
   Timer {
@@ -773,7 +789,7 @@ Item {
 
       Timer {
         id: copyToastTimer
-        interval: 1400
+        interval: 1800
         repeat: false
         onTriggered: root.copyToastVisible = false
       }
@@ -794,11 +810,17 @@ Item {
         Text {
           id: copyToastLabel
           anchors.centerIn: parent
-          text: "●  copied to clipboard"
+          text: "●  " + root.toastText
           color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
           font.weight: Font.DemiBold
+        }
+
+        MouseArea {
+          anchors.fill: parent
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.copyToastVisible = false
         }
       }
 
@@ -887,19 +909,49 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(10)
 
-          Text {
-            text: root.demoMode ? "preview" : (root.service && root.service.syncActive ? "synced" : "local")
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-
           Rectangle {
-            width: Style.space(7)
-            height: width
-            radius: width / 2
-            color: root.service && root.service.ready ? root.accent : root.urgent
-            opacity: root.service && root.service.syncActive ? 0.9 : 0.48
+            id: syncModeButton
+            height: Style.space(28)
+            width: syncModeLabel.implicitWidth + Style.space(26)
+            radius: height / 2
+            color: syncModeMouse.containsMouse
+              ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+            border.width: !root.demoMode && root.service && root.service.offlineMode ? 1 : 0
+            border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.65)
+
+            Rectangle {
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(7)
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(6)
+              height: width
+              radius: width / 2
+              color: root.demoMode || (root.service && (root.service.syncActive || root.service.offlineMode))
+                ? root.accent : root.urgent
+              opacity: root.service && root.service.syncActive ? 0.9 : 0.55
+            }
+
+            Text {
+              id: syncModeLabel
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(7)
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.demoMode ? "preview"
+                : (root.service && root.service.offlineMode ? "offline"
+                  : (root.service && root.service.syncActive ? "online" : "reconnecting"))
+              color: root.service && root.service.offlineMode ? root.accent : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            MouseArea {
+              id: syncModeMouse
+              anchors.fill: parent
+              enabled: !root.demoMode && root.service && !root.service.controlWriting
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.service.setOnline(root.service.offlineMode)
+            }
           }
 
           Rectangle {
@@ -1093,12 +1145,16 @@ Item {
                 width: Math.max(Style.space(20), unreadText.implicitWidth + Style.space(8))
                 height: Style.space(20)
                 radius: height / 2
-                color: root.accent
+                color: Number(modelData.notification_unread || 0) > 0
+                  ? root.accent : "transparent"
+                border.width: Number(modelData.notification_unread || 0) > 0 ? 0 : 1
+                border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.28)
                 Text {
                   id: unreadText
                   anchors.centerIn: parent
                   text: Number(modelData.unread || 0) > 99 ? "99+" : String(modelData.unread || 0)
-                  color: root.background
+                  color: Number(modelData.notification_unread || 0) > 0
+                    ? root.background : root.dimmer
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                 }
@@ -1310,7 +1366,7 @@ Item {
                 id: chatMenu
                 x: parent.width - width
                 y: parent.height + Style.space(4)
-                width: Style.space(188)
+                width: Style.space(230)
                 height: chatMenuColumn.implicitHeight + Style.space(10)
                 padding: Style.space(5)
                 closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
@@ -1328,7 +1384,10 @@ Item {
                       { label: root.selectedChat && root.selectedChat.pinned ? "Unpin chat" : "Pin chat", action: root.selectedChat && root.selectedChat.pinned ? "unpin" : "pin" },
                       { label: root.selectedChat && root.selectedChat.muted ? "Unmute notifications" : "Mute notifications", action: root.selectedChat && root.selectedChat.muted ? "unmute" : "mute" },
                       { label: root.selectedChat && root.selectedChat.archived ? "Unarchive chat" : "Archive chat", action: root.selectedChat && root.selectedChat.archived ? "unarchive" : "archive" },
-                      { label: "Mark as unread", action: "unread" }
+                      { label: root.selectedChat && Number(root.selectedChat.unread || 0) > 0
+                          ? "Mark read · send receipt" : "Mark as unread",
+                        action: root.selectedChat && Number(root.selectedChat.unread || 0) > 0
+                          ? "read" : "unread" }
                     ]
                     delegate: Rectangle {
                       required property var modelData

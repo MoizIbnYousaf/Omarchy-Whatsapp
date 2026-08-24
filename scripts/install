@@ -117,10 +117,16 @@ trap - EXIT
 rmdir -- "$staging_root"
 
 systemctl --user daemon-reload
-systemctl --user enable wacli-sync.service
-# `enable --now` does not restart an already-running unit after an upgrade, so
-# explicitly restart to activate the newly installed sandbox and ExecStart.
-systemctl --user restart wacli-sync.service
+preferences="$user_home/.local/state/omawhatsapp/preferences.json"
+if [[ -f $preferences ]] && jq -e '.online == false' "$preferences" >/dev/null 2>&1; then
+  # An upgrade must not silently undo the user's explicit offline choice.
+  systemctl --user disable --now wacli-sync.service
+else
+  systemctl --user enable wacli-sync.service
+  # `enable --now` does not restart an already-running unit after an upgrade,
+  # so explicitly restart to activate the new sandbox and ExecStart.
+  systemctl --user restart wacli-sync.service
+fi
 
 if command -v omarchy-restart-shell >/dev/null; then
   omarchy-restart-shell
