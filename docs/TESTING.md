@@ -4,7 +4,6 @@
 
 ```bash
 ./scripts/test
-./scripts/benchmark 100
 ```
 
 The unit suite verifies focused DM/standalone-group listing, exclusion of

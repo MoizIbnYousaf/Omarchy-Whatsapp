@@ -9,15 +9,6 @@ Electron runtime, browser wrapper, or cloud backend is added.
 
 ![OmaWhatsApp conversation view](preview.png)
 
-| Local path | Median | p95 |
-|---|---:|---:|
-| Load 218 chats | 76.93 ms | 87.06 ms |
-| Load 160 messages | 79.90 ms | 91.49 ms |
-| Read sync health | 103.41 ms | 118.86 ms |
-
-Measured over 100 warm runs on the project XPS. See the reproducible
-[benchmark](docs/BENCHMARK.md).
-
 ## A WhatsApp client that feels like Omarchy
 
 - **Local-first opening.** Chats and messages render from SQLite immediately;
@@ -168,14 +159,13 @@ can hide the notification badge entirely.
 
 ```bash
 ./scripts/test
-./scripts/benchmark 100
 ```
 
 The release gate runs 39 backend boundary/write-path tests, 5 offscreen QML
 tests, an isolated installer preflight, manifest validation, QML lint, shell
 syntax checks, a diff check, and a heavyweight-runtime dependency guard.
 Installed verification and screenshot rules live in [testing](docs/TESTING.md);
-measured local latency and footprint live in [benchmarks](docs/BENCHMARK.md).
+the architecture and privacy boundaries are documented alongside the code.
 
 ## Remove
 

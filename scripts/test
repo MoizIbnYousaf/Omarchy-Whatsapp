@@ -25,7 +25,7 @@ QT_QPA_PLATFORM=offscreen "$qml_test_runner" \
   -import "$repo_root/plugins/omawhatsapp" \
   -o -,txt
 
-bash -n scripts/install scripts/test scripts/uninstall scripts/benchmark
+bash -n scripts/install scripts/test scripts/uninstall
 git diff --check
 
 jq -e '.id == "io.github.moizibnyousaf.omawhatsapp"' \

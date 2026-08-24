@@ -9,7 +9,6 @@ runtimes.
 
 ```bash
 ./scripts/test
-./scripts/benchmark 30
 ```
 
 - Keep every write scoped to an exact locally indexed chat and, when relevant,
@@ -18,7 +17,7 @@ runtimes.
   conversation screenshot to a commit or issue.
 - Use demo mode for UI evidence and include narrow plus wide coverage for layout
   changes.
-- Update the parity, technical, privacy, or benchmark docs when their contract
+- Update the parity, technical, or privacy docs when their contract
   changes.
 - Explain any new runtime dependency. Browser and Electron dependencies are out
   of scope.

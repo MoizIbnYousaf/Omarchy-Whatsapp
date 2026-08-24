@@ -22,11 +22,11 @@
   calls, Communities, and Community-linked subgroups are intentionally hidden.
 - Add native mentions, selection-to-copy, compact message bubbles, responsive
   rail collapse, album sending, rich media, and the native media viewer.
-- Add a versioned install preflight, multi-path local benchmark, and hardened
-  background sync service; upgrades now restart that service so a changed unit
+- Add a versioned install preflight and a hardened background sync service;
+  upgrades now restart that service so a changed unit
   takes effect immediately.
 - Refresh the repository presentation with a release preview, responsive demo
-  gallery, precise performance measurements, and public-facing metadata.
+  gallery, and public-facing metadata.
 
 ## 0.3.0 — 2026-08-24
 
@@ -52,7 +52,7 @@
   media rendering.
 - 360 px single-pane, narrow, compact, and wide responsive modes.
 - Configurable unread bar item in a combined service/panel/bar plugin.
-- Offscreen QML tests, benchmark helper, uninstall path, and release docs.
+- Offscreen QML tests, an uninstall path, and release docs.
 
 ### Reliability
 

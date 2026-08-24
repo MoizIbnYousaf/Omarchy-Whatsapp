@@ -16,5 +16,5 @@ jobs:
         run: make test
       - name: Check shell scripts
         run: |
-          bash -n scripts/install scripts/test scripts/uninstall scripts/benchmark
+          bash -n scripts/install scripts/test scripts/uninstall
           git diff --check
