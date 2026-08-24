@@ -8,6 +8,8 @@
   the current visible draft.
 - `BarWidget.qml` is a thin view over the existing service.
 - `bin/omawhatsapp` is a bounded local bridge; it is not a daemon.
+- `skills/omawhatsapp` teaches compatible local agents to use that same bridge
+  without bypassing its exact-chat and authorization boundaries.
 
 The window can disappear without making the data path cold.
 

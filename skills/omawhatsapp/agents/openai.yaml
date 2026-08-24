@@ -1,0 +1,4 @@
+interface:
+  display_name: "OmaWhatsApp"
+  short_description: "Use WhatsApp safely through OmaWhatsApp"
+  default_prompt: "Use $omawhatsapp to check my local chats or handle a clearly requested WhatsApp action."

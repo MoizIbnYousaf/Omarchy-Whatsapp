@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 — 2026-08-24
+
+- Ship a shared `omawhatsapp` agent skill that lets compatible on-device
+  agents search the local archive and perform clearly requested WhatsApp
+  actions through the same exact-chat helper boundary as the UI.
+- Install the skill under `~/.agents/skills/omawhatsapp` for cross-agent
+  discovery, remove it on uninstall, and validate its safety contract during
+  installation preflight.
+
 ## 0.5.0 — 2026-08-24
 
 - Add a persistent online/offline toggle: offline mode disables and stops

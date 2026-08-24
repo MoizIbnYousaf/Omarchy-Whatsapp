@@ -17,6 +17,8 @@ workflow assumptions and no WhatsApp history.
   `chats` table before invoking wacli.
 - Long history/media maintenance must remain separate from the interactive
   write path and restart background sync through an exit trap.
+- Keep `skills/omawhatsapp` aligned with the helper's public JSON commands.
+  The skill must never broaden authorization for external WhatsApp mutations.
 
 ## Local paths
 

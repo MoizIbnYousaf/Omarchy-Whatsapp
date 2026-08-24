@@ -3,6 +3,7 @@ set -euo pipefail
 
 user_home=${HOME:?HOME is required}
 plugin_root="$user_home/.config/omarchy/plugins"
+skill_root="$user_home/.agents/skills"
 shell_config="$user_home/.config/omarchy/shell.json"
 purge_runtime=false
 
@@ -32,6 +33,7 @@ if command -v quickshell >/dev/null; then
 fi
 
 rm -rf -- "$plugin_root/omawhatsapp" "$plugin_root/omawhatsapp-bar"
+rm -rf -- "$skill_root/omawhatsapp"
 rm -f -- "$user_home/.local/bin/omawhatsapp"
 rm -f -- "$user_home/.config/systemd/user/wacli-sync.service"
 mv -- "$temporary" "$shell_config"

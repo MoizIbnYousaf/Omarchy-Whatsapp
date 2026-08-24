@@ -83,6 +83,7 @@ Build/test artifacts remain outside the installed plugin tree.
 | Path | Purpose |
 |---|---|
 | `~/.config/omarchy/plugins/omawhatsapp` | installed plugin |
+| `~/.agents/skills/omawhatsapp` | shared on-device agent skill |
 | `~/.local/bin/omawhatsapp` | bounded helper |
 | `~/.config/systemd/user/wacli-sync.service` | background sync unit |
 | `~/.local/state/wacli` | linked-device store owned by wacli |

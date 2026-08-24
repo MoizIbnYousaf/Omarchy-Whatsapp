@@ -11,8 +11,9 @@ channels and Communities, single-line previews, literal search, strict
 conversation boundaries, media metadata, outgoing-media handoff and album
 identity, target validation, bounded messages, group-member mention scoping,
 local notification acknowledgement, explicit receipt commands, persistent
-offline write blocking, and the lock-free live-delegate path. The release script also runs an isolated,
-read-only install preflight before the offscreen QML tests.
+offline write blocking, and the lock-free live-delegate path. The release script
+also runs an isolated, read-only install preflight—including the bundled agent
+skill safety contract—before the offscreen QML tests.
 
 ## Live local verification
 

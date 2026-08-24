@@ -4,10 +4,12 @@ set -euo pipefail
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 user_home=${HOME:?HOME is required}
 plugin_root="$user_home/.config/omarchy/plugins"
+skill_root="$user_home/.agents/skills"
 shell_config="$user_home/.config/omarchy/shell.json"
 shell_source="/usr/share/omarchy/shell"
 check_only=false
 plugin_dir=omawhatsapp
+skill_dir=omawhatsapp
 plugin_id=io.github.moizibnyousaf.omawhatsapp
 
 if [[ ${1:-} == "--check" ]]; then
@@ -19,7 +21,7 @@ if (( $# > 0 )); then
   exit 2
 fi
 
-for command_name in jq python3 qmllint systemctl wl-paste zenity omarchy; do
+for command_name in jq python3 qmllint rg systemctl wl-paste zenity omarchy; do
   command -v "$command_name" >/dev/null || {
     echo "Missing requirement: $command_name" >&2
     exit 1
@@ -63,6 +65,11 @@ while IFS= read -r -d '' source_file; do
   relative=${source_file#"$repo_root/plugins/$plugin_dir/"}
   install -Dm644 "$source_file" "$staging_root/$plugin_dir/$relative"
 done < <(find "$repo_root/plugins/$plugin_dir" -type f -print0)
+install -d "$staging_root/skills/$skill_dir"
+while IFS= read -r -d '' source_file; do
+  relative=${source_file#"$repo_root/skills/$skill_dir/"}
+  install -Dm644 "$source_file" "$staging_root/skills/$skill_dir/$relative"
+done < <(find "$repo_root/skills/$skill_dir" -type f -print0)
 jq --arg plugin_id "$plugin_id" '
   def migrate_id:
     if (.id == "omawhatsapp" or .id == "omawhatsapp-bar")
@@ -85,6 +92,8 @@ chmod --reference="$shell_config" "$temporary"
 if $check_only; then
   jq -e --arg plugin_id "$plugin_id" '.id == $plugin_id' \
     "$staging_root/$plugin_dir/manifest.json" >/dev/null
+  rg -q '^name: omawhatsapp$' "$staging_root/skills/$skill_dir/SKILL.md"
+  ! rg -q 'TODO|\[TODO' "$staging_root/skills/$skill_dir"
   jq -e --arg plugin_id "$plugin_id" '
     ([.plugins[]? | select(.id == $plugin_id)] | length) == 1 and
     (any((.bar.layout.left + .bar.layout.center + .bar.layout.right)[]?;
@@ -106,6 +115,9 @@ fi
 install -Dm755 "$repo_root/bin/omawhatsapp" "$user_home/.local/bin/omawhatsapp"
 rm -rf -- "$plugin_root/$plugin_dir"
 mv -- "$staging_root/$plugin_dir" "$plugin_root/$plugin_dir"
+install -d "$skill_root"
+rm -rf -- "$skill_root/$skill_dir"
+mv -- "$staging_root/skills/$skill_dir" "$skill_root/$skill_dir"
 # Pre-0.3 used a second bar-only plugin. The combined manifest supersedes only
 # that exact legacy directory and shell id.
 rm -rf -- "$plugin_root/omawhatsapp-bar"
@@ -114,7 +126,7 @@ install -Dm644 "$repo_root/systemd/user/wacli-sync.service" \
   "$user_home/.config/systemd/user/wacli-sync.service"
 mv -- "$temporary" "$shell_config"
 trap - EXIT
-rmdir -- "$staging_root"
+rmdir -- "$staging_root/skills" "$staging_root"
 
 systemctl --user daemon-reload
 preferences="$user_home/.local/state/omawhatsapp/preferences.json"
@@ -132,6 +144,6 @@ if command -v omarchy-restart-shell >/dev/null; then
   omarchy-restart-shell
 fi
 
-echo "OmaWhatsApp installed as one service/panel/bar plugin."
+echo "OmaWhatsApp installed as one service/panel/bar plugin with a shared agent skill."
 echo "Run ~/.local/bin/omawhatsapp auth if WhatsApp is not linked."
 echo "Bind Super+Shift+W using omarchy/bindings.lua.example if desired."

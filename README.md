@@ -33,6 +33,9 @@ native, and visually at home in Omarchy.
   from the active Omarchy theme.
 - **Keyboard-native.** Jump between chats, collapse the rail, search, attach,
   reply, and open media without leaving the keyboard.
+- **Agent-native.** The installer ships a shared `$omawhatsapp` skill so an
+  on-device Omarchy agent can search your local archive or carry out a clearly
+  requested WhatsApp action through the same guarded helper as the UI.
 
 ## Everyday conversation flow
 
@@ -71,6 +74,19 @@ top-level sections.
 Missing media is downloaded only after you ask for it. The helper verifies the
 chat and message against the local mirror before any wacli write crosses the
 boundary.
+
+## Let your Omarchy agent use WhatsApp
+
+Installation also places the repository-owned skill at
+`~/.agents/skills/omawhatsapp`. Compatible agents can use `$omawhatsapp` to
+search or summarize local chats and, when you explicitly ask, send, reply,
+attach, react, mark read, or manage a chat on your behalf.
+
+The skill is local-first and fail-closed: it never invents recipients, writes
+WhatsApp databases directly, treats opening a chat as a receipt, turns offline
+mode off by itself, or creates test messages. Every destination must first
+resolve to one exact DM or standalone group already present in the local
+OmaWhatsApp index.
 
 ## One app at every size
 
@@ -129,8 +145,8 @@ Link this machine once when needed:
 
 Run `./scripts/install --check` for a read-only installation preflight. A real
 install validates and stages the complete plugin tree before replacing it,
-restarts Quickshell once, and enables hardened background sync. It never copies
-a WhatsApp session into the repository.
+installs the shared agent skill, restarts Quickshell once, and enables hardened
+background sync. It never copies a WhatsApp session into the repository.
 
 Add the `Super+Shift+W` binding from
 [`omarchy/bindings.lua.example`](omarchy/bindings.lua.example).

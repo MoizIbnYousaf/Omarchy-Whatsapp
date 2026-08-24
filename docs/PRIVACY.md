@@ -14,5 +14,10 @@ OmaWhatsApp's mode-`0600` preferences contain the offline choice and local
 notification acknowledgements. They never leave the machine and are never
 written into wacli's database.
 
+The shipped agent skill contains instructions only—no account, chat, message,
+or media data. Agents must keep local results out of repositories, issues,
+screenshots, and durable logs, and must use the helper rather than touching a
+WhatsApp database directly.
+
 For screenshots, open `omawhatsapp` with `{"demo":true}`. Demo mode contains
 repository-owned sample data and performs no WhatsApp writes.
