@@ -1,0 +1,20 @@
+name: validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate helper, safety model, and manifests
+        run: make test
+      - name: Check shell scripts
+        run: |
+          bash -n scripts/install scripts/test scripts/uninstall scripts/benchmark
+          git diff --check

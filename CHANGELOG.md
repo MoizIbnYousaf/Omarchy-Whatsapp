@@ -1,0 +1,71 @@
+# Changelog
+
+## Unreleased
+
+- Adopt the permanent marketplace ID
+  `io.github.moizibnyousaf.omawhatsapp` and migrate existing shell entries
+  automatically during installation.
+- Remove private-extension references and prepare one privacy-audited public
+  source snapshot for marketplace submission.
+
+## 0.4.0 — 2026-08-24
+
+- Focus the chat rail on direct messages and standalone groups; channels,
+  calls, Communities, and Community-linked subgroups are intentionally hidden.
+- Add native mentions, selection-to-copy, compact message bubbles, responsive
+  rail collapse, album sending, rich media, and the native media viewer.
+- Add a versioned install preflight, multi-path local benchmark, and hardened
+  background sync service; upgrades now restart that service so a changed unit
+  takes effect immediately.
+- Refresh the repository presentation with a release preview, responsive demo
+  gallery, precise performance measurements, and public-facing metadata.
+
+## 0.3.0 — 2026-08-24
+
+### Added
+
+- Native full-window image/GIF/video viewer with zoom, fit, gallery navigation,
+  playback, metadata, and external-open controls.
+- Optional Omasnap handoff for annotating an open image, with a system-viewer
+  fallback for other media and installations.
+- Multi-file review queue, drag/drop, staged clipboard images/files, caption,
+  sticker picker, poll composer, and per-chat attachment drafts.
+- Reply, reaction, edit, delete, forward, interactive-option, and copy actions.
+- Keyboard-first real group mentions backed by the locally indexed participant
+  list, plus drag-selection auto-copy with a confirmation toast.
+- `Ctrl+1` through `Ctrl+9` instant chat jumps that follow the visible/search
+  order and enter the conversation in single-pane mode.
+- `Ctrl+B` chat-rail focus mode with an animated, state-preserving collapse.
+- Multi-photo sends retain one private batch identity and render as a single
+  responsive album while preserving each real WhatsApp message ID.
+- Metric-driven text bubbles that hug short messages while reserving exactly
+  enough room for sender and delivery metadata, then wrap at a responsive max.
+- Quote, reaction, forwarded, edited, starred, location, poll/button, and typed
+  media rendering.
+- 360 px single-pane, narrow, compact, and wide responsive modes.
+- Configurable unread bar item in a combined service/panel/bar plugin.
+- Offscreen QML tests, benchmark helper, uninstall path, and release docs.
+
+### Reliability
+
+- Restrict chat discovery to direct messages and standalone groups; channels,
+  calls, Community parents, and linked Community subgroups remain out of scope.
+- Collapse all chat previews to one line before QML rendering so feed-style
+  content cannot bleed across neighboring rows.
+- Stage the complete installed plugin before one shell stop/restart, avoiding
+  watched-directory partial reloads.
+- Move file picking out of the Quickshell process so picker/portal failures
+  cannot crash the desktop shell.
+- Keep writes scoped to an indexed chat/message and preserve background sync
+  across every fallback path.
+- Reconcile successful outgoing uploads to their original local path so sent
+  photos and GIFs preview immediately instead of flashing a download card.
+
+## 0.2.0 — 2026-08-23
+
+- Added typed local media rendering and verified on-demand media download.
+
+## 0.1.0 — 2026-08-23
+
+- Added the resident service, all-chat rail, local conversation view, bar item,
+  background wacli sync, and `Super+Shift+W` launch flow.

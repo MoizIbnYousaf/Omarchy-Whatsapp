@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose a focused addition to the native chat experience.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: User need
+      description: What workflow is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed experience
+      description: Describe the smallest native, local-first solution.
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Project boundaries
+      options:
+        - label: This does not require a browser or Electron runtime.
+          required: true
+        - label: This contains no personal WhatsApp data.
+          required: true

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+user_home=${HOME:?HOME is required}
+plugin_root="$user_home/.config/omarchy/plugins"
+shell_config="$user_home/.config/omarchy/shell.json"
+purge_runtime=false
+
+if [[ ${1:-} == "--purge-runtime" ]]; then
+  purge_runtime=true
+  shift
+fi
+if (( $# > 0 )); then
+  echo "Usage: scripts/uninstall [--purge-runtime]" >&2
+  exit 2
+fi
+
+temporary=$(mktemp "${shell_config}.XXXXXX")
+trap 'rm -f -- "$temporary"' EXIT
+jq --arg plugin_id "io.github.moizibnyousaf.omawhatsapp" '
+  def keep: .id != $plugin_id and .id != "omawhatsapp" and .id != "omawhatsapp-bar";
+  .plugins = [(.plugins // [])[] | select(keep)] |
+  .bar.layout.left = [(.bar.layout.left // [])[] | select(keep)] |
+  .bar.layout.center = [(.bar.layout.center // [])[] | select(keep)] |
+  .bar.layout.right = [(.bar.layout.right // [])[] | select(keep)]
+' "$shell_config" > "$temporary"
+chmod --reference="$shell_config" "$temporary"
+
+systemctl --user disable --now wacli-sync.service >/dev/null 2>&1 || true
+if command -v quickshell >/dev/null; then
+  while timeout 5 quickshell kill -p /usr/share/omarchy/shell --any-display >/dev/null 2>&1; do :; done
+fi
+
+rm -rf -- "$plugin_root/omawhatsapp" "$plugin_root/omawhatsapp-bar"
+rm -f -- "$user_home/.local/bin/omawhatsapp"
+rm -f -- "$user_home/.config/systemd/user/wacli-sync.service"
+mv -- "$temporary" "$shell_config"
+trap - EXIT
+systemctl --user daemon-reload
+
+if $purge_runtime; then
+  runtime="$user_home/.local/state/omawhatsapp"
+  [[ $runtime == "$user_home/.local/state/omawhatsapp" ]] || exit 3
+  rm -rf -- "$runtime"
+  echo "Removed OmaWhatsApp runtime state. Your wacli session and messages were preserved."
+fi
+
+if command -v omarchy-restart-shell >/dev/null; then omarchy-restart-shell; fi
+echo "OmaWhatsApp removed. Your linked WhatsApp device and wacli store were preserved."

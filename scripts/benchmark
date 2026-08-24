@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+helper="$repo_root/bin/omawhatsapp"
+runs=${1:-20}
+[[ $runs =~ ^[1-9][0-9]*$ ]] || { echo "Usage: scripts/benchmark [positive-runs]" >&2; exit 2; }
+
+python3 - "$helper" "$runs" <<'PY'
+import json
+import math
+from pathlib import Path
+import statistics
+import subprocess
+import sys
+import time
+
+helper, runs = sys.argv[1], int(sys.argv[2])
+
+def invoke(arguments, payload=None):
+    started = time.perf_counter_ns()
+    result = subprocess.run(
+        [helper, *arguments],
+        input=json.dumps(payload) if payload is not None else None,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    elapsed = (time.perf_counter_ns() - started) / 1_000_000
+    if result.returncode != 0:
+        return None, None
+    try:
+        return elapsed, json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None, None
+
+def measure(operation, arguments, payload=None, row_key=None):
+    samples = []
+    rows = None
+    for _ in range(runs):
+        elapsed, response = invoke(arguments, payload)
+        if elapsed is None or not isinstance(response, dict):
+            continue
+        samples.append(elapsed)
+        if row_key:
+            rows = len(response.get(row_key) or [])
+    if not samples:
+        raise SystemExit(f"No successful {operation} samples.")
+    samples.sort()
+    p95 = samples[max(0, math.ceil(len(samples) * 0.95) - 1)]
+    result = {
+        "operation": operation,
+        "runs": len(samples),
+        "median_ms": round(statistics.median(samples), 2),
+        "p95_ms": round(p95, 2),
+        "min_ms": round(samples[0], 2),
+        "max_ms": round(samples[-1], 2),
+    }
+    if rows is not None:
+        result["rows"] = rows
+    return result
+
+results = [measure("local-status", ["status"])]
+_, chat_response = invoke(["chats", "--limit", "500"], {})
+chats = chat_response.get("chats") if isinstance(chat_response, dict) else None
+if chats:
+    results.append(measure("local-chats", ["chats", "--limit", "500"], {}, "chats"))
+    results.append(measure(
+        "local-messages", ["messages", "--limit", "160"],
+        {"jid": chats[0]["jid"]}, "messages"
+    ))
+results[0]["helper_bytes"] = Path(helper).stat().st_size
+for result in results:
+    print(json.dumps(result, separators=(",", ":")))
+PY

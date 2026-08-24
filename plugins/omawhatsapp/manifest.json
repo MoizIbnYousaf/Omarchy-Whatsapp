@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.moizibnyousaf.omawhatsapp",
+  "name": "OmaWhatsApp",
+  "version": "0.4.0",
+  "author": "MoizIbnYousaf",
+  "license": "MIT",
+  "description": "WhatsApp in Quickshell—not Chromium. Fast local chats, rich media, keyboard workflows, and Omarchy themes powered by wacli.",
+  "kinds": ["service", "bar-widget", "panel"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml",
+    "panel": "App.qml"
+  },
+  "barWidget": {
+    "displayName": "OmaWhatsApp",
+    "description": "Open synced direct chats and standalone groups, with unread messages at a glance.",
+    "category": "Communication",
+    "aliases": ["whatsapp", "chat", "messages", "messaging"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "showUnreadCount": "On"
+    },
+    "schema": [
+      {
+        "key": "showUnreadCount",
+        "type": "enum",
+        "label": "Show unread count",
+        "options": ["On", "Off"],
+        "defaultValue": "On",
+        "description": "Show the total unread message count beside the WhatsApp icon."
+      }
+    ]
+  }
+}

@@ -1,0 +1,516 @@
+from __future__ import annotations
+
+import importlib.util
+from importlib.machinery import SourceFileLoader
+from contextlib import closing
+import json
+import os
+from pathlib import Path
+import sqlite3
+import subprocess
+import tempfile
+import unittest
+from unittest import mock
+
+
+SCRIPT = Path(os.environ["OMAW_SCRIPT"])
+SPEC = importlib.util.spec_from_loader(
+    "omawhatsapp_backend", SourceFileLoader("omawhatsapp_backend", str(SCRIPT))
+)
+assert SPEC and SPEC.loader
+backend_module = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(backend_module)
+
+
+SCHEMA = """
+CREATE TABLE chats (
+  jid TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT, last_message_ts INTEGER,
+  archived INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0,
+  muted_until INTEGER NOT NULL DEFAULT 0, unread INTEGER NOT NULL DEFAULT 0,
+  unread_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE groups (
+  jid TEXT PRIMARY KEY, name TEXT, owner_jid TEXT, created_ts INTEGER,
+  is_parent INTEGER NOT NULL DEFAULT 0, linked_parent_jid TEXT,
+  left_at INTEGER, updated_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE group_participants (
+  group_jid TEXT NOT NULL, user_jid TEXT NOT NULL, role TEXT, updated_at INTEGER,
+  PRIMARY KEY (group_jid, user_jid)
+);
+CREATE TABLE contacts (
+  jid TEXT PRIMARY KEY, phone TEXT, push_name TEXT, full_name TEXT,
+  first_name TEXT, business_name TEXT, system_name TEXT, updated_at INTEGER
+);
+CREATE TABLE contact_aliases (
+  jid TEXT PRIMARY KEY, alias TEXT NOT NULL, notes TEXT, updated_at INTEGER NOT NULL
+);
+CREATE TABLE messages (
+  rowid INTEGER PRIMARY KEY AUTOINCREMENT, chat_jid TEXT NOT NULL, chat_name TEXT,
+  msg_id TEXT NOT NULL, sender_jid TEXT, sender_name TEXT, ts INTEGER NOT NULL,
+  from_me INTEGER NOT NULL, text TEXT, display_text TEXT, quoted_msg_id TEXT,
+  quoted_sender_jid TEXT, is_forwarded INTEGER NOT NULL DEFAULT 0,
+  forwarding_score INTEGER NOT NULL DEFAULT 0, reaction_to_id TEXT,
+  reaction_emoji TEXT, media_type TEXT, media_caption TEXT, filename TEXT,
+  mime_type TEXT, direct_path TEXT, media_key BLOB, file_sha256 BLOB,
+  file_enc_sha256 BLOB, file_length INTEGER, local_path TEXT, downloaded_at INTEGER,
+  media_unavailable_at INTEGER, revoked INTEGER NOT NULL DEFAULT 0,
+  deleted_for_me INTEGER NOT NULL DEFAULT 0, deleted_at INTEGER,
+  deletion_reason TEXT, payload_purged_at INTEGER, edited INTEGER NOT NULL DEFAULT 0,
+  edited_ts INTEGER NOT NULL DEFAULT 0, buttons TEXT,
+  UNIQUE(chat_jid, msg_id)
+);
+CREATE TABLE starred (
+  chat_jid TEXT NOT NULL, msg_id TEXT NOT NULL, sender_jid TEXT,
+  from_me INTEGER NOT NULL DEFAULT 0, starred_at INTEGER NOT NULL,
+  PRIMARY KEY (chat_jid, msg_id)
+);
+CREATE TABLE message_locations (
+  chat_jid TEXT NOT NULL, msg_id TEXT NOT NULL, latitude REAL,
+  longitude REAL, name TEXT, address TEXT, is_live INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (chat_jid, msg_id)
+);
+"""
+
+
+class BackendTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.store = self.root / "wacli"
+        self.store.mkdir()
+        self.wacli = self.root / "wacli-bin"
+        self.wacli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        self.wacli.chmod(0o700)
+        self.preview = self.root / "mock.png"
+        self.preview.write_bytes(b"png")
+        self.preview_two = self.root / "second.jpg"
+        self.preview_two.write_bytes(b"jpg")
+        self.document = self.root / "notes.pdf"
+        self.document.write_bytes(b"pdf")
+        self.sticker = self.root / "sticker.webp"
+        self.sticker.write_bytes(b"webp")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.executescript(SCHEMA)
+            connection.executemany(
+                "INSERT INTO chats VALUES (?, ?, ?, ?, 0, ?, 0, 0, ?)",
+                [
+                    ("team@g.us", "group", "Design team", 30, 1, 3),
+                    ("alex@s.whatsapp.net", "dm", "Alex", 40, 0, 1),
+                    ("archive@g.us", "group", "Archive", 10, 0, 0),
+                    ("news@newsletter", "newsletter", "News", 50, 0, 4),
+                    ("legacy@newsletter", "unknown", "Legacy channel", 49, 0, 0),
+                    ("community@g.us", "group", "Community", 48, 0, 0),
+                    ("subgroup@g.us", "group", "Community subgroup", 47, 0, 0),
+                ],
+            )
+            connection.executemany(
+                """INSERT INTO groups
+                (jid, name, is_parent, linked_parent_jid, updated_at)
+                VALUES (?, ?, ?, ?, 1)""",
+                [
+                    ("community@g.us", "Community", 1, None),
+                    ("subgroup@g.us", "Community subgroup", 0, "community@g.us"),
+                ],
+            )
+            connection.executemany(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me,
+                 text, reaction_to_id, media_type, mime_type, local_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)""",
+                [
+                    ("team@g.us", "Design team", "t1", "member@s.whatsapp.net", "Sam", 30, 0, "ship it", "", "", ""),
+                    ("alex@s.whatsapp.net", "Alex", "a1", "me@s.whatsapp.net", "", 40, 1, "hello", "", "", ""),
+                    ("team@g.us", "Design team", "t2", "me@s.whatsapp.net", "", 20, 1, "mockup", "image", "image/png", str(self.preview)),
+                ],
+            )
+            connection.executemany(
+                "INSERT INTO contacts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    ("member@s.whatsapp.net", "15551234567", "Sam", "Sam Rivera", "Sam", "", "", 1),
+                    ("admin@s.whatsapp.net", "15557654321", "Alex", "Alex Kim", "Alex", "", "", 1),
+                ],
+            )
+            connection.executemany(
+                "INSERT INTO group_participants VALUES (?, ?, ?, ?)",
+                [
+                    ("team@g.us", "member@s.whatsapp.net", "member", 1),
+                    ("team@g.us", "admin@s.whatsapp.net", "admin", 1),
+                ],
+            )
+        self.backend = backend_module.Backend(
+            store_dir=self.store, state_dir=self.root / "state", wacli=self.wacli
+        )
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def test_chat_rail_contains_every_local_chat(self) -> None:
+        result = self.backend.chats()
+        self.assertEqual({chat["name"] for chat in result["chats"]}, {"Design team", "Alex", "Archive"})
+        self.assertEqual(result["chats"][0]["name"], "Design team")  # pinned first
+        self.assertEqual(result["chats"][0]["unread"], 3)
+
+    def test_chat_search_is_literal(self) -> None:
+        self.assertEqual(self.backend.chats("Design%team")["chats"], [])
+        self.assertEqual(self.backend.chats("design")["chats"][0]["jid"], "team@g.us")
+
+    def test_chat_surface_is_only_dms_and_standalone_groups(self) -> None:
+        visible = {chat["jid"] for chat in self.backend.chats()["chats"]}
+        self.assertEqual(visible, {"team@g.us", "alex@s.whatsapp.net", "archive@g.us"})
+        for hidden in ("news@newsletter", "legacy@newsletter", "community@g.us",
+                       "subgroup@g.us"):
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not available"):
+                self.backend._chat(hidden)
+
+    def test_chat_previews_are_always_one_line(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE messages SET text = ? WHERE chat_jid = ? AND msg_id = ?",
+                ["first line\nsecond\tline", "alex@s.whatsapp.net", "a1"],
+            )
+        chat = next(item for item in self.backend.chats()["chats"]
+                    if item["jid"] == "alex@s.whatsapp.net")
+        self.assertEqual(chat["preview"], "first line second line")
+
+    def test_messages_never_cross_chat_boundary(self) -> None:
+        values = self.backend.messages("team@g.us")["messages"]
+        self.assertEqual([value["id"] for value in values], ["t1", "t2"])
+        self.assertNotIn("a1", [value["id"] for value in values])
+
+    def test_message_search_and_media_metadata(self) -> None:
+        values = self.backend.messages("team@g.us", "mock")["messages"]
+        self.assertEqual(len(values), 1)
+        self.assertEqual(values[0]["mime_type"], "image/png")
+        self.assertEqual(values[0]["local_path"], str(self.preview))
+
+    def test_reply_reaction_star_and_location_metadata(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE messages SET quoted_msg_id = ? WHERE chat_jid = ? AND msg_id = ?",
+                ["t1", "team@g.us", "t2"],
+            )
+            connection.execute(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+                 from_me, text, reaction_to_id, reaction_emoji)
+                VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?)""",
+                ["team@g.us", "Design team", "r1", "member@s.whatsapp.net",
+                 "Sam", 31, 0, "t2", "🔥"],
+            )
+            connection.execute(
+                "INSERT INTO starred VALUES (?, ?, ?, ?, ?)",
+                ["team@g.us", "t2", "me@s.whatsapp.net", 1, 32],
+            )
+            connection.execute(
+                "INSERT INTO message_locations VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ["team@g.us", "t2", 40.7, -74.0, "Studio", "New York", 0],
+            )
+        item = next(value for value in self.backend.messages("team@g.us")["messages"]
+                    if value["id"] == "t2")
+        self.assertEqual(item["quoted_id"], "t1")
+        self.assertEqual(item["quoted_text"], "ship it")
+        self.assertEqual(item["reactions"][0]["emoji"], "🔥")
+        self.assertTrue(item["starred"])
+        self.assertEqual(item["location_name"], "Studio")
+
+    def test_media_placeholder_is_not_rendered_as_a_caption(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE messages SET text = '', display_text = 'Sent gif', "
+                "media_type = 'gif', mime_type = 'video/mp4' "
+                "WHERE chat_jid = ? AND msg_id = ?",
+                ["team@g.us", "t2"],
+            )
+        message = next(item for item in self.backend.messages("team@g.us")["messages"]
+                       if item["id"] == "t2")
+        self.assertEqual(message["media_type"], "gif")
+        self.assertEqual(message["text"], "")
+
+    def test_existing_media_returns_without_network_write(self) -> None:
+        with mock.patch.object(self.backend, "_write") as write:
+            result = self.backend.download_media("team@g.us", "t2")
+        self.assertEqual(result["local_path"], str(self.preview))
+        write.assert_not_called()
+
+    def test_missing_media_download_is_scoped_to_selected_chat(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE messages SET local_path = '' WHERE chat_jid = ? AND msg_id = ?",
+                ["team@g.us", "t2"],
+            )
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            result = self.backend.download_media("team@g.us", "t2")
+        self.assertTrue(result["ok"])
+        command = write.call_args.args[0]
+        self.assertEqual(command[command.index("--chat") + 1], "team@g.us")
+        self.assertEqual(command[command.index("--id") + 1], "t2")
+
+    def test_unavailable_media_is_not_retried_forever(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE messages SET local_path = '', media_unavailable_at = 1 "
+                "WHERE chat_jid = ? AND msg_id = ?",
+                ["team@g.us", "t2"],
+            )
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "no longer available"):
+            self.backend.download_media("team@g.us", "t2")
+
+    def test_unknown_chat_is_rejected_before_write(self) -> None:
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not available"):
+            self.backend.send("unknown@g.us", "hello")
+
+    def test_send_targets_selected_local_chat(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, json.dumps({"success": True}), "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.send("alex@s.whatsapp.net", "hello")
+        command = write.call_args.args[0]
+        self.assertEqual(command[command.index("--to") + 1], "alex@s.whatsapp.net")
+        self.assertEqual(command[command.index("--message") + 1], "hello")
+
+    def test_group_members_are_named_and_admins_sort_first(self) -> None:
+        members = self.backend.members("team@g.us")["members"]
+        self.assertEqual([member["name"] for member in members], ["Alex Kim", "Sam Rivera"])
+        self.assertEqual(members[0]["role"], "admin")
+        self.assertEqual(self.backend.members("alex@s.whatsapp.net")["members"], [])
+
+    def test_external_image_prefers_omasnap_when_installed(self) -> None:
+        with mock.patch.object(backend_module.shutil, "which", return_value="/usr/bin/omasnap"), \
+             mock.patch.object(backend_module.subprocess, "Popen") as popen:
+            result = self.backend.open_media_external(self.preview.as_uri())
+        self.assertEqual(result["opener"], "omasnap")
+        self.assertEqual(popen.call_args.args[0],
+                         ["/usr/bin/omasnap", "--file", str(self.preview)])
+
+    def test_external_non_image_uses_system_opener(self) -> None:
+        with mock.patch.object(backend_module.shutil, "which", return_value="/usr/bin/omasnap"), \
+             mock.patch.object(backend_module.subprocess, "Popen") as popen:
+            result = self.backend.open_media_external(self.document.as_uri())
+        self.assertEqual(result["opener"], "system")
+        self.assertEqual(popen.call_args.args[0],
+                         [str(backend_module.XDG_OPEN), str(self.document)])
+
+    def test_send_passes_real_group_mentions_to_wacli(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, json.dumps({"success": True}), "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.send("team@g.us", "hey @Sam Rivera", "", ["member@s.whatsapp.net"])
+        command = write.call_args.args[0]
+        self.assertEqual(command[command.index("--mention") + 1], "member@s.whatsapp.net")
+
+    def test_send_rejects_mentions_outside_selected_group(self) -> None:
+        with mock.patch.object(self.backend, "_write") as write, \
+             self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not a member"):
+            self.backend.send("team@g.us", "hey @stranger", "", ["stranger@s.whatsapp.net"])
+        write.assert_not_called()
+
+    def test_clipboard_file_is_staged_without_sending(self) -> None:
+        with mock.patch.object(self.backend, "_clipboard_types", return_value=["text/uri-list"]), \
+             mock.patch.object(self.backend, "_clipboard", return_value=(self.document.as_uri() + "\n").encode()), \
+             mock.patch.object(self.backend, "_write") as write:
+            result = self.backend.paste("team@g.us")
+        self.assertEqual(result["kind"], "file")
+        self.assertEqual(result["path"], self.document.as_uri())
+        write.assert_not_called()
+
+    def test_clipboard_image_is_staged_for_preview_without_sending(self) -> None:
+        runtime = self.root / "runtime"
+        with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)}), \
+             mock.patch.object(self.backend, "_clipboard_types", return_value=["image/gif"]), \
+             mock.patch.object(self.backend, "_clipboard", return_value=b"GIF89a"), \
+             mock.patch.object(self.backend, "_write") as write:
+            result = self.backend.paste("team@g.us")
+        staged = Path(result["path"].removeprefix("file://"))
+        self.assertEqual(result["kind"], "image")
+        self.assertEqual(staged.suffix, ".gif")
+        self.assertEqual(staged.read_bytes(), b"GIF89a")
+        write.assert_not_called()
+
+    def test_reply_is_scoped_and_carries_group_sender(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.send("team@g.us", "reply", "t1")
+        command = write.call_args.args[0]
+        self.assertEqual(command[command.index("--reply-to") + 1], "t1")
+        self.assertEqual(command[command.index("--reply-to-sender") + 1],
+                         "member@s.whatsapp.net")
+
+    def test_attachment_reply_is_applied_only_to_first_file(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.send_files("team@g.us", [self.preview.as_uri(), self.document.as_uri()],
+                                    "caption", "t1")
+        first, second = [call.args[0] for call in write.call_args_list]
+        self.assertIn("--reply-to", first)
+        self.assertIn("--caption", first)
+        self.assertNotIn("--reply-to", second)
+        self.assertNotIn("--caption", second)
+
+    def test_sticker_requires_webp_and_supports_reply(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.send_sticker("team@g.us", self.sticker.as_uri(), "t1")
+        command = write.call_args.args[0]
+        self.assertEqual(command[1:3], ["send", "sticker"])
+        self.assertIn("--reply-to-sender", command)
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "WebP"):
+            self.backend.send_sticker("team@g.us", self.preview.as_uri())
+
+    def test_poll_is_validated_and_transport_is_exact(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.send_poll("team@g.us", "Ship it?", ["Yes", "No"], 1)
+        command = write.call_args.args[0]
+        self.assertEqual(command[1:3], ["send", "poll"])
+        self.assertEqual(command.count("--option"), 2)
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "unique"):
+            self.backend.send_poll("team@g.us", "Ship it?", ["Yes", "yes"], 1)
+
+    def test_reaction_uses_stored_group_sender(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.react("team@g.us", "t1", "🔥")
+        command = write.call_args.args[0]
+        self.assertEqual(command[command.index("--id") + 1], "t1")
+        self.assertEqual(command[command.index("--sender") + 1],
+                         "member@s.whatsapp.net")
+
+    def test_edit_and_everyone_delete_require_own_message(self) -> None:
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "your own"):
+            self.backend.edit_message("team@g.us", "t1", "changed")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "your own"):
+            self.backend.delete_message("team@g.us", "t1", False)
+
+    def test_edit_delete_and_forward_commands_are_exact(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.edit_message("alex@s.whatsapp.net", "a1", "changed")
+            edit = write.call_args.args[0]
+            self.backend.delete_message("alex@s.whatsapp.net", "a1", True)
+            delete = write.call_args.args[0]
+            self.backend.forward_message("team@g.us", "t1", "alex@s.whatsapp.net")
+            forward = write.call_args.args[0]
+        self.assertEqual(edit[1:3], ["messages", "edit"])
+        self.assertIn("--for-me", delete)
+        self.assertEqual(forward[forward.index("--to") + 1], "alex@s.whatsapp.net")
+
+    def test_chat_actions_are_allowlisted(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.chat_action("team@g.us", "mute")
+        command = write.call_args.args[0]
+        self.assertEqual(command[1:3], ["chats", "mute"])
+        self.assertEqual(command[command.index("--chat") + 1], "team@g.us")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not supported"):
+            self.backend.chat_action("team@g.us", "leave")
+
+    def test_selectable_option_is_bounded(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.select_option("team@g.us", "t1", 2)
+        command = write.call_args.args[0]
+        self.assertEqual(command[command.index("--index") + 1], "2")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "valid option"):
+            self.backend.select_option("team@g.us", "t1", "not-a-number")
+
+    def test_multi_file_send_validates_then_sends_every_file(self) -> None:
+        completed = subprocess.CompletedProcess([], 0,
+            '{"success":true,"data":{"id":"sent-media-id",'
+            '"file":{"mime_type":"image/png","media":"image"}}}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            result = self.backend.send_files(
+                "team@g.us", [self.preview.as_uri(), str(self.document)], "review"
+            )
+        self.assertEqual(result["count"], 2)
+        commands = [call.args[0] for call in write.call_args_list]
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(result["album_id"], "")
+        self.assertEqual(commands[0][commands[0].index("--caption") + 1], "review")
+        self.assertNotIn("--caption", commands[1])
+
+    def test_visual_batch_keeps_one_private_album_identity(self) -> None:
+        responses = [
+            subprocess.CompletedProcess([], 0,
+                '{"success":true,"data":{"id":"photo-1",'
+                '"file":{"mime_type":"image/png","media":"image"}}}', ""),
+            subprocess.CompletedProcess([], 0,
+                '{"success":true,"data":{"id":"photo-2",'
+                '"file":{"mime_type":"image/jpeg","media":"image"}}}', ""),
+        ]
+        with mock.patch.object(self.backend, "_write", side_effect=responses):
+            result = self.backend.send_files(
+                "team@g.us", [self.preview.as_uri(), self.preview_two.as_uri()], "album"
+            )
+        self.assertRegex(result["album_id"], r"^[0-9a-f]{24}$")
+        self.assertEqual([item["album_index"] for item in result["items"]], [0, 1])
+        self.assertEqual({item["album_id"] for item in result["items"]},
+                         {result["album_id"]})
+
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.executemany(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me,
+                 text, reaction_to_id, media_type, mime_type, local_path)
+                VALUES (?, 'Design team', ?, 'me@s.whatsapp.net', '', ?, 1,
+                        '', '', 'image', ?, '')""",
+                [
+                    ("team@g.us", "photo-1", 50, "image/png"),
+                    ("team@g.us", "photo-2", 49, "image/jpeg"),
+                ],
+            )
+        messages = {item["id"]: item
+                    for item in self.backend.messages("team@g.us")["messages"]}
+        self.assertEqual(messages["photo-1"]["album_id"], result["album_id"])
+        self.assertEqual(messages["photo-2"]["album_count"], 2)
+        self.assertEqual(messages["photo-2"]["local_path"], str(self.preview_two))
+
+    def test_fresh_sent_media_keeps_its_local_preview(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE messages SET local_path = '' WHERE chat_jid = ? AND msg_id = ?",
+                ["team@g.us", "t2"],
+            )
+        completed = subprocess.CompletedProcess([], 0,
+            '{"success":true,"data":{"sent":true,"id":"t2",'
+            '"file":{"name":"mock.png","mime_type":"image/png","media":"image"}}}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed):
+            result = self.backend.send_file("team@g.us", self.preview, "image/png")
+        self.assertEqual(result["id"], "t2")
+        message = next(item for item in self.backend.messages("team@g.us")["messages"]
+                       if item["id"] == "t2")
+        self.assertEqual(message["local_path"], str(self.preview))
+        index_path = self.root / "state" / "sent-media.json"
+        self.assertEqual(index_path.stat().st_mode & 0o777, 0o600)
+
+    def test_sent_media_hints_are_scoped_by_chat(self) -> None:
+        self.backend._remember_sent_media("alex@s.whatsapp.net", "t2", self.document,
+                                         "application/pdf", "document", "")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE messages SET local_path = '' WHERE chat_jid = ? AND msg_id = ?",
+                ["team@g.us", "t2"],
+            )
+        message = next(item for item in self.backend.messages("team@g.us")["messages"]
+                       if item["id"] == "t2")
+        self.assertEqual(message["local_path"], "")
+
+    def test_multi_file_send_rejects_remote_and_oversized_batches(self) -> None:
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Only local"):
+            self.backend.send_files("team@g.us", ["https://example.com/file.png"])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "no more than"):
+            self.backend.send_files("team@g.us", [str(self.preview)] * 11)
+
+    def test_live_delegate_path_does_not_stop_sync(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_run", return_value=completed), \
+             mock.patch.object(backend_module.subprocess, "run") as systemctl:
+            self.backend._write(["--json", "send"], timeout=10)
+        systemctl.assert_not_called()
+
+    def test_oversized_message_is_rejected(self) -> None:
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "too long"):
+            self.backend.send("alex@s.whatsapp.net", "x" * 4097)
+
+
+if __name__ == "__main__":
+    unittest.main()

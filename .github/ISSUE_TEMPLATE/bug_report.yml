@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a reproducible OmaWhatsApp problem without private chat data.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Never attach a WhatsApp session, database, JID, phone number, message,
+        media file, or screenshot of a real conversation.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Synthetic reproduction
+      description: List the smallest steps using demo or invented data.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: OmaWhatsApp commit, Omarchy version, and wacli version.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed all private WhatsApp data from this report.
+          required: true

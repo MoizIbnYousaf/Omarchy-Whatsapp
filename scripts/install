@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+user_home=${HOME:?HOME is required}
+plugin_root="$user_home/.config/omarchy/plugins"
+shell_config="$user_home/.config/omarchy/shell.json"
+shell_source="/usr/share/omarchy/shell"
+check_only=false
+plugin_dir=omawhatsapp
+plugin_id=io.github.moizibnyousaf.omawhatsapp
+
+if [[ ${1:-} == "--check" ]]; then
+  check_only=true
+  shift
+fi
+if (( $# > 0 )); then
+  echo "Usage: scripts/install [--check]" >&2
+  exit 2
+fi
+
+for command_name in jq python3 qmllint systemctl wl-paste zenity omarchy; do
+  command -v "$command_name" >/dev/null || {
+    echo "Missing requirement: $command_name" >&2
+    exit 1
+  }
+done
+
+if [[ ! -x "$user_home/.local/bin/wacli" ]]; then
+  echo "Install wacli at ~/.local/bin/wacli before installing OmaWhatsApp." >&2
+  exit 1
+fi
+
+wacli_version=$("$user_home/.local/bin/wacli" --version 2>&1 | sed -nE 's/^wacli[[:space:]]+v?([0-9]+([.][0-9]+)+).*/\1/p' | head -n 1)
+if [[ -z $wacli_version ]] || ! printf '0.17.1\n%s\n' "$wacli_version" | sort -V -C; then
+  echo "OmaWhatsApp requires wacli 0.17.1 or newer (found: ${wacli_version:-unknown})." >&2
+  exit 1
+fi
+
+if [[ ! -f "$shell_config" ]]; then
+  echo "Missing Omarchy shell config: $shell_config" >&2
+  exit 1
+fi
+
+# Build the complete install tree before disturbing the live shell. Quickshell
+# watches local plugins and can otherwise reload once per copied QML file.
+omarchy plugin validate "$repo_root"
+if $check_only; then
+  staging_root=$(mktemp -d)
+else
+  install -d "$plugin_root"
+  staging_root=$(mktemp -d "$plugin_root/.omawhatsapp-install.XXXXXX")
+fi
+temporary=$(mktemp "${shell_config}.XXXXXX")
+cleanup() {
+  rm -rf -- "$staging_root"
+  rm -f -- "$temporary"
+}
+trap cleanup EXIT
+
+install -d "$staging_root/$plugin_dir"
+while IFS= read -r -d '' source_file; do
+  relative=${source_file#"$repo_root/plugins/$plugin_dir/"}
+  install -Dm644 "$source_file" "$staging_root/$plugin_dir/$relative"
+done < <(find "$repo_root/plugins/$plugin_dir" -type f -print0)
+jq --arg plugin_id "$plugin_id" '
+  def migrate_id:
+    if (.id == "omawhatsapp" or .id == "omawhatsapp-bar")
+    then .id = $plugin_id else . end;
+  def unique_ids:
+    reduce .[] as $item ([];
+      if any(.[]; .id == $item.id) then . else . + [$item] end);
+  .plugins = (.plugins // []) |
+  .plugins = ([.plugins[]? | migrate_id] | unique_ids) |
+  .bar.layout.left = ((.bar.layout.left // []) | map(migrate_id) | unique_ids) |
+  .bar.layout.center = ((.bar.layout.center // []) | map(migrate_id) | unique_ids) |
+  .bar.layout.right = ((.bar.layout.right // []) | map(migrate_id) | unique_ids) |
+  (if any(.plugins[]?; .id == $plugin_id) then .
+   else .plugins += [{"id":$plugin_id}] end) |
+  (if any((.bar.layout.left + .bar.layout.center + .bar.layout.right)[]?; .id == $plugin_id) then .
+   else .bar.layout.right += [{"id":$plugin_id}] end)
+' "$shell_config" > "$temporary"
+chmod --reference="$shell_config" "$temporary"
+
+if $check_only; then
+  jq -e --arg plugin_id "$plugin_id" '.id == $plugin_id' \
+    "$staging_root/$plugin_dir/manifest.json" >/dev/null
+  jq -e --arg plugin_id "$plugin_id" '
+    ([.plugins[]? | select(.id == $plugin_id)] | length) == 1 and
+    (any((.bar.layout.left + .bar.layout.center + .bar.layout.right)[]?;
+      .id == $plugin_id)) and
+    (all((.plugins + .bar.layout.left + .bar.layout.center + .bar.layout.right)[]?;
+      .id != "omawhatsapp" and .id != "omawhatsapp-bar"))
+  ' "$temporary" >/dev/null
+  echo "OmaWhatsApp install preflight passed (wacli $wacli_version)."
+  exit 0
+fi
+
+# Stop the shell before replacing watched plugin directories. The restart
+# below launches one fully-consistent tree instead of hot-reloading partial
+# plugin states and racing IpcHandler registration.
+if command -v quickshell >/dev/null; then
+  while timeout 5 quickshell kill -p "$shell_source" --any-display >/dev/null 2>&1; do :; done
+fi
+
+install -Dm755 "$repo_root/bin/omawhatsapp" "$user_home/.local/bin/omawhatsapp"
+rm -rf -- "$plugin_root/$plugin_dir"
+mv -- "$staging_root/$plugin_dir" "$plugin_root/$plugin_dir"
+# Pre-0.3 used a second bar-only plugin. The combined manifest supersedes only
+# that exact legacy directory and shell id.
+rm -rf -- "$plugin_root/omawhatsapp-bar"
+
+install -Dm644 "$repo_root/systemd/user/wacli-sync.service" \
+  "$user_home/.config/systemd/user/wacli-sync.service"
+mv -- "$temporary" "$shell_config"
+trap - EXIT
+rmdir -- "$staging_root"
+
+systemctl --user daemon-reload
+systemctl --user enable wacli-sync.service
+# `enable --now` does not restart an already-running unit after an upgrade, so
+# explicitly restart to activate the newly installed sandbox and ExecStart.
+systemctl --user restart wacli-sync.service
+
+if command -v omarchy-restart-shell >/dev/null; then
+  omarchy-restart-shell
+fi
+
+echo "OmaWhatsApp installed as one service/panel/bar plugin."
+echo "Run ~/.local/bin/omawhatsapp auth if WhatsApp is not linked."
+echo "Bind Super+Shift+W using omarchy/bindings.lua.example if desired."

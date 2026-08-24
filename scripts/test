@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$repo_root"
+
+for command_name in make qmllint jq omarchy rg; do
+  command -v "$command_name" >/dev/null 2>&1 || {
+    echo "test: missing command: $command_name" >&2
+    exit 1
+  }
+done
+
+qml_test_runner=/usr/lib/qt6/bin/qmltestrunner
+[[ -x $qml_test_runner ]] || {
+  echo "test: Qt 6 qmltestrunner is missing: $qml_test_runner" >&2
+  exit 1
+}
+
+make validate
+./scripts/install --check
+QT_QPA_PLATFORM=offscreen "$qml_test_runner" \
+  -input tests/tst_media_viewer.qml \
+  -import "$repo_root/tests/imports" \
+  -import "$repo_root/plugins/omawhatsapp" \
+  -o -,txt
+
+bash -n scripts/install scripts/test scripts/uninstall scripts/benchmark
+git diff --check
+
+jq -e '.id == "io.github.moizibnyousaf.omawhatsapp"' \
+  manifest.json plugins/omawhatsapp/manifest.json >/dev/null || {
+  echo "test: public plugin ID must remain globally namespaced" >&2
+  exit 1
+}
+
+rg -q 'systemctl --user restart wacli-sync\.service' scripts/install || {
+  echo "test: installer upgrades must activate the new sync unit" >&2
+  exit 1
+}
+
+if rg -n 'QtWebEngine|WebEngineView|WebView|node_modules|Electron' \
+  --glob '*.qml' --glob '*.js' --glob '*.sh' --glob '*.service' \
+  --glob '!scripts/test' .; then
+  echo "test: forbidden heavyweight runtime dependency found" >&2
+  exit 1
+fi
+
+echo "All validation and tests passed."

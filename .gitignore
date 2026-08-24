@@ -1,0 +1,19 @@
+# Never commit WhatsApp identity, private data, or generated exports.
+.private/
+private/
+.env
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.ndjson
+exports/
+media/
+sessions/
+state/
+
+# Local tooling.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
