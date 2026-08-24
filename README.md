@@ -7,6 +7,12 @@ the private mirror maintained by [`wacli`](https://github.com/openclaw/wacli),
 opens without waiting on the network, and follows the active Omarchy theme. No
 Electron runtime, browser wrapper, or cloud backend is added.
 
+## Why this exists
+
+WhatsApp Web can feel slow and janky on the desktop, and it does not follow
+Omarchy themes. OmaWhatsApp exists to make everyday chats feel immediate,
+native, and visually at home in Omarchy.
+
 ![OmaWhatsApp conversation view](preview.png)
 
 ## A WhatsApp client that feels like Omarchy
