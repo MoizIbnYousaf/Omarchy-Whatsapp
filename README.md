@@ -165,11 +165,13 @@ Add the `Super+Shift+W` binding from
 | `Ctrl+V` | Stage clipboard text, image, GIF, or local file |
 | `Ctrl+O` | Add documents |
 | `Ctrl+Shift+O` | Add photos and videos |
-| `J` / `K`, arrows | Move through messages |
+| `J` / `K`, arrows | Move through messages or the focused chat list |
+| `Enter` | Open the selected chat from the chat list |
+| `C` | Focus the message composer |
 | `Space` | Open selected media; play/pause inside the viewer |
 | `Left` / `Right` | Previous/next gallery item |
 | `+` / `-` / `0` | Zoom in/out/fit |
-| `Esc` | Close the current layer, then the app |
+| `Esc` | Step back: composer → messages → chat list → close |
 | Header `online` / `offline` pill | Toggle background sync; local history stays available |
 | Chat menu `Mark read · send receipt` | Explicitly mark the chat read on WhatsApp |
 

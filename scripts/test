@@ -19,11 +19,13 @@ qml_test_runner=/usr/lib/qt6/bin/qmltestrunner
 
 make validate
 ./scripts/install --check
-QT_QPA_PLATFORM=offscreen "$qml_test_runner" \
-  -input tests/tst_media_viewer.qml \
-  -import "$repo_root/tests/imports" \
-  -import "$repo_root/plugins/omawhatsapp" \
-  -o -,txt
+for qml_test in tests/tst_keyboard_navigation.qml tests/tst_media_viewer.qml; do
+  QT_QPA_PLATFORM=offscreen "$qml_test_runner" \
+    -input "$qml_test" \
+    -import "$repo_root/tests/imports" \
+    -import "$repo_root/plugins/omawhatsapp" \
+    -o -,txt
+done
 
 bash -n scripts/install scripts/test scripts/uninstall
 git diff --check

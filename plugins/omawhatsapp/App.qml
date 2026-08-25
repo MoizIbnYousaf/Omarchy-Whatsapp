@@ -18,7 +18,9 @@ Item {
   property bool closingFromHost: false
   property bool demoMode: false
   property string contentFilter: "all"
-  property int cursorIndex: 0
+  property alias cursorIndex: keyboardNavigation.messageIndex
+  property alias chatCursorIndex: keyboardNavigation.chatIndex
+  readonly property alias keyboardContext: keyboardNavigation.context
   property string pendingDraft: ""
   property bool narrowConversation: false
   property bool narrowSearchOpen: false
@@ -83,6 +85,8 @@ Item {
     foreground.b * 0.45 + background.b * 0.55, 1)
   readonly property bool narrow: window.width < Style.space(640)
   readonly property bool compact: window.width < Style.space(900)
+  readonly property bool textEntryActive: composer.activeFocus
+    || messageSearchField.activeFocus || chatSearchField.activeFocus
   readonly property var sourceItems: root.demoMode
     ? root.demoItems : (root.service ? root.service.messages : [])
   readonly property var sourceChats: root.demoMode
@@ -145,6 +149,8 @@ Item {
   readonly property bool sendingAttachments: !root.demoMode && root.service
     && root.service.writing && root.service.activeWriteKind === "files"
 
+  KeyboardNavigation { id: keyboardNavigation }
+
   function groupMediaAlbums(items) {
     var albums = ({})
     items.forEach(function(item) {
@@ -187,6 +193,7 @@ Item {
     narrowSearchOpen = false
     replyTarget = null
     editTarget = null
+    keyboardNavigation.enterComposer()
     mediaViewer.closeViewer()
     if (demoMode && payload.attachments === true) {
       pendingStickerPath = ""
@@ -212,9 +219,9 @@ Item {
         composer.text = "@"
         composer.cursorPosition = composer.length
         root.updateMentionCompletion()
-        composer.forceActiveFocus()
+        root.focusComposer()
       }
-      else composer.forceActiveFocus()
+      else root.focusComposer()
     })
   }
 
@@ -229,6 +236,61 @@ Item {
   function requestClose() {
     if (shell && typeof shell.hide === "function") shell.hide(pluginId)
     else close()
+  }
+
+  function currentChatIndex() {
+    var key = root.currentChatKey()
+    for (var i = 0; i < root.visibleChats.length; i++) {
+      if (String(root.visibleChats[i].jid || "") === key) return i
+    }
+    return -1
+  }
+
+  function focusComposer() {
+    keyboardNavigation.enterComposer()
+    composer.forceActiveFocus()
+  }
+
+  function focusMessages() {
+    keyboardNavigation.enterMessages(root.visibleMessages.length)
+    if (root.narrow && root.currentChatKey() !== "") root.narrowConversation = true
+    keyboardHome.forceActiveFocus()
+    if (root.visibleMessages.length > 0)
+      messageList.positionViewAtIndex(root.cursorIndex, ListView.Contain)
+  }
+
+  function focusChats() {
+    if (root.narrow) {
+      root.narrowConversation = false
+      root.narrowSearchOpen = false
+    } else if (root.sidebarCollapsed) {
+      root.sidebarCollapsed = false
+    }
+    keyboardNavigation.enterChats(root.visibleChats.length, root.currentChatIndex())
+    keyboardHome.forceActiveFocus()
+    if (root.visibleChats.length > 0)
+      chatList.positionViewAtIndex(root.chatCursorIndex, ListView.Contain)
+  }
+
+  function goBack() {
+    if (messageSearchField.activeFocus) {
+      if (messageSearchField.text !== "") messageSearchField.text = ""
+      root.focusMessages()
+      return
+    }
+    if (chatSearchField.activeFocus) {
+      if (chatSearchField.text !== "") chatSearchField.text = ""
+      root.focusChats()
+      return
+    }
+    if (root.replyTarget || root.editTarget) {
+      root.cancelComposerContext()
+      return
+    }
+    var target = keyboardNavigation.backTarget()
+    if (target === "messages") root.focusMessages()
+    else if (target === "chats") root.focusChats()
+    else root.requestClose()
   }
 
   function sendDraft() {
@@ -307,7 +369,7 @@ Item {
       next.push({ jid: String(candidate.jid), name: String(candidate.name || "") })
     selectedMentions = next
     closeMentionCompletion()
-    composer.forceActiveFocus()
+    root.focusComposer()
   }
 
   function activeMentionJids() {
@@ -466,7 +528,7 @@ Item {
     copyToastTimer.restart()
   }
 
-  function selectChat(chat) {
+  function selectChat(chat, focusTarget) {
     if (!chat) return
     saveComposerState()
     messageSearchField.text = ""
@@ -475,14 +537,29 @@ Item {
     else if (service) service.selectChat(chat)
     restoreComposerState(String(chat.jid))
     if (narrow) narrowConversation = true
-    composer.forceActiveFocus()
+    if (focusTarget === "messages") root.focusMessages()
+    else root.focusComposer()
   }
 
   function selectChatAt(index) {
     var position = Number(index)
     if (position < 0 || position >= visibleChats.length) return
+    chatCursorIndex = position
     chatList.positionViewAtIndex(position, ListView.Contain)
     selectChat(visibleChats[position])
+  }
+
+  function moveChatCursor(delta) {
+    if (visibleChats.length === 0) return
+    keyboardNavigation.moveChats(delta, visibleChats.length)
+    chatList.currentIndex = chatCursorIndex
+    chatList.positionViewAtIndex(chatCursorIndex, ListView.Contain)
+  }
+
+  function openChatCursor() {
+    if (visibleChats.length === 0) return
+    chatCursorIndex = keyboardNavigation.boundedIndex(chatCursorIndex, visibleChats.length)
+    selectChat(visibleChats[chatCursorIndex], "messages")
   }
 
   function toggleSidebar() {
@@ -494,15 +571,15 @@ Item {
     }
     Qt.callLater(function() {
       if ((root.narrow && root.narrowConversation)
-          || (!root.narrow && root.sidebarCollapsed)) composer.forceActiveFocus()
-      else chatSearchField.forceActiveFocus()
+          || (!root.narrow && root.sidebarCollapsed)) root.focusMessages()
+      else root.focusChats()
     })
   }
 
   function startReply(item) {
     replyTarget = item
     editTarget = null
-    composer.forceActiveFocus()
+    root.focusComposer()
   }
 
   function startEdit(item) {
@@ -513,7 +590,7 @@ Item {
     selectedMentions = []
     closeMentionCompletion()
     composer.text = String(item.text || "")
-    composer.forceActiveFocus()
+    root.focusComposer()
     composer.cursorPosition = composer.length
   }
 
@@ -538,7 +615,7 @@ Item {
     if (wasEditing && restoreDraft !== false) selectedMentions = draftMentionsBeforeEdit.slice()
     draftBeforeEdit = ""
     draftMentionsBeforeEdit = []
-    composer.forceActiveFocus()
+    root.focusComposer()
   }
 
   function formatTime(seconds) {
@@ -590,7 +667,7 @@ Item {
 
   function moveCursor(delta) {
     if (visibleMessages.length === 0) return
-    cursorIndex = Math.max(0, Math.min(visibleMessages.length - 1, cursorIndex + delta))
+    keyboardNavigation.moveMessages(delta, visibleMessages.length)
     messageList.currentIndex = cursorIndex
     messageList.positionViewAtIndex(cursorIndex, ListView.Contain)
   }
@@ -606,7 +683,7 @@ Item {
       var key = String(jid || root.pendingWriteChatKey)
       if (key === root.composerChatKey) {
         composer.insert(composer.cursorPosition, String(text || ""))
-        composer.forceActiveFocus()
+        root.focusComposer()
       } else {
         var states = Object.assign({}, root.composerStates)
         var state = states[key] || { text: "", attachments: [], reply: null, edit: null, draftBeforeEdit: "" }
@@ -668,7 +745,7 @@ Item {
         pollOptions.text = ""
       }
       if (kind === "forward") root.forwardTarget = null
-      if (sameChat) composer.forceActiveFocus()
+      if (sameChat) root.focusComposer()
     }
     function onWriteFailed(message, jid) {
       var key = String(jid || root.pendingWriteChatKey)
@@ -676,7 +753,7 @@ Item {
         composer.text = root.pendingDraft
       root.pendingDraft = ""
       root.pendingWriteChatKey = ""
-      if (key === root.composerChatKey) composer.forceActiveFocus()
+      if (key === root.composerChatKey) root.focusComposer()
     }
     function onControlCompleted(kind) {
       if (kind === "sync-mode")
@@ -697,6 +774,7 @@ Item {
 
   FloatingWindow {
     id: window
+    objectName: "omawhatsappWindow"
     visible: root.opened
     title: "OmaWhatsApp"
     color: root.background
@@ -710,6 +788,7 @@ Item {
 
     FocusScope {
       id: focusScope
+      objectName: "omawhatsappFocusScope"
       anchors.fill: parent
       focus: true
 
@@ -842,33 +921,31 @@ Item {
           root.selectChatAt(event.key - Qt.Key_1)
           event.accepted = true
         } else if (event.key === Qt.Key_Escape) {
-          if (messageSearchField.activeFocus) {
-            if (messageSearchField.text !== "") messageSearchField.text = ""
-            else {
-              root.narrowSearchOpen = false
-              keyboardHome.forceActiveFocus()
-            }
-          } else if (root.replyTarget || root.editTarget) root.cancelComposerContext()
-          else if (root.narrow && root.narrowConversation) root.narrowConversation = false
-          else root.requestClose()
+          root.goBack()
           event.accepted = true
         } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_F) {
           messageSearchField.forceActiveFocus()
           messageSearchField.selectAll()
           event.accepted = true
-        } else if (event.key === Qt.Key_C && !messageSearchField.activeFocus && !composer.activeFocus) {
-          composer.forceActiveFocus()
+        } else if (event.key === Qt.Key_C && !root.textEntryActive) {
+          root.focusComposer()
           event.accepted = true
-        } else if (!messageSearchField.activeFocus && !composer.activeFocus
+        } else if (!root.textEntryActive
                    && (event.key === Qt.Key_J || event.key === Qt.Key_Down)) {
-          root.moveCursor(1)
+          if (root.keyboardContext === "chats") root.moveChatCursor(1)
+          else if (root.keyboardContext === "messages") root.moveCursor(1)
           event.accepted = true
-        } else if (!messageSearchField.activeFocus && !composer.activeFocus
+        } else if (!root.textEntryActive
                    && (event.key === Qt.Key_K || event.key === Qt.Key_Up)) {
-          root.moveCursor(-1)
+          if (root.keyboardContext === "chats") root.moveChatCursor(-1)
+          else if (root.keyboardContext === "messages") root.moveCursor(-1)
           event.accepted = true
-        } else if (!messageSearchField.activeFocus && !composer.activeFocus
-                   && event.key === Qt.Key_Space) {
+        } else if (root.keyboardContext === "chats"
+                   && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+          root.openChatCursor()
+          event.accepted = true
+        } else if (!root.textEntryActive
+                   && root.keyboardContext === "messages" && event.key === Qt.Key_Space) {
           root.toggleCursorItem()
           event.accepted = true
         }
@@ -1053,6 +1130,8 @@ Item {
             accent: root.accent
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
+            onActiveFocusChanged: if (activeFocus) keyboardNavigation.enterChatSearch()
+            onTextChanged: root.chatCursorIndex = 0
             background: Rectangle {
               radius: Style.cornerRadius
               color: chatSearchField.activeFocus || chatSearchField.hovered
@@ -1072,6 +1151,7 @@ Item {
             clip: true
             spacing: Style.space(3)
             model: root.visibleChats
+            currentIndex: root.chatCursorIndex
             boundsBehavior: Flickable.StopAtBounds
 
             delegate: Rectangle {
@@ -1084,9 +1164,13 @@ Item {
               readonly property bool selected: root.demoMode
                 ? String(modelData.jid) === root.demoSelectedJid
                 : root.service && String(modelData.jid) === root.service.selectedChatJid
-              color: selected
+              readonly property bool keyboardSelected: root.keyboardContext === "chats"
+                && index === root.chatCursorIndex
+              color: keyboardSelected || selected
                 ? Style.selectedFillFor(root.foreground, root.accent)
                 : (chatMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
+              border.width: keyboardSelected ? 1 : 0
+              border.color: root.accent
 
               Rectangle {
                 id: chatAvatar
@@ -1176,7 +1260,10 @@ Item {
                 id: chatMouse
                 anchors.fill: parent
                 hoverEnabled: true
-                onClicked: root.selectChat(modelData)
+                onClicked: {
+                  root.chatCursorIndex = index
+                  root.selectChat(modelData)
+                }
               }
             }
           }
@@ -1332,6 +1419,7 @@ Item {
               accent: root.accent
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
+              onActiveFocusChanged: if (activeFocus) keyboardNavigation.enterMessageSearch()
               onTextChanged: searchDebounce.restart()
               background: Rectangle {
                 radius: Style.cornerRadius
@@ -1499,6 +1587,7 @@ Item {
               onSelectedRequested: {
                 root.cursorIndex = index
                 if (root.service) root.service.selectItem(modelData.id)
+                root.focusMessages()
               }
               onOpenMediaRequested: function(path) { root.openMedia(path) }
               onDownloadMediaRequested: if (root.service) root.service.downloadMedia(modelData)
@@ -1988,6 +2077,7 @@ Item {
               textFormat: TextEdit.PlainText
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
+              onActiveFocusChanged: if (activeFocus) keyboardNavigation.enterComposer()
               onTextChanged: root.updateMentionCompletion()
               onCursorPositionChanged: root.updateMentionCompletion()
               Keys.priority: Keys.BeforeItem
@@ -2015,8 +2105,7 @@ Item {
                   root.sendDraft()
                   event.accepted = true
                 } else if (event.key === Qt.Key_Up && composer.text === "") {
-                  keyboardHome.forceActiveFocus()
-                  root.moveCursor(0)
+                  root.focusMessages()
                   event.accepted = true
                 }
               }
