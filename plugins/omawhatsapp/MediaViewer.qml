@@ -132,6 +132,7 @@ FocusScope {
       color: closeHover.hovered
         ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
       Text {
+        textFormat: Text.PlainText
         anchors.centerIn: parent
         text: "×"
         color: root.foreground
@@ -150,6 +151,7 @@ FocusScope {
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(1)
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: root.currentItem ? String(root.currentItem.sender || "WhatsApp media") : "Media"
         color: root.foreground
@@ -158,6 +160,7 @@ FocusScope {
         font.pixelSize: Style.font.body
       }
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         text: root.currentItem && root.currentItem.timestamp
           ? Qt.formatDateTime(new Date(Number(root.currentItem.timestamp) * 1000), "ddd, MMM d · h:mm AP") : ""
@@ -193,6 +196,7 @@ FocusScope {
             ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
           opacity: root.video && modelData.action !== "external" ? 0.35 : 1
           Text {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             text: modelData.icon
             color: root.foreground
@@ -304,6 +308,7 @@ FocusScope {
         radius: height / 2
         color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.78)
         Text {
+          textFormat: Text.PlainText
           id: animationState
           anchors.centerIn: parent
           text: animation.playing ? "GIF · playing" : "GIF · paused"
@@ -349,6 +354,7 @@ FocusScope {
         radius: Style.cornerRadius
         color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.78)
         Text {
+          textFormat: Text.PlainText
           anchors.left: parent.left
           anchors.leftMargin: Style.space(10)
           anchors.verticalCenter: parent.verticalCenter
@@ -380,6 +386,7 @@ FocusScope {
           }
         }
         Text {
+          textFormat: Text.PlainText
           id: durationLabel
           anchors.right: parent.right
           anchors.rightMargin: Style.space(10)
@@ -410,6 +417,7 @@ FocusScope {
       : Qt.rgba(root.background.r, root.background.g, root.background.b, 0.72)
     z: 3
     Text {
+      textFormat: Text.PlainText
       anchors.centerIn: parent
       text: "‹"
       color: root.foreground
@@ -433,6 +441,7 @@ FocusScope {
       : Qt.rgba(root.background.r, root.background.g, root.background.b, 0.72)
     z: 3
     Text {
+      textFormat: Text.PlainText
       anchors.centerIn: parent
       text: "›"
       color: root.foreground
@@ -455,6 +464,7 @@ FocusScope {
       color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.90)
     }
     Text {
+      textFormat: Text.PlainText
       anchors.left: parent.left
       anchors.leftMargin: Style.space(14)
       anchors.right: itemCounter.left
@@ -468,6 +478,7 @@ FocusScope {
       font.pixelSize: Style.font.bodySmall
     }
     Text {
+      textFormat: Text.PlainText
       id: itemCounter
       anchors.right: parent.right
       anchors.rightMargin: Style.space(14)

@@ -808,6 +808,7 @@ Item {
         border.color: root.accent
 
         Text {
+          textFormat: Text.PlainText
           id: copyToastLabel
           anchors.centerIn: parent
           text: "●  " + root.toastText
@@ -889,6 +890,7 @@ Item {
           spacing: Style.space(9)
 
           Text {
+            textFormat: Text.PlainText
             text: "󰖣"
             color: root.foreground
             font.family: root.fontFamily
@@ -896,6 +898,7 @@ Item {
           }
 
           Text {
+            textFormat: Text.PlainText
             text: "OmaWhatsApp"
             color: root.foreground
             font.family: root.fontFamily
@@ -932,6 +935,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               id: syncModeLabel
               anchors.right: parent.right
               anchors.rightMargin: Style.space(7)
@@ -961,6 +965,7 @@ Item {
             color: refreshMouse.containsMouse
               ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
             Text {
+              textFormat: Text.PlainText
               anchors.centerIn: parent
               text: "↻"
               color: root.dim
@@ -1021,6 +1026,7 @@ Item {
             width: parent.width
             height: Style.space(30)
             Text {
+              textFormat: Text.PlainText
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
               text: "Chats"
@@ -1029,6 +1035,7 @@ Item {
               font.pixelSize: Style.font.heading
             }
             Text {
+              textFormat: Text.PlainText
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               text: String(root.sourceChats.length)
@@ -1091,6 +1098,7 @@ Item {
                 radius: width / 2
                 color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, selected ? 0.22 : 0.12)
                 Text {
+                  textFormat: Text.PlainText
                   anchors.centerIn: parent
                   text: modelData.kind === "group" ? "󰠮" : String(modelData.name || "?").charAt(0).toUpperCase()
                   color: root.accent
@@ -1100,6 +1108,7 @@ Item {
               }
 
               Text {
+                textFormat: Text.PlainText
                 anchors.right: parent.right
                 anchors.rightMargin: Style.space(9)
                 anchors.verticalCenter: parent.verticalCenter
@@ -1119,6 +1128,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.space(3)
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: String(modelData.name || "WhatsApp chat")
                   color: root.foreground
@@ -1127,6 +1137,7 @@ Item {
                   font.pixelSize: Style.font.body
                 }
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: (modelData.last_from_me ? "You · " : "") + String(modelData.preview || "No local messages yet")
                   color: root.dim
@@ -1150,6 +1161,7 @@ Item {
                 border.width: Number(modelData.notification_unread || 0) > 0 ? 0 : 1
                 border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.28)
                 Text {
+                  textFormat: Text.PlainText
                   id: unreadText
                   anchors.centerIn: parent
                   text: Number(modelData.unread || 0) > 99 ? "99+" : String(modelData.unread || 0)
@@ -1205,6 +1217,7 @@ Item {
               color: backHover.hovered
                 ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
               Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: "←"
                 color: root.foreground
@@ -1228,6 +1241,7 @@ Item {
               color: sidebarToggleHover.hovered
                 ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
               Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: root.sidebarCollapsed ? "󰤻" : "󰤸"
                 color: root.dim
@@ -1246,6 +1260,7 @@ Item {
               radius: width / 2
               color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.16)
               Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: "󰠮"
                 color: root.accent
@@ -1260,6 +1275,7 @@ Item {
                 - Style.space(84))
               spacing: Style.space(2)
               Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 text: root.displayGroupName
                 color: root.foreground
@@ -1268,6 +1284,7 @@ Item {
                 font.pixelSize: Style.font.body
               }
               Text {
+                textFormat: Text.PlainText
                 text: root.displayKind === "group" ? "group" : "direct message"
                 color: root.dim
                 font.family: root.fontFamily
@@ -1293,6 +1310,7 @@ Item {
                 color: root.contentFilter === modelData
                   ? Style.selectedFillFor(root.foreground, root.accent) : "transparent"
                 Text {
+                  textFormat: Text.PlainText
                   anchors.centerIn: parent
                   text: modelData
                   color: root.contentFilter === modelData ? root.foreground : root.dimmer
@@ -1331,6 +1349,7 @@ Item {
               color: narrowSearchHover.hovered
                 ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
               Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: "󰍉"
                 color: root.dim
@@ -1353,6 +1372,7 @@ Item {
               color: chatMenuHover.hovered
                 ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
               Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: "󰇙"
                 color: root.dim
@@ -1397,6 +1417,7 @@ Item {
                       color: chatActionHover.hovered
                         ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
                       Text {
+                        textFormat: Text.PlainText
                         anchors.left: parent.left
                         anchors.leftMargin: Style.space(8)
                         anchors.verticalCenter: parent.verticalCenter
@@ -1430,6 +1451,7 @@ Item {
         }
 
         Text {
+          textFormat: Text.PlainText
           visible: root.visibleMessages.length === 0 && !(root.service && root.service.loadingMessages)
           anchors.centerIn: messageList
           text: root.displayGroupName === "" ? "Choose a chat" : "No local messages in this chat"
@@ -1513,6 +1535,7 @@ Item {
           clip: true
 
           Text {
+            textFormat: Text.PlainText
             anchors.left: parent.left
             anchors.leftMargin: Style.space(12)
             anchors.top: parent.top
@@ -1554,6 +1577,7 @@ Item {
                 radius: width / 2
                 color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18)
                 Text {
+                  textFormat: Text.PlainText
                   anchors.centerIn: parent
                   text: String(modelData.name || "?").slice(0, 1).toUpperCase()
                   color: root.accent
@@ -1570,6 +1594,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 1
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   text: String(modelData.name || "WhatsApp member")
                   color: root.foreground
@@ -1578,6 +1603,7 @@ Item {
                   font.pixelSize: Style.font.body
                 }
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   visible: String(modelData.phone || "") !== ""
                   text: String(modelData.phone || "")
@@ -1589,6 +1615,7 @@ Item {
               }
 
               Text {
+                textFormat: Text.PlainText
                 id: roleLabel
                 anchors.right: parent.right
                 anchors.rightMargin: Style.space(12)
@@ -1654,6 +1681,7 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(2)
               Text {
+                textFormat: Text.PlainText
                 text: root.editTarget ? "Editing message"
                   : "Replying to " + String(root.replyTarget ? root.replyTarget.sender : "")
                 color: root.accent
@@ -1661,6 +1689,7 @@ Item {
                 font.pixelSize: Style.font.caption
               }
               Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 text: String(root.editTarget ? root.editTarget.text
                   : (root.replyTarget ? root.replyTarget.text || "[media]" : ""))
@@ -1682,6 +1711,7 @@ Item {
               color: cancelContextHover.hovered
                 ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
               Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: "×"
                 color: root.dim
@@ -1744,6 +1774,7 @@ Item {
                     smooth: true
                   }
                   Text {
+                    textFormat: Text.PlainText
                     visible: !root.attachmentIsImage(modelData)
                     anchors.centerIn: parent
                     text: "󰈔"
@@ -1754,6 +1785,7 @@ Item {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   id: attachmentLabel
                   anchors.left: parent.left
                   anchors.leftMargin: Style.space(53)
@@ -1779,6 +1811,7 @@ Item {
                   radius: width / 2
                   color: root.background
                   Text {
+                    textFormat: Text.PlainText
                     anchors.centerIn: parent
                     text: "×"
                     color: root.dim
@@ -1801,6 +1834,7 @@ Item {
               color: clearAttachmentsHover.hovered
                 ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
               Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: root.sendingAttachments
                   ? "Sending " + String(root.pendingAttachments.length) + "…" : "󰆴"
@@ -1832,6 +1866,7 @@ Item {
             color: pasteMouse.containsMouse
               ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
             Text {
+              textFormat: Text.PlainText
               anchors.centerIn: parent
               text: "󰐕"
               color: root.dim
@@ -1882,6 +1917,7 @@ Item {
                     color: trayItemHover.hovered
                       ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
                     Text {
+                      textFormat: Text.PlainText
                       anchors.left: parent.left
                       anchors.leftMargin: Style.space(9)
                       anchors.verticalCenter: parent.verticalCenter
@@ -1891,6 +1927,7 @@ Item {
                       font.pixelSize: Style.font.icon
                     }
                     Text {
+                      textFormat: Text.PlainText
                       anchors.left: parent.left
                       anchors.leftMargin: Style.space(42)
                       anchors.verticalCenter: parent.verticalCenter
@@ -1986,6 +2023,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               visible: composer.text === ""
               anchors.left: parent.left
               anchors.leftMargin: Style.space(10)
@@ -2012,6 +2050,7 @@ Item {
               ? root.accent : "transparent"
             opacity: root.service && root.service.writing ? 0.45 : 1
             Text {
+              textFormat: Text.PlainText
               anchors.centerIn: parent
               text: "➤"
               color: composer.text.trim() !== "" || root.pendingAttachments.length > 0
@@ -2027,6 +2066,7 @@ Item {
         }
 
         Text {
+          textFormat: Text.PlainText
           visible: root.attachmentError !== ""
             || (!root.demoMode && root.service && root.service.errorText !== "")
           anchors.left: parent.left
@@ -2063,6 +2103,7 @@ Item {
           id: deleteColumn
           spacing: Style.space(12)
           Text {
+            textFormat: Text.PlainText
             text: root.deleteForMe ? "Delete this message for you?"
               : "Delete this message for everyone?"
             color: root.foreground
@@ -2070,6 +2111,7 @@ Item {
             font.pixelSize: Style.font.heading
           }
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: root.deleteForMe
               ? "It will disappear from this device's WhatsApp history."
@@ -2095,6 +2137,7 @@ Item {
                 color: modelData.confirm ? root.urgent
                   : Style.normalFillFor(root.foreground, root.accent)
                 Text {
+                  textFormat: Text.PlainText
                   anchors.centerIn: parent
                   text: modelData.label
                   color: modelData.confirm ? root.background : root.foreground
@@ -2134,12 +2177,14 @@ Item {
         contentItem: Column {
           spacing: Style.space(10)
           Text {
+            textFormat: Text.PlainText
             text: "Create poll"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
           }
           Text {
+            textFormat: Text.PlainText
             text: "Question"
             color: root.dim
             font.family: root.fontFamily
@@ -2161,6 +2206,7 @@ Item {
             }
           }
           Text {
+            textFormat: Text.PlainText
             text: "Options · one per line (2–12)"
             color: root.dim
             font.family: root.fontFamily
@@ -2200,6 +2246,7 @@ Item {
               border.width: 1
               border.color: root.pollMultiple ? root.accent : root.dim
               Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 visible: root.pollMultiple
                 text: "✓"
@@ -2209,6 +2256,7 @@ Item {
               }
             }
             Text {
+              textFormat: Text.PlainText
               anchors.left: parent.left
               anchors.leftMargin: Style.space(30)
               anchors.verticalCenter: parent.verticalCenter
@@ -2236,6 +2284,7 @@ Item {
                 color: modelData.send ? root.accent
                   : Style.normalFillFor(root.foreground, root.accent)
                 Text {
+                  textFormat: Text.PlainText
                   anchors.centerIn: parent
                   text: modelData.label
                   color: modelData.send ? root.background : root.foreground
@@ -2293,6 +2342,7 @@ Item {
             width: parent.width
             height: Style.space(30)
             Text {
+              textFormat: Text.PlainText
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
               text: "Forward message"
@@ -2301,6 +2351,7 @@ Item {
               font.pixelSize: Style.font.heading
             }
             Text {
+              textFormat: Text.PlainText
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               text: "×"
@@ -2343,6 +2394,7 @@ Item {
               color: forwardHover.hovered
                 ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
               Text {
+                textFormat: Text.PlainText
                 anchors.left: parent.left
                 anchors.leftMargin: Style.space(10)
                 anchors.right: parent.right

@@ -17,7 +17,9 @@ Reads open wacli's discovered `wacli.db` with SQLite URI `mode=ro` and
 `PRAGMA query_only=ON`. Every write target must already exist in the local
 `chats` table. Message mutations must additionally resolve inside that exact
 chat. Requests are limited to 64 KiB, message text to 4096 characters, files
-to 100 MiB each, and batches to 10 files.
+to 100 MiB each, and batches to 10 files. wacli, systemctl, and clipboard
+output is drained concurrently under command-specific hard byte caps; an
+over-limit child is killed and reaped before its output reaches JSON parsing.
 
 The helper accepts local absolute paths only. Clipboard images are staged with
 mode `0600` below the user's runtime directory so the composer can preview and
@@ -30,11 +32,13 @@ does not retain the original local path. Keys include both chat and message ID,
 and missing/stale paths are ignored. Group mentions are likewise bounded and
 must resolve to a participant or known sender in the selected indexed group.
 
-`preferences.json` is another atomic mode-`0600` helper file. It stores only
-the online/offline preference and per-chat unread/timestamp acknowledgement
-snapshots. Acknowledgement affects the local notification delta, never
-`wacli.db`; read receipts use `wacli chats mark-read` only after an explicit
-chat-menu action.
+`preferences.json` is another atomic mode-`0600` helper file. State files and
+locks are opened relative to an owner-checked directory descriptor with
+`O_NOFOLLOW`; writes use same-directory descriptor-bound atomic replacement.
+It stores only the online/offline preference and per-chat unread/timestamp
+acknowledgement snapshots. Acknowledgement affects the local notification
+delta, never `wacli.db`; read receipts use `wacli chats mark-read` only after
+an explicit chat-menu action.
 
 ## Writes while sync is live
 
@@ -57,7 +61,8 @@ Typing `@` in a group filters the locally indexed participant list; the chosen
 display name is inserted into the draft while its JID travels separately as a
 real WhatsApp mention. Message body text is read-only selectable text. A stable
 selection is piped directly to `wl-copy`, followed by an in-app confirmation
-toast.
+toast. Every QML `Text` surface explicitly uses `Text.PlainText`, including
+remote chat, sender, message, filename, option, and error values.
 
 The gallery's external action routes readable images to `omasnap --file` when
 Omasnap is present on `PATH`. Videos, documents, and machines without Omasnap

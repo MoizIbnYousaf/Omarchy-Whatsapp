@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -447,7 +448,7 @@ class BackendTests(unittest.TestCase):
 
     def test_offline_mode_persists_and_blocks_whatsapp_writes(self) -> None:
         completed = subprocess.CompletedProcess([], 0, "", "")
-        with mock.patch.object(backend_module.subprocess, "run", return_value=completed) as run:
+        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
             result = self.backend.set_online(False)
         self.assertFalse(result["online"])
         self.assertFalse(self.backend.online())
@@ -456,7 +457,7 @@ class BackendTests(unittest.TestCase):
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Offline mode"):
             self.backend._write(["--json", "chats", "mark-read"], timeout=10)
 
-        with mock.patch.object(backend_module.subprocess, "run", return_value=completed) as run:
+        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
             result = self.backend.set_online(True)
         self.assertTrue(result["online"])
         self.assertTrue(self.backend.online())
@@ -564,6 +565,75 @@ class BackendTests(unittest.TestCase):
              mock.patch.object(backend_module.subprocess, "run") as systemctl:
             self.backend._write(["--json", "send"], timeout=10)
         systemctl.assert_not_called()
+
+    def test_child_output_is_streamed_under_hard_caps(self) -> None:
+        for stream in ("stdout", "stderr"):
+            with self.subTest(stream=stream), \
+                 self.assertRaises(backend_module.ProcessOutputLimitExceeded):
+                backend_module.run_bounded(
+                    [sys.executable, "-c",
+                     f"import sys; sys.{stream}.write('x' * 4097)"],
+                    timeout=5, stdout_limit=4096, stderr_limit=4096,
+                )
+
+        completed = backend_module.run_bounded(
+            [sys.executable, "-c",
+             "import sys; sys.stdout.write('ok'); sys.stderr.write('note')"],
+            timeout=5, stdout_limit=16, stderr_limit=16,
+        )
+        self.assertEqual(completed.stdout, "ok")
+        self.assertEqual(completed.stderr, "note")
+
+    def test_state_json_never_follows_predictable_symlinks(self) -> None:
+        state = self.root / "state"
+        state.mkdir()
+        victim = self.root / "victim.json"
+        victim.write_text('{"online":false}', encoding="utf-8")
+        (state / "preferences.json").symlink_to(victim)
+
+        self.assertTrue(self.backend.online())
+        self.backend._update_preferences(lambda value: value.update({"online": False}))
+        self.assertFalse((state / "preferences.json").is_symlink())
+        self.assertEqual(victim.read_text(encoding="utf-8"), '{"online":false}')
+        self.assertFalse(self.backend.online())
+
+        media_victim = self.root / "media-victim.json"
+        media_victim.write_text('{"foreign":{"local_path":"/etc/passwd"}}',
+                                encoding="utf-8")
+        (state / "sent-media.json").symlink_to(media_victim)
+        self.assertEqual(self.backend._sent_media_hints(), {})
+
+    def test_state_locks_never_follow_predictable_symlinks(self) -> None:
+        state = self.root / "state"
+        state.mkdir()
+        victim = self.root / "lock-victim"
+        victim.write_text("unchanged", encoding="utf-8")
+        (state / "preferences.lock").symlink_to(victim)
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "unsafe state path"):
+            self.backend._update_preferences(lambda value: value.update({"online": False}))
+        self.assertEqual(victim.read_text(encoding="utf-8"), "unchanged")
+
+    def test_state_directory_itself_must_not_be_a_symlink(self) -> None:
+        actual = self.root / "redirected-state"
+        actual.mkdir()
+        (self.root / "state").symlink_to(actual, target_is_directory=True)
+        self.assertTrue(self.backend.online())
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "unsafe state path"):
+            self.backend._update_preferences(lambda value: value.update({"online": False}))
+        self.assertEqual(list(actual.iterdir()), [])
+
+    def test_every_qml_text_surface_is_explicitly_plain(self) -> None:
+        plugin = SCRIPT.parent.parent / "plugins" / "omawhatsapp"
+        missing = []
+        for path in sorted(plugin.glob("*.qml")):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for index, line in enumerate(lines):
+                if line.strip() != "Text {":
+                    continue
+                next_line = lines[index + 1].strip() if index + 1 < len(lines) else ""
+                if next_line != "textFormat: Text.PlainText":
+                    missing.append(f"{path.name}:{index + 1}")
+        self.assertEqual(missing, [])
 
     def test_oversized_message_is_rejected(self) -> None:
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "too long"):

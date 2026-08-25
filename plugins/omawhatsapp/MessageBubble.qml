@@ -121,6 +121,7 @@ Item {
       spacing: Style.space(6)
 
       Text {
+        textFormat: Text.PlainText
         visible: root.message.forwarded === true
         text: "󰜎  Forwarded"
         color: root.dimmer
@@ -130,6 +131,7 @@ Item {
       }
 
       Text {
+        textFormat: Text.PlainText
         visible: !root.message.from_me && root.groupChat
         text: String(root.message.sender || "")
         color: root.accent
@@ -162,12 +164,14 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(2)
           Text {
+            textFormat: Text.PlainText
             text: String(root.message.quoted_sender || "WhatsApp")
             color: root.accent
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
           }
           Text {
+            textFormat: Text.PlainText
             id: quoteText
             width: parent.width
             text: String(root.message.quoted_text || "") !== ""
@@ -243,6 +247,7 @@ Item {
               ? Style.hoverFillFor(root.foreground, root.accent)
               : Qt.rgba(root.background.r, root.background.g, root.background.b, 0.45)
             Text {
+              textFormat: Text.PlainText
               anchors.centerIn: parent
               width: parent.width - Style.space(16)
               text: String(modelData.display_text || "Option " + (index + 1))
@@ -262,6 +267,7 @@ Item {
         anchors.right: parent.right
         spacing: Style.space(6)
         Text {
+          textFormat: Text.PlainText
           visible: root.message.edited === true
           text: "edited"
           color: root.dimmer
@@ -270,6 +276,7 @@ Item {
           font.italic: true
         }
         Text {
+          textFormat: Text.PlainText
           visible: root.message.starred === true
           text: "󰓎"
           color: root.dimmer
@@ -277,12 +284,14 @@ Item {
           font.pixelSize: Style.font.caption
         }
         Text {
+          textFormat: Text.PlainText
           text: root.timestampText
           color: root.dimmer
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }
         Text {
+          textFormat: Text.PlainText
           visible: root.message.from_me
           text: "✓"
           color: root.accent
@@ -326,6 +335,7 @@ Item {
             color: actionHover.hovered
               ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
             Text {
+              textFormat: Text.PlainText
               anchors.centerIn: parent
               text: modelData.icon
               color: root.dim
@@ -380,6 +390,7 @@ Item {
             color: emojiHover.hovered
               ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
             Text {
+              textFormat: Text.PlainText
               anchors.centerIn: parent
               text: modelData
               font.pixelSize: Style.font.body
@@ -431,6 +442,7 @@ Item {
             color: menuHover.hovered
               ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
             Text {
+              textFormat: Text.PlainText
               anchors.left: parent.left
               anchors.leftMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
@@ -480,6 +492,7 @@ Item {
         border.color: modelData.mine ? root.accent
           : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
         Text {
+          textFormat: Text.PlainText
           id: reactionText
           anchors.centerIn: parent
           text: modelData.emoji + (modelData.count > 1 ? " " + modelData.count : "")

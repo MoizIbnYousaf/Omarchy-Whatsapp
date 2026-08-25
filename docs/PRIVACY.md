@@ -11,8 +11,14 @@ must still be reviewed before push.
 Runtime data remains under `~/.local/state/`. Clipboard images use a private
 runtime file, pass through wacli, and are removed in a `finally` path.
 OmaWhatsApp's mode-`0600` preferences contain the offline choice and local
-notification acknowledgements. They never leave the machine and are never
-written into wacli's database.
+notification acknowledgements. State reads and locks are descriptor-bound,
+owner-checked, and no-follow; atomic replacement never follows a predictable
+state-file symlink. They never leave the machine and are never written into
+wacli's database.
+
+Child-process and clipboard pipes are drained incrementally under hard byte
+caps. Chat names, senders, message bodies, filenames, button labels, and error
+strings are always rendered as plain text in QML.
 
 The shipped agent skill contains instructions only—no account, chat, message,
 or media data. Agents must keep local results out of repositories, issues,

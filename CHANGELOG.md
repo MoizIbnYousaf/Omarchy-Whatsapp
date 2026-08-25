@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.1 — 2026-08-24
+
+- Stream wacli, systemctl, and clipboard output under hard byte caps instead
+  of capturing unbounded child output before validation.
+- Read, lock, and atomically replace helper state through descriptor-bound,
+  owner-checked, no-follow file operations.
+- Force every QML `Text` surface to plain-text mode so chat, sender, button,
+  filename, and error strings can never trigger Qt rich-text interpretation.
+- Expand the fixture suite with subprocess-cap, symlink-refusal, and QML
+  plain-text invariants.
+
 ## 0.6.0 — 2026-08-24
 
 - Ship a shared `omawhatsapp` agent skill that lets compatible on-device

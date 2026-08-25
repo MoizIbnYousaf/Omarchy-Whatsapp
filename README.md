@@ -183,7 +183,7 @@ can hide the notification badge entirely.
 ./scripts/test
 ```
 
-The release gate runs 39 backend boundary/write-path tests, 5 offscreen QML
+The release gate runs 44 backend boundary/write-path tests, 5 offscreen QML
 tests, an isolated installer preflight, manifest validation, QML lint, shell
 syntax checks, a diff check, and a heavyweight-runtime dependency guard.
 Installed verification and screenshot rules live in [testing](docs/TESTING.md);

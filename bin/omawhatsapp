@@ -4,20 +4,22 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import closing
+from contextlib import closing, contextmanager
 import fcntl
 import json
 import mimetypes
 import os
 from pathlib import Path
+import selectors
 import secrets
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
 import time
-from typing import Any
+from typing import Any, Iterator, Sequence
 from urllib.parse import quote, unquote, urlparse
 
 
@@ -33,6 +35,12 @@ MAX_MESSAGE = 4096
 MAX_FILE = 100 * 1024 * 1024
 MAX_ATTACHMENTS = 10
 MAX_SENT_MEDIA_HINTS = 2000
+MAX_WACLI_OUTPUT = 1024 * 1024
+MAX_PROCESS_ERROR = 64 * 1024
+MAX_CLIPBOARD_TYPES = 64 * 1024
+MAX_CLIPBOARD_TEXT = MAX_MESSAGE * 4
+MAX_PREFERENCES = 1024 * 1024
+MAX_SENT_MEDIA_STATE = 2 * 1024 * 1024
 PREFERENCES_VERSION = 1
 SUPPORTED_CHAT_WHERE = """(chats.kind = 'dm' OR (
   chats.kind = 'group'
@@ -42,6 +50,10 @@ SUPPORTED_CHAT_WHERE = """(chats.kind = 'dm' OR (
 
 
 class OmaWhatsAppError(RuntimeError):
+    pass
+
+
+class ProcessOutputLimitExceeded(RuntimeError):
     pass
 
 
@@ -76,6 +88,78 @@ def request() -> dict[str, Any]:
     return value
 
 
+def run_bounded(
+    command: Sequence[str],
+    *,
+    timeout: float,
+    stdout_limit: int,
+    stderr_limit: int = MAX_PROCESS_ERROR,
+    text: bool = True,
+) -> subprocess.CompletedProcess[Any]:
+    """Run a child while draining both pipes under hard in-memory byte caps."""
+    process = subprocess.Popen(
+        list(command),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        close_fds=True,
+    )
+    if process.stdout is None or process.stderr is None:
+        process.kill()
+        process.wait()
+        raise OmaWhatsAppError("The helper process could not be started safely.")
+
+    stdout_descriptor = process.stdout.fileno()
+    stderr_descriptor = process.stderr.fileno()
+    streams = {stdout_descriptor: (process.stdout, stdout_limit, bytearray()),
+               stderr_descriptor: (process.stderr, stderr_limit, bytearray())}
+    selector = selectors.DefaultSelector()
+    deadline = time.monotonic() + timeout
+    try:
+        for descriptor in streams:
+            os.set_blocking(descriptor, False)
+            selector.register(descriptor, selectors.EVENT_READ)
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(list(command), timeout)
+            events = selector.select(remaining)
+            if not events:
+                raise subprocess.TimeoutExpired(list(command), timeout)
+            for key, _ in events:
+                descriptor = int(key.fd)
+                stream, limit, output = streams[descriptor]
+                try:
+                    chunk = os.read(descriptor, min(65_536, limit - len(output) + 1))
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(descriptor)
+                    stream.close()
+                    continue
+                output.extend(chunk)
+                if len(output) > limit:
+                    raise ProcessOutputLimitExceeded(
+                        f"Child output exceeded its {limit}-byte limit"
+                    )
+        returncode = process.wait(timeout=max(0.01, deadline - time.monotonic()))
+    except (ProcessOutputLimitExceeded, subprocess.TimeoutExpired):
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        selector.close()
+        for stream, _, _ in streams.values():
+            if not stream.closed:
+                stream.close()
+
+    stdout_bytes = bytes(streams[stdout_descriptor][2])
+    stderr_bytes = bytes(streams[stderr_descriptor][2])
+    stdout: Any = stdout_bytes.decode("utf-8", "replace") if text else stdout_bytes
+    stderr: Any = stderr_bytes.decode("utf-8", "replace") if text else stderr_bytes
+    return subprocess.CompletedProcess(list(command), returncode, stdout, stderr)
+
+
 class Backend:
     def __init__(
         self,
@@ -87,19 +171,122 @@ class Backend:
         self.state_dir = state_dir
         self.wacli = wacli
 
+    @contextmanager
+    def _state_directory(self, *, create: bool) -> Iterator[int]:
+        if create:
+            self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(self.state_dir, flags)
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid():
+                raise OSError("OmaWhatsApp state directory is not privately owned")
+            if create:
+                os.fchmod(descriptor, 0o700)
+            yield descriptor
+        finally:
+            os.close(descriptor)
+
+    def _read_state_json(self, name: str, limit: int, default: Any) -> Any:
+        flags = os.O_RDONLY | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = -1
+        try:
+            with self._state_directory(create=False) as directory:
+                descriptor = os.open(name, flags, dir_fd=directory)
+                metadata = os.fstat(descriptor)
+                if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid()
+                        or metadata.st_nlink != 1 or metadata.st_size > limit):
+                    return default
+                output = bytearray()
+                while len(output) <= limit:
+                    chunk = os.read(descriptor, min(65_536, limit - len(output) + 1))
+                    if not chunk:
+                        break
+                    output.extend(chunk)
+                if len(output) > limit:
+                    return default
+                return json.loads(bytes(output).decode("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return default
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+    def _write_state_json(self, name: str, value: Any, limit: int) -> None:
+        encoded = json.dumps(
+            value, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+        if len(encoded) > limit:
+            raise OmaWhatsAppError("OmaWhatsApp state exceeded its safe size limit.")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        temporary = ""
+        descriptor = -1
+        with self._state_directory(create=True) as directory:
+            try:
+                for _ in range(16):
+                    temporary = f".{name}.{secrets.token_hex(12)}.tmp"
+                    try:
+                        descriptor = os.open(temporary, flags, 0o600, dir_fd=directory)
+                        break
+                    except FileExistsError:
+                        continue
+                if descriptor < 0:
+                    raise OmaWhatsAppError("OmaWhatsApp could not create private state.")
+                os.fchmod(descriptor, 0o600)
+                view = memoryview(encoded)
+                while view:
+                    written = os.write(descriptor, view)
+                    view = view[written:]
+                os.fsync(descriptor)
+                os.close(descriptor)
+                descriptor = -1
+                os.replace(temporary, name, src_dir_fd=directory, dst_dir_fd=directory)
+                temporary = ""
+                os.fsync(directory)
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
+                if temporary:
+                    try:
+                        os.unlink(temporary, dir_fd=directory)
+                    except OSError:
+                        pass
+
+    @contextmanager
+    def _state_lock(self, name: str) -> Iterator[None]:
+        flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = -1
+        try:
+            with self._state_directory(create=True) as directory:
+                descriptor = os.open(name, flags, 0o600, dir_fd=directory)
+                metadata = os.fstat(descriptor)
+                if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid()
+                        or metadata.st_nlink != 1):
+                    raise OmaWhatsAppError("OmaWhatsApp refused an unsafe state lock.")
+                os.fchmod(descriptor, 0o600)
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                yield
+        except OSError as exc:
+            raise OmaWhatsAppError("OmaWhatsApp refused an unsafe state path.") from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
     def _preferences(self) -> dict[str, Any]:
-        path = self.state_dir / "preferences.json"
         default: dict[str, Any] = {
             "version": PREFERENCES_VERSION,
             "online": True,
             "acknowledged_unread": {},
         }
-        try:
-            if path.stat().st_size > 1024 * 1024:
-                return default
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            return default
+        value = self._read_state_json("preferences.json", MAX_PREFERENCES, default)
         if not isinstance(value, dict):
             return default
         acknowledged = value.get("acknowledged_unread")
@@ -121,30 +308,10 @@ class Backend:
         }
 
     def _write_preferences(self, value: dict[str, Any]) -> None:
-        self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.state_dir, 0o700)
-        descriptor, temporary = tempfile.mkstemp(prefix="preferences.", dir=self.state_dir)
-        try:
-            os.fchmod(descriptor, 0o600)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(value, handle, ensure_ascii=False, separators=(",", ":"))
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.state_dir / "preferences.json")
-        except Exception:
-            try:
-                os.unlink(temporary)
-            except OSError:
-                pass
-            raise
+        self._write_state_json("preferences.json", value, MAX_PREFERENCES)
 
     def _update_preferences(self, update: Any) -> dict[str, Any]:
-        self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.state_dir, 0o700)
-        lock_path = self.state_dir / "preferences.lock"
-        with lock_path.open("a+b") as handle:
-            os.chmod(lock_path, 0o600)
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        with self._state_lock("preferences.lock"):
             value = self._preferences()
             update(value)
             self._write_preferences(value)
@@ -159,13 +326,7 @@ class Backend:
         return f"{jid}\n{message_id}"
 
     def _sent_media_hints(self) -> dict[str, dict[str, Any]]:
-        path = self.state_dir / "sent-media.json"
-        try:
-            if path.stat().st_size > 2 * 1024 * 1024:
-                return {}
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            return {}
+        value = self._read_state_json("sent-media.json", MAX_SENT_MEDIA_STATE, {})
         if not isinstance(value, dict):
             return {}
         clean: dict[str, dict[str, Any]] = {}
@@ -192,8 +353,6 @@ class Backend:
         target = message_id.strip()
         if not target:
             return
-        self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.state_dir, 0o700)
         hints = self._sent_media_hints()
         hints[self._media_hint_key(jid, target)] = {
             "local_path": str(path),
@@ -209,35 +368,24 @@ class Backend:
         if len(hints) > MAX_SENT_MEDIA_HINTS:
             ordered = sorted(hints.items(), key=lambda pair: int(pair[1].get("saved_at") or 0))
             hints = dict(ordered[-MAX_SENT_MEDIA_HINTS:])
-        descriptor, temporary = tempfile.mkstemp(prefix="sent-media.", dir=self.state_dir)
-        try:
-            os.fchmod(descriptor, 0o600)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(hints, handle, ensure_ascii=False, separators=(",", ":"))
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.state_dir / "sent-media.json")
-        except Exception:
-            try:
-                os.unlink(temporary)
-            except OSError:
-                pass
-            raise
+        self._write_state_json("sent-media.json", hints, MAX_SENT_MEDIA_STATE)
 
     def _run(self, args: list[str], *, timeout: float = 30) -> subprocess.CompletedProcess[str]:
         if not self.wacli.is_file() or not os.access(self.wacli, os.X_OK):
             raise OmaWhatsAppError("wacli is not installed.")
         try:
-            return subprocess.run(
+            return run_bounded(
                 [str(self.wacli), *args],
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
                 timeout=timeout,
-                check=False,
+                stdout_limit=MAX_WACLI_OUTPUT,
+                stderr_limit=MAX_PROCESS_ERROR,
             )
+        except ProcessOutputLimitExceeded as exc:
+            raise OmaWhatsAppError("WhatsApp returned too much data.") from exc
         except subprocess.TimeoutExpired as exc:
             raise OmaWhatsAppError("WhatsApp took too long to respond.") from exc
+        except OSError as exc:
+            raise OmaWhatsAppError("wacli could not be started.") from exc
 
     @staticmethod
     def _locked(result: subprocess.CompletedProcess[str]) -> bool:
@@ -261,12 +409,7 @@ class Backend:
         result = self._run(args, timeout=timeout)
         if not self._locked(result):
             return result
-        self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.state_dir, 0o700)
-        lock_path = self.state_dir / "write.lock"
-        with lock_path.open("a+b") as handle:
-            os.chmod(lock_path, 0o600)
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        with self._state_lock("write.lock"):
             result = self._run(args, timeout=timeout)
             if not self._locked(result):
                 return result
@@ -473,16 +616,18 @@ class Backend:
     def set_online(self, online: bool) -> dict[str, Any]:
         command = "enable" if online else "disable"
         try:
-            result = subprocess.run(
+            result = run_bounded(
                 [str(SYSTEMCTL), "--user", command, "--now", "wacli-sync.service"],
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
                 timeout=20,
-                check=False,
+                stdout_limit=16 * 1024,
+                stderr_limit=MAX_PROCESS_ERROR,
             )
+        except ProcessOutputLimitExceeded as exc:
+            raise OmaWhatsAppError("Background sync returned too much output.") from exc
         except subprocess.TimeoutExpired as exc:
             raise OmaWhatsAppError("Background sync took too long to change mode.") from exc
+        except OSError as exc:
+            raise OmaWhatsAppError("Background sync mode could not be changed.") from exc
         if result.returncode != 0:
             raise OmaWhatsAppError(clean_error(result.stderr, "Background sync mode could not be changed."))
 
@@ -1058,30 +1203,45 @@ class Backend:
         if not WL_PASTE.is_file():
             raise OmaWhatsAppError("Clipboard support is not installed.")
         try:
-            result = subprocess.run([str(WL_PASTE), "--list-types"], text=True,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3, check=False)
+            result = run_bounded(
+                [str(WL_PASTE), "--list-types"], timeout=3,
+                stdout_limit=MAX_CLIPBOARD_TYPES, stderr_limit=16 * 1024,
+            )
+        except ProcessOutputLimitExceeded as exc:
+            raise OmaWhatsAppError("The clipboard advertised too many content types.") from exc
         except subprocess.TimeoutExpired as exc:
             raise OmaWhatsAppError("The clipboard did not respond.") from exc
+        except OSError as exc:
+            raise OmaWhatsAppError("The clipboard could not be read.") from exc
+        if result.returncode != 0:
+            raise OmaWhatsAppError("The clipboard could not be read.")
         return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
     @staticmethod
-    def _clipboard(mime: str) -> bytes:
+    def _clipboard(mime: str, limit: int = MAX_FILE) -> bytes:
         try:
-            result = subprocess.run([str(WL_PASTE), "--type", mime], stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, timeout=15, check=False)
+            result = run_bounded(
+                [str(WL_PASTE), "--type", mime], timeout=15,
+                stdout_limit=limit, stderr_limit=16 * 1024, text=False,
+            )
+        except ProcessOutputLimitExceeded as exc:
+            raise OmaWhatsAppError(
+                f"The pasted content is too large (maximum {limit // (1024 * 1024) or limit}"
+                f"{' MB' if limit >= 1024 * 1024 else ' bytes'})."
+            ) from exc
         except subprocess.TimeoutExpired as exc:
             raise OmaWhatsAppError("The clipboard did not respond.") from exc
+        except OSError as exc:
+            raise OmaWhatsAppError("The clipboard could not be read.") from exc
         if result.returncode != 0:
             raise OmaWhatsAppError("The clipboard could not be read.")
-        if len(result.stdout) > MAX_FILE:
-            raise OmaWhatsAppError("The pasted content is too large (maximum 100 MB).")
         return result.stdout
 
     def paste(self, jid: str) -> dict[str, Any]:
         self._chat(jid)
         types = self._clipboard_types()
         if "text/uri-list" in types:
-            raw = self._clipboard("text/uri-list").decode("utf-8", "replace")
+            raw = self._clipboard("text/uri-list", MAX_CLIPBOARD_TYPES).decode("utf-8", "replace")
             for line in raw.splitlines():
                 if not line or line.startswith("#"):
                     continue
@@ -1109,7 +1269,8 @@ class Backend:
                           if kind in types), None)
         if text_type:
             return {"ok": True, "kind": "text",
-                    "text": self._clipboard(text_type).decode("utf-8", "replace")[:MAX_MESSAGE]}
+                    "text": self._clipboard(text_type, MAX_CLIPBOARD_TEXT)
+                    .decode("utf-8", "replace")[:MAX_MESSAGE]}
         raise OmaWhatsAppError("The clipboard has no text, image, or local file to paste.")
 
     def auth(self) -> int:

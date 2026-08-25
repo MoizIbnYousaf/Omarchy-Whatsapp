@@ -151,6 +151,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               visible: !albumImage.visible || albumImage.status === Image.Error
               anchors.centerIn: parent
               width: parent.width - Style.space(18)
@@ -170,6 +171,7 @@ Item {
               radius: width / 2
               color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.82)
               Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: "▶"
                 color: root.foreground
@@ -184,6 +186,7 @@ Item {
               anchors.fill: parent
               color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.66)
               Text {
+                textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: "+" + String(Number(root.message.album_count) - 3)
                 color: root.foreground
@@ -226,6 +229,7 @@ Item {
         smooth: true
       }
       Text {
+        textFormat: Text.PlainText
         visible: imagePreview.status === Image.Error
         anchors.centerIn: parent
         width: parent.width - Style.space(24)
@@ -263,6 +267,7 @@ Item {
         smooth: true
       }
       Text {
+        textFormat: Text.PlainText
         visible: animatedPreview.status === Image.Error
         anchors.centerIn: parent
         width: parent.width - Style.space(24)
@@ -282,6 +287,7 @@ Item {
         radius: height / 2
         color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.82)
         Text {
+          textFormat: Text.PlainText
           id: gifLabel
           anchors.centerIn: parent
           text: root.mediaType === "sticker" ? "sticker" : "GIF"
@@ -327,6 +333,7 @@ Item {
       }
 
       Text {
+        textFormat: Text.PlainText
         visible: player.error !== MediaPlayer.NoError
         anchors.centerIn: parent
         width: parent.width - Style.space(24)
@@ -347,6 +354,7 @@ Item {
         radius: height / 2
         color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.82)
         Text {
+          textFormat: Text.PlainText
           id: videoLabel
           anchors.centerIn: parent
           text: root.gifVideo ? "GIF" : (player.playing ? "Ⅱ" : "▶ video")
@@ -386,6 +394,7 @@ Item {
         radius: width / 2
         color: root.accent
         Text {
+          textFormat: Text.PlainText
           anchors.centerIn: parent
           text: audioPlayer.playing ? "Ⅱ" : "▶"
           color: root.background
@@ -406,6 +415,7 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: Style.space(5)
         Text {
+          textFormat: Text.PlainText
           text: root.label()
           color: root.foreground
           elide: Text.ElideRight
@@ -443,6 +453,7 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: Style.space(9)
         Text {
+          textFormat: Text.PlainText
           text: "󰈔"
           color: root.accent
           font.family: root.fontFamily
@@ -452,6 +463,7 @@ Item {
           width: parent.width - Style.space(36)
           spacing: Style.space(2)
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: root.label()
             color: root.foreground
@@ -460,6 +472,7 @@ Item {
             font.pixelSize: Style.font.caption
           }
           Text {
+            textFormat: Text.PlainText
             text: root.humanSize(root.message.file_size)
             color: root.dimmer
             font.family: root.fontFamily
@@ -490,6 +503,7 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: Style.space(10)
         Text {
+          textFormat: Text.PlainText
           text: root.unavailable ? "󰚌" : (root.busy ? "…" : "󰇚")
           color: root.unavailable ? root.dimmer : root.accent
           font.family: root.fontFamily
@@ -499,6 +513,7 @@ Item {
           width: parent.width - Style.space(40)
           spacing: Style.space(3)
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: root.label()
             color: root.foreground
@@ -507,6 +522,7 @@ Item {
             font.pixelSize: Style.font.caption
           }
           Text {
+            textFormat: Text.PlainText
             text: root.unavailable ? "No longer available from WhatsApp"
               : (root.busy ? "Downloading…" : "Click to download"
                 + (root.humanSize(root.message.file_size) !== ""
@@ -536,12 +552,14 @@ Item {
         anchors.centerIn: parent
         spacing: Style.space(8)
         Text {
+          textFormat: Text.PlainText
           text: "󰍎"
           color: root.accent
           font.family: root.fontFamily
           font.pixelSize: Style.font.icon
         }
         Text {
+          textFormat: Text.PlainText
           text: "Location"
           color: root.foreground
           font.family: root.fontFamily
