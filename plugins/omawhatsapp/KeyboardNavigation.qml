@@ -49,6 +49,10 @@ QtObject {
     return chatIndex
   }
 
+  function wantsChatSearch(key, textEntryActive) {
+    return context === "chats" && textEntryActive !== true && key === Qt.Key_Slash
+  }
+
   function backTarget() {
     if (context === "composer" || context === "message-search") return "messages"
     if (context === "messages" || context === "chat-search") return "chats"

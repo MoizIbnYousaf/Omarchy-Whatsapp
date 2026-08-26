@@ -30,7 +30,8 @@ wacli help tree before the offscreen QML tests.
    and the local archive remains readable while offline.
 3. Open with `Super+Shift+W`; switch between a direct message and a group.
    From the chat list, use J/K and Enter; verify focus lands in the composer and
-   the next printable key is inserted without another click or shortcut.
+   the next printable key is inserted without another click or shortcut. Press
+   `/` from the list, type a chat query, then press Escape to return to J/K.
 4. Click the bar item and verify the mini client is anchored to that item.
    Check J/K, arrows, `/` search, Escape, outside-click dismissal, entering a
    conversation, composer focus, demo sending, clipboard staging, and `O`

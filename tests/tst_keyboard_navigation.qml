@@ -53,4 +53,14 @@ TestCase {
     compare(navigation.context, "composer")
     compare(navigation.backTarget(), "messages")
   }
+
+  function test_slash_search_is_only_armed_from_the_chat_list() {
+    var navigation = createTemporaryObject(navigationComponent, testCase)
+    navigation.enterChats(3, 1)
+    verify(navigation.wantsChatSearch(Qt.Key_Slash, false))
+    verify(!navigation.wantsChatSearch(Qt.Key_Slash, true))
+    verify(!navigation.wantsChatSearch(Qt.Key_J, false))
+    navigation.enterMessages(3)
+    verify(!navigation.wantsChatSearch(Qt.Key_Slash, false))
+  }
 }

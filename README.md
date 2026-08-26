@@ -186,6 +186,7 @@ Add the `Super+Shift+W` binding from
 | `Ctrl+F` | Find in the current conversation |
 | `Ctrl+1` … `Ctrl+9` | Jump to that visible chat (search order respected) |
 | `Ctrl+B` | Collapse or restore the chat rail without losing context |
+| Chat list `/` | Focus chat search; `Esc` returns to list navigation |
 | `C` | Focus the composer |
 | `Enter` / `Shift+Enter` | Send / add a line |
 | `@`, then arrows + `Enter` | Find and mention a group member |

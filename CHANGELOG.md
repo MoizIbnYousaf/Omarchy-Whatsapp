@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.2 — 2026-08-26
+
+- Press `/` from the full-app chat list to focus chat search immediately;
+  Escape returns to the J/K navigation layer.
+- Keep slash inert while typing and outside the chat-list context, with an
+  offscreen keyboard regression test for the complete transition.
+
 ## 0.8.1 — 2026-08-26
 
 - Use the same crisp, theme-native WhatsApp mark in the bar, compact client,

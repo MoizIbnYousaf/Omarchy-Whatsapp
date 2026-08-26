@@ -301,6 +301,18 @@ Item {
       chatList.positionViewAtIndex(root.chatCursorIndex, ListView.Contain)
   }
 
+  function focusChatSearch() {
+    if (root.narrow) {
+      root.narrowConversation = false
+      root.narrowSearchOpen = false
+    } else if (root.sidebarCollapsed) {
+      root.sidebarCollapsed = false
+    }
+    keyboardNavigation.enterChatSearch()
+    chatSearchField.forceActiveFocus()
+    chatSearchField.selectAll()
+  }
+
   function goBack() {
     if (settingsOpen) {
       settingsOpen = false
@@ -974,6 +986,9 @@ Item {
         } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_F) {
           messageSearchField.forceActiveFocus()
           messageSearchField.selectAll()
+          event.accepted = true
+        } else if (keyboardNavigation.wantsChatSearch(event.key, root.textEntryActive)) {
+          root.focusChatSearch()
           event.accepted = true
         } else if (event.key === Qt.Key_C && !root.textEntryActive) {
           root.focusComposer()
