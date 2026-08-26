@@ -424,7 +424,7 @@ Panel {
               Text {
                 textFormat: Text.PlainText
                 anchors.centerIn: parent
-                text: "󰠮"
+                text: "󰖣"
                 color: root.accent
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.title

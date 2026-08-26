@@ -85,8 +85,8 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: root.vertical
-      ? "󰠮"
-      : "󰠮" + (root.available && root.showUnreadCount && root.unreadCount > 0
+      ? "󰖣"
+      : "󰖣" + (root.available && root.showUnreadCount && root.unreadCount > 0
         ? " " + (root.unreadCount > 99 ? "99+" : root.unreadCount) : "")
     active: root.available && root.unreadCount > 0
     horizontalMargin: 8

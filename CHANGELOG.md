@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.1 — 2026-08-26
+
+- Use the same crisp, theme-native WhatsApp mark in the bar, compact client,
+  and full app instead of mixing the brand mark with a generic group glyph.
+- Guard the three branded surfaces in the release test so their identity stays
+  visually consistent across future UI work.
+
 ## 0.8.0 — 2026-08-26
 
 - Replace the bar item's full-window launch with a compact, bar-anchored mini

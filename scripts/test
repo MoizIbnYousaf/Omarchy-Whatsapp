@@ -52,6 +52,13 @@ rg -q 'plugin_root/\$install_plugin_dir.*plugin_root/\$source_plugin_dir' script
   exit 1
 }
 
+for branded_surface in BarWidget.qml Dropdown.qml App.qml; do
+  rg -q '󰖣' "plugins/omawhatsapp/$branded_surface" || {
+    echo "test: $branded_surface must use the WhatsApp brand mark" >&2
+    exit 1
+  }
+done
+
 rg -q '"setpriv", "--pdeathsig", "TERM"' plugins/omawhatsapp/Service.qml || {
   echo "test: store watcher must die with the Omarchy shell" >&2
   exit 1
