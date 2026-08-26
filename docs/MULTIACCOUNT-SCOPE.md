@@ -222,14 +222,36 @@ All five steps landed in 0.9.0 and 0.10.0:
 5. Architecture, technical, privacy, testing, README, skill, and changelog
    notes describe the account boundary.
 
+## Verified against two real accounts
+
+Two linked phones were run side by side: the original session, registered with
+`store: .`, plus a second account added afterwards. The merged rail ordered
+both accounts correctly, the badge aggregated, and the new account adopted its
+watermark silently instead of replaying its history as popups. Several chats
+were reachable from both phones, and each kept its own local state, which is
+what keying state by store rather than by account name buys.
+
+That run also found two defects a single account could never surface:
+
+- `status` aggregated `sync_active`, so the header pill claimed "online" for an
+  account whose own sync was down while a sibling account synced. Readiness
+  stays aggregated; anything a surface describes is now per account.
+- The sync units treated a held store lock as a failure and restarted every ten
+  seconds. A foreground `accounts add` bootstrapping history holds that lock for
+  as long as the history takes, so the unit failed and restarted for as long as
+  the bootstrap ran. `--lock-wait` makes the unit wait inside the process and
+  start the moment the lock frees.
+
+Passing `--lock-wait` on the helper's own writes was considered and rejected:
+`sync --follow` holds the store lock continuously, so a write that is not
+delegated to its companion socket will always collide, and waiting would only
+add latency before the unavoidable pause-write-restart fallback.
+
 ## Still open
 
-- None of this has run against two real linked accounts yet. The suites cover
-  two stores with a stubbed account list; a second phone is what would exercise
-  session handling, the store lock across instances, and per-instance sync.
-- An account whose store lives outside wacli's state directory needs a
-  systemd drop-in adding that path to `ReadWritePaths`. The template documents
-  it rather than guessing.
+- An account whose store lives outside wacli's state directory needs a systemd
+  drop-in adding that path to `ReadWritePaths`. The template documents it
+  rather than guessing.
 - The full window has no account switcher, by design: the rail is merged and
   the open chat decides the account. If per-account filtering is ever wanted,
   the rows already carry what a filter would need.
