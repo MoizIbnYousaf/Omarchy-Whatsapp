@@ -10,6 +10,7 @@ import json
 import mimetypes
 import os
 from pathlib import Path
+import re
 import selectors
 import secrets
 import shutil
@@ -48,7 +49,136 @@ SUPPORTED_CHAT_WHERE = """(chats.kind = 'dm' OR (
   AND COALESCE(groups.linked_parent_jid, '') = ''
 ))"""
 
+WACLI_PARITY_VERSION = "0.17.1"
+WACLI_GLOBAL_FLAGS = frozenset({
+    "--account", "--events", "--full", "--json", "--lock-wait",
+    "--read-only", "--store", "--timeout",
+})
+WACLI_CHAT_TO_OPERATIONS = frozenset({
+    ("messages", "forward"),
+    ("poll", "show"),
+    ("poll", "vote"),
+    ("presence", "paused"),
+    ("presence", "typing"),
+    ("send", "file"),
+    ("send", "location"),
+    ("send", "poll"),
+    ("send", "react"),
+    ("send", "select"),
+    ("send", "sticker"),
+    ("send", "text"),
+    ("send", "voice"),
+})
 
+# Every user-facing leaf in wacli 0.17.1 is classified here. Unknown leaves
+# fail closed; a future wacli release can therefore never silently broaden an
+# agent's mutation surface. A few flag-dependent operations are narrowed by
+# _transport_policy (for example, cleanup --dry-run is a local read).
+WACLI_OPERATION_POLICIES: dict[tuple[str, ...], str] = {
+    ("accounts", "add"): "interactive",
+    ("accounts", "list"): "local-read",
+    ("accounts", "remove"): "destructive",
+    ("accounts", "show"): "local-read",
+    ("accounts", "use"): "local-write",
+    ("auth",): "interactive",
+    ("auth", "logout"): "destructive",
+    ("auth", "status"): "local-read",
+    ("calls", "list"): "local-read",
+    ("channels", "info"): "remote-read",
+    ("channels", "join"): "whatsapp-write",
+    ("channels", "leave"): "destructive",
+    ("channels", "list"): "remote-read",
+    ("chats", "archive"): "whatsapp-write",
+    ("chats", "cleanup"): "local-write",
+    ("chats", "list"): "local-read",
+    ("chats", "mark-read"): "whatsapp-write",
+    ("chats", "mark-unread"): "whatsapp-write",
+    ("chats", "mute"): "whatsapp-write",
+    ("chats", "pin"): "whatsapp-write",
+    ("chats", "show"): "local-read",
+    ("chats", "unarchive"): "whatsapp-write",
+    ("chats", "unmute"): "whatsapp-write",
+    ("chats", "unpin"): "whatsapp-write",
+    ("completion", "bash"): "local-read",
+    ("completion", "fish"): "local-read",
+    ("completion", "powershell"): "local-read",
+    ("completion", "zsh"): "local-read",
+    ("contacts", "alias", "rm"): "local-write",
+    ("contacts", "alias", "set"): "local-write",
+    ("contacts", "check"): "remote-read",
+    ("contacts", "import-system"): "local-write",
+    ("contacts", "refresh"): "local-write",
+    ("contacts", "search"): "local-read",
+    ("contacts", "show"): "local-read",
+    ("contacts", "tags", "add"): "local-write",
+    ("contacts", "tags", "rm"): "local-write",
+    ("docs",): "local-read",
+    ("doctor",): "local-read",
+    ("groups", "announce-only"): "whatsapp-write",
+    ("groups", "create"): "whatsapp-write",
+    ("groups", "description"): "whatsapp-write",
+    ("groups", "info"): "remote-read",
+    ("groups", "invite", "link", "get"): "remote-read",
+    ("groups", "invite", "link", "revoke"): "destructive",
+    ("groups", "join"): "whatsapp-write",
+    ("groups", "leave"): "destructive",
+    ("groups", "list"): "local-read",
+    ("groups", "locked"): "whatsapp-write",
+    ("groups", "participants", "add"): "whatsapp-write",
+    ("groups", "participants", "demote"): "destructive",
+    ("groups", "participants", "promote"): "whatsapp-write",
+    ("groups", "participants", "remove"): "destructive",
+    ("groups", "prune"): "local-write",
+    ("groups", "refresh"): "remote-read",
+    ("groups", "rename"): "whatsapp-write",
+    ("groups", "requests", "approve"): "whatsapp-write",
+    ("groups", "requests", "list"): "remote-read",
+    ("groups", "requests", "reject"): "destructive",
+    ("groups", "topic"): "whatsapp-write",
+    ("help",): "local-read",
+    ("history", "backfill"): "sync",
+    ("history", "coverage"): "local-read",
+    ("history", "fill"): "sync",
+    ("media", "backfill"): "sync",
+    ("media", "download"): "sync",
+    ("media", "retry"): "sync",
+    ("messages", "context"): "local-read",
+    ("messages", "delete"): "destructive",
+    ("messages", "edit"): "whatsapp-write",
+    ("messages", "export"): "local-read",
+    ("messages", "forward"): "whatsapp-write",
+    ("messages", "list"): "local-read",
+    ("messages", "purge"): "destructive",
+    ("messages", "revoke"): "destructive",
+    ("messages", "search"): "local-read",
+    ("messages", "show"): "local-read",
+    ("messages", "starred"): "local-read",
+    ("poll", "show"): "local-read",
+    ("poll", "vote"): "whatsapp-write",
+    ("polls", "list"): "local-read",
+    ("presence", "paused"): "whatsapp-write",
+    ("presence", "typing"): "whatsapp-write",
+    ("profile", "business"): "remote-read",
+    ("profile", "get-about"): "remote-read",
+    ("profile", "picture-info"): "remote-read",
+    ("profile", "remove-picture"): "destructive",
+    ("profile", "set-about"): "whatsapp-write",
+    ("profile", "set-name"): "whatsapp-write",
+    ("profile", "set-picture"): "whatsapp-write",
+    ("send", "file"): "whatsapp-write",
+    ("send", "location"): "whatsapp-write",
+    ("send", "poll"): "whatsapp-write",
+    ("send", "react"): "whatsapp-write",
+    ("send", "select"): "whatsapp-write",
+    ("send", "status"): "whatsapp-write",
+    ("send", "sticker"): "whatsapp-write",
+    ("send", "text"): "whatsapp-write",
+    ("send", "voice"): "whatsapp-write",
+    ("store", "cleanup"): "destructive",
+    ("store", "stats"): "local-read",
+    ("sync",): "sync",
+    ("version",): "local-read",
+}
 class OmaWhatsAppError(RuntimeError):
     pass
 
@@ -386,15 +516,22 @@ class Backend:
             hints = dict(ordered[-MAX_SENT_MEDIA_HINTS:])
         self._write_state_json("sent-media.json", hints, MAX_SENT_MEDIA_STATE)
 
-    def _run(self, args: list[str], *, timeout: float = 30) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self,
+        args: list[str],
+        *,
+        timeout: float = 30,
+        stdout_limit: int = MAX_WACLI_OUTPUT,
+        stderr_limit: int = MAX_PROCESS_ERROR,
+    ) -> subprocess.CompletedProcess[str]:
         if not self.wacli.is_file() or not os.access(self.wacli, os.X_OK):
             raise OmaWhatsAppError("wacli is not installed.")
         try:
             return run_bounded(
                 [str(self.wacli), *args],
                 timeout=timeout,
-                stdout_limit=MAX_WACLI_OUTPUT,
-                stderr_limit=MAX_PROCESS_ERROR,
+                stdout_limit=stdout_limit,
+                stderr_limit=stderr_limit,
             )
         except ProcessOutputLimitExceeded as exc:
             raise OmaWhatsAppError("WhatsApp returned too much data.") from exc
@@ -418,15 +555,31 @@ class Backend:
         )
         return result.returncode == 0
 
-    def _write(self, args: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
-        if not self.online():
-            raise OmaWhatsAppError("Offline mode is on. Go online before sending or changing WhatsApp state.")
+    def _mutate(
+        self,
+        args: list[str],
+        *,
+        timeout: float,
+        require_online: bool,
+        stdout_limit: int = MAX_WACLI_OUTPUT,
+        stderr_limit: int = MAX_PROCESS_ERROR,
+    ) -> subprocess.CompletedProcess[str]:
+        if require_online and not self.online():
+            raise OmaWhatsAppError(
+                "Offline mode is on. Go online before connecting to or changing WhatsApp."
+            )
         # wacli delegates supported mutations to sync --follow's companion socket.
-        result = self._run(args, timeout=timeout)
+        result = self._run(
+            args, timeout=timeout, stdout_limit=stdout_limit,
+            stderr_limit=stderr_limit,
+        )
         if not self._locked(result):
             return result
         with self._state_lock("write.lock"):
-            result = self._run(args, timeout=timeout)
+            result = self._run(
+                args, timeout=timeout, stdout_limit=stdout_limit,
+                stderr_limit=stderr_limit,
+            )
             if not self._locked(result):
                 return result
             active = self._sync_active()
@@ -442,7 +595,10 @@ class Backend:
                     raise OmaWhatsAppError("OmaWhatsApp could not pause background sync.")
             try:
                 for attempt in range(5):
-                    result = self._run(args, timeout=timeout)
+                    result = self._run(
+                        args, timeout=timeout, stdout_limit=stdout_limit,
+                        stderr_limit=stderr_limit,
+                    )
                     if not self._locked(result) or attempt == 4:
                         return result
                     time.sleep(0.15)
@@ -456,6 +612,9 @@ class Backend:
                         check=False,
                     )
         return result
+
+    def _write(self, args: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+        return self._mutate(args, timeout=timeout, require_online=True)
 
     def _doctor(self) -> dict[str, Any]:
         result = self._run(["--read-only", "--json", "doctor"])
@@ -516,6 +675,25 @@ class Backend:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
         if row is None:
             raise OmaWhatsAppError("That chat is not available in the local WhatsApp index.")
+        return {"jid": str(row["jid"]), "name": str(row["name"]), "kind": str(row["kind"])}
+
+    def _chat_any(self, jid: str) -> dict[str, str]:
+        target = jid.strip()
+        if not target or len(target) > 160:
+            raise OmaWhatsAppError("Choose an exact locally indexed chat first.")
+        try:
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    "SELECT jid, kind, COALESCE(NULLIF(name, ''), 'WhatsApp chat') AS name "
+                    "FROM chats WHERE jid = ?",
+                    [target],
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
+        if row is None:
+            raise OmaWhatsAppError(
+                "That target is not an exact chat in the local WhatsApp index."
+            )
         return {"jid": str(row["jid"]), "name": str(row["name"]), "kind": str(row["kind"])}
 
     def status(self) -> dict[str, Any]:
@@ -1293,6 +1471,317 @@ class Backend:
                     .decode("utf-8", "replace")[:MAX_MESSAGE]}
         raise OmaWhatsAppError("The clipboard has no text, image, or local file to paste.")
 
+    @staticmethod
+    def _transport_args(value: Any) -> list[str]:
+        if not isinstance(value, list) or not value or len(value) > 128:
+            raise OmaWhatsAppError("wacli args must be a non-empty JSON string array.")
+        args: list[str] = []
+        total = 0
+        for item in value:
+            if not isinstance(item, str) or not item or "\x00" in item:
+                raise OmaWhatsAppError("Every wacli argument must be a non-empty string.")
+            encoded = len(item.encode("utf-8"))
+            if encoded > 8192:
+                raise OmaWhatsAppError("One wacli argument is too large.")
+            total += encoded
+            args.append(item)
+        if total > 48 * 1024:
+            raise OmaWhatsAppError("The wacli argument list is too large.")
+        for item in args:
+            if item.split("=", 1)[0] in WACLI_GLOBAL_FLAGS:
+                raise OmaWhatsAppError(
+                    "Pass wacli global options as OmaWhatsApp request fields, not in args."
+                )
+        return args
+
+    @staticmethod
+    def _transport_path(args: Sequence[str]) -> tuple[str, ...]:
+        for path in sorted(WACLI_OPERATION_POLICIES, key=len, reverse=True):
+            if tuple(args[:len(path)]) == path:
+                return path
+        raise OmaWhatsAppError(
+            f"That operation is not in the wacli {WACLI_PARITY_VERSION} parity registry."
+        )
+
+    @classmethod
+    def _transport_policy(
+        cls, args: Sequence[str], path: tuple[str, ...] | None = None
+    ) -> str:
+        operation = path or cls._transport_path(args)
+        flags = {item.split("=", 1)[0] for item in args[len(operation):]}
+        if operation == ("accounts", "add") and "--no-auth" in flags:
+            return "local-write"
+        if operation == ("doctor",) and "--connect" in flags:
+            return "remote-read"
+        if operation == ("history", "fill") and "--dry-run" in flags:
+            return "local-read"
+        if operation == ("messages", "export") and "--output" in flags:
+            return "local-write"
+        if operation in (("messages", "purge"), ("store", "cleanup")) \
+                and "--dry-run" in flags:
+            return "local-read"
+        return WACLI_OPERATION_POLICIES[operation]
+
+    @staticmethod
+    def _transport_flag_values(args: Sequence[str], flag: str) -> list[str]:
+        values: list[str] = []
+        index = 0
+        while index < len(args):
+            item = args[index]
+            if item == flag:
+                if index + 1 >= len(args) or args[index + 1].startswith("--"):
+                    raise OmaWhatsAppError(f"{flag} requires a value.")
+                values.append(args[index + 1])
+                index += 2
+                continue
+            if item.startswith(flag + "="):
+                values.append(item.split("=", 1)[1])
+            index += 1
+        return values
+
+    def _validate_transport_targets(
+        self, args: Sequence[str], path: tuple[str, ...]
+    ) -> None:
+        if path not in WACLI_CHAT_TO_OPERATIONS:
+            return
+        if self._transport_flag_values(args, "--pick"):
+            raise OmaWhatsAppError("Resolve an exact chat JID instead of using --pick.")
+        targets = self._transport_flag_values(args, "--to")
+        if len(targets) != 1:
+            raise OmaWhatsAppError("This operation requires one exact --to chat JID.")
+        self._chat_any(targets[0])
+
+    @staticmethod
+    def _transport_account(value: Any) -> str:
+        account = str(value or "").strip()
+        if not account:
+            return ""
+        if len(account) > 64 or not re.fullmatch(r"[A-Za-z0-9._-]+", account):
+            raise OmaWhatsAppError("Choose a valid named wacli account.")
+        return account
+
+    @staticmethod
+    def _transport_store(value: Any) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        if "\x00" in raw:
+            raise OmaWhatsAppError("Choose a valid wacli store directory.")
+        target = Path(raw).expanduser()
+        if not target.is_absolute():
+            raise OmaWhatsAppError("A one-off wacli store must use an absolute path.")
+        try:
+            resolved = target.resolve(strict=False)
+            home = HOME.resolve(strict=True)
+        except OSError as exc:
+            raise OmaWhatsAppError("The wacli store path could not be resolved safely.") from exc
+        if resolved != home and home not in resolved.parents:
+            raise OmaWhatsAppError("A one-off wacli store must stay inside your home directory.")
+        return str(resolved)
+
+    @classmethod
+    def _transport_globals(
+        cls,
+        payload: dict[str, Any],
+        *,
+        read_only: bool,
+        json_output: bool,
+    ) -> tuple[list[str], int, int, bool]:
+        command: list[str] = []
+        account = cls._transport_account(payload.get("account"))
+        store = cls._transport_store(payload.get("store"))
+        if account and store:
+            raise OmaWhatsAppError("Choose either a named account or a one-off store, not both.")
+        if account:
+            command.extend(["--account", account])
+        if store:
+            command.extend(["--store", store])
+        if payload.get("events") not in (None, False, True):
+            raise OmaWhatsAppError("events must be true or false.")
+        if payload.get("full") not in (None, False, True):
+            raise OmaWhatsAppError("full must be true or false.")
+        include_events = payload.get("events") is True
+        if include_events:
+            command.append("--events")
+        if payload.get("full") is True:
+            command.append("--full")
+        lock_wait = str(payload.get("lock_wait") or "").strip()
+        if lock_wait:
+            if len(lock_wait) > 32 or not re.fullmatch(r"[0-9]+(?:ms|s|m|h)", lock_wait):
+                raise OmaWhatsAppError("lock_wait must be a bounded duration such as 5s.")
+            command.extend(["--lock-wait", lock_wait])
+        timeout = bounded_int(payload.get("timeout"), 300, 1, 7200)
+        command.extend(["--timeout", f"{timeout}s"])
+        if read_only:
+            command.append("--read-only")
+        if json_output:
+            command.append("--json")
+        output_limit = bounded_int(
+            payload.get("max_output_bytes"), MAX_WACLI_OUTPUT,
+            4096, 8 * 1024 * 1024,
+        )
+        return command, timeout, output_limit, include_events
+
+    @staticmethod
+    def _transport_events(stderr: str) -> list[Any]:
+        events: list[Any] = []
+        for line in stderr.splitlines()[:2048]:
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                value = clean_error(line, "")
+            if value not in (None, ""):
+                events.append(value)
+        return events
+
+    @staticmethod
+    def _transport_result(
+        result: subprocess.CompletedProcess[str],
+        path: tuple[str, ...],
+        policy: str,
+        include_events: bool,
+    ) -> dict[str, Any]:
+        raw = result.stdout.strip()
+        try:
+            value: Any = json.loads(raw) if raw else None
+        except json.JSONDecodeError:
+            value = None
+        if result.returncode != 0:
+            error: Any = value.get("error") if isinstance(value, dict) else None
+            if isinstance(error, dict):
+                error = error.get("message")
+            raise OmaWhatsAppError(
+                clean_error(error or result.stderr or raw, "wacli rejected the request.")
+            )
+        if isinstance(value, dict) and value.get("success") is False:
+            error = value.get("error")
+            if isinstance(error, dict):
+                error = error.get("message")
+            raise OmaWhatsAppError(clean_error(error, "wacli rejected the request."))
+        response: dict[str, Any] = {
+            "ok": True,
+            "kind": "wacli",
+            "operation": " ".join(path),
+            "policy": policy,
+        }
+        if isinstance(value, dict) and value.get("success") is True:
+            response["data"] = value.get("data")
+        elif value is not None:
+            response["data"] = value
+        elif raw:
+            response["output"] = raw
+        if include_events:
+            response["events"] = Backend._transport_events(result.stderr)
+        return response
+
+    def capabilities(self) -> dict[str, Any]:
+        operations = [{
+            "operation": " ".join(path),
+            "policy": policy,
+            "authorization": "" if policy == "local-read" else policy,
+        } for path, policy in sorted(WACLI_OPERATION_POLICIES.items())]
+        return {
+            "ok": True,
+            "kind": "capabilities",
+            "wacli_parity_version": WACLI_PARITY_VERSION,
+            "operation_count": len(operations),
+            "operations": operations,
+        }
+
+    def transport(self, payload: dict[str, Any]) -> dict[str, Any]:
+        args = self._transport_args(payload.get("args"))
+        path = self._transport_path(args)
+        policy = self._transport_policy(args, path)
+        if policy == "interactive":
+            raise OmaWhatsAppError(
+                "That operation needs a terminal. Use omawhatsapp wacli --interactive."
+            )
+        expected = "" if policy == "local-read" else policy
+        authorization = str(payload.get("authorization") or "")
+        if authorization != expected:
+            raise OmaWhatsAppError(
+                f"This operation requires authorization={expected!r} from the current request."
+            )
+        self._validate_transport_targets(args, path)
+        global_args, timeout, output_limit, include_events = self._transport_globals(
+            payload, read_only=policy == "local-read", json_output=True
+        )
+        command = [*global_args, *args]
+        if policy == "local-read":
+            result = self._run(
+                command, timeout=timeout + 5, stdout_limit=output_limit,
+                stderr_limit=output_limit if include_events else MAX_PROCESS_ERROR,
+            )
+        else:
+            local_destructive = path in {
+                ("accounts", "remove"),
+                ("messages", "purge"),
+                ("store", "cleanup"),
+            }
+            result = self._mutate(
+                command,
+                timeout=timeout + 5,
+                require_online=policy in {
+                    "remote-read", "sync", "whatsapp-write", "destructive"
+                } and not local_destructive,
+                stdout_limit=output_limit,
+                stderr_limit=output_limit if include_events else MAX_PROCESS_ERROR,
+            )
+        return self._transport_result(result, path, policy, include_events)
+
+    def transport_interactive(
+        self,
+        values: Sequence[str],
+        *,
+        authorization: str,
+        account: str = "",
+        store: str = "",
+    ) -> int:
+        args = list(values)
+        if args and args[0] == "--":
+            args = args[1:]
+        args = self._transport_args(args)
+        path = self._transport_path(args)
+        policy = self._transport_policy(args, path)
+        if policy not in {"interactive", "sync"}:
+            raise OmaWhatsAppError(
+                "Interactive mode is only for linking accounts or a foreground sync."
+            )
+        if authorization != policy:
+            raise OmaWhatsAppError(
+                f"This operation requires --authorize {policy} from the current request."
+            )
+        if policy == "sync" and not self.online():
+            raise OmaWhatsAppError("Offline mode is on. Go online before syncing WhatsApp.")
+        global_args: list[str] = []
+        clean_account = self._transport_account(account)
+        clean_store = self._transport_store(store)
+        if clean_account and clean_store:
+            raise OmaWhatsAppError("Choose either a named account or a one-off store, not both.")
+        if clean_account:
+            global_args.extend(["--account", clean_account])
+        if clean_store:
+            global_args.extend(["--store", clean_store])
+        if not self.wacli.is_file() or not os.access(self.wacli, os.X_OK):
+            raise OmaWhatsAppError("wacli is not installed.")
+        active = path in {("auth",), ("sync",)} and self._sync_active()
+        if active:
+            stopped = subprocess.run(
+                [str(SYSTEMCTL), "--user", "stop", "wacli-sync.service"],
+                check=False,
+            )
+            if stopped.returncode != 0:
+                raise OmaWhatsAppError("OmaWhatsApp could not pause background sync.")
+        try:
+            result = subprocess.run([str(self.wacli), *global_args, *args], check=False)
+            return result.returncode
+        finally:
+            if active and self.online():
+                subprocess.run(
+                    [str(SYSTEMCTL), "--user", "start", "wacli-sync.service"],
+                    check=False,
+                )
+
     def auth(self) -> int:
         result = subprocess.run([str(self.wacli), "auth"], check=False)
         if result.returncode == 0:
@@ -1328,6 +1817,13 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("chat-action")
     commands.add_parser("acknowledge")
     commands.add_parser("sync-mode")
+    commands.add_parser("capabilities")
+    transport = commands.add_parser("wacli")
+    transport.add_argument("--interactive", action="store_true")
+    transport.add_argument("--authorize", default="")
+    transport.add_argument("--account", default="")
+    transport.add_argument("--store", default="")
+    transport.add_argument("transport_args", nargs=argparse.REMAINDER)
     commands.add_parser("auth")
     return value
 
@@ -1337,10 +1833,28 @@ def main() -> int:
     backend = Backend()
     if args.command == "auth":
         return backend.auth()
+    if args.command == "wacli" and args.interactive:
+        try:
+            return backend.transport_interactive(
+                args.transport_args,
+                authorization=str(args.authorize or ""),
+                account=str(args.account or ""),
+                store=str(args.store or ""),
+            )
+        except OmaWhatsAppError as exc:
+            return emit({"ok": False, "error": clean_error(exc, "OmaWhatsApp failed.")}, 1)
     try:
         if args.command == "status":
             return emit(backend.status())
+        if args.command == "capabilities":
+            return emit(backend.capabilities())
         payload = request()
+        if args.command == "wacli":
+            if args.transport_args:
+                raise OmaWhatsAppError(
+                    "Pass non-interactive wacli arguments in the JSON request."
+                )
+            return emit(backend.transport(payload))
         if args.command == "chats":
             return emit(backend.chats(str(payload.get("query") or ""), args.limit))
         if args.command == "messages":

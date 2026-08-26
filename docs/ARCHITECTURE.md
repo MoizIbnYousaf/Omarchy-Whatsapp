@@ -7,7 +7,9 @@
 - `App.qml` is disposable. It owns window composition, focus, filtering, and
   the current visible draft.
 - `BarWidget.qml` is a thin view over the existing service.
-- `bin/omawhatsapp` is a bounded local bridge; it is not a daemon.
+- `bin/omawhatsapp` is a bounded local bridge; it is not a daemon. Its focused
+  commands serve the graphical client, while its classified `wacli` gateway
+  accounts for every command leaf in the supported transport version.
 - `skills/omawhatsapp` teaches compatible local agents to use that same bridge
   without bypassing its exact-chat and authorization boundaries.
 
@@ -26,10 +28,20 @@ targets are accepted only if their exact JID already exists in the local
 `chats` table, preventing arbitrary destinations from crossing the UI/helper
 boundary. All writes use wacli's public CLI.
 
-The chat boundary is intentionally narrower than the mirror: only `dm` rows
+The graphical chat boundary is intentionally narrower than the mirror: only `dm` rows
 and standalone `group` rows are discoverable. Newsletter/channel rows,
 Community parents, Community-linked subgroups, broadcasts, and call-event data
-stay in wacli without entering this release's UI or write paths.
+stay out of this release's UI. Explicit agent requests can reach those
+capabilities through the versioned parity registry without widening the chat
+rail or its default write paths.
+
+The advanced gateway is an argument-array adapter, not an arbitrary executable
+passthrough. Every wacli 0.17.1 leaf has a fixed policy. Local reads receive
+`--read-only`; network work respects offline mode; local writes, sync,
+WhatsApp writes, destructive operations, and interactive linking require
+distinct current-request authorization tokens. Global options are structured
+JSON fields, child output remains bounded, and unknown future leaves fail
+closed until reviewed.
 
 Media metadata is read with the message, but bytes stay in wacli's private
 store. Existing files render locally. Missing files are fetched only after an

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.0 — 2026-08-26
+
+- Give the shared `$omawhatsapp` skill guarded parity with all 103 command
+  leaves in wacli 0.17.1: calls, channels, contacts, group administration,
+  history, media recovery, polls, presence, profiles, accounts, status,
+  synchronization, exports, and store maintenance now share one bounded JSON
+  gateway.
+- Classify every advanced operation as local read, remote read, local write,
+  sync, WhatsApp write, destructive, or interactive. Unknown future commands
+  fail closed, local reads force `--read-only`, offline mode blocks network
+  work, and mutations require an exact current-request authorization token.
+- Add a terminal-preserving path for interactive account linking and
+  foreground sync without replacing the resident wacli service.
+- Make Enter from the keyboard-selected chat list open that conversation with
+  the composer focused immediately; the next keypress now types the message.
+- Add twelve backend parity/escape-boundary tests and one keyboard-transition
+  test, including an end-to-end fake-wacli invocation with no live mutations.
+
 ## 0.6.1 — 2026-08-24
 
 - Stream wacli, systemctl, and clipboard output under hard byte caps instead

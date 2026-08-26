@@ -558,8 +558,8 @@ Item {
 
   function openChatCursor() {
     if (visibleChats.length === 0) return
-    chatCursorIndex = keyboardNavigation.boundedIndex(chatCursorIndex, visibleChats.length)
-    selectChat(visibleChats[chatCursorIndex], "messages")
+    chatCursorIndex = keyboardNavigation.openChat(visibleChats.length)
+    selectChat(visibleChats[chatCursorIndex], "composer")
   }
 
   function toggleSidebar() {

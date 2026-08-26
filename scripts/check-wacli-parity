@@ -1,0 +1,90 @@
+#!/usr/bin/python3
+"""Compare the shipped policy registry with the installed wacli command tree."""
+
+from __future__ import annotations
+
+import importlib.util
+from importlib.machinery import SourceFileLoader
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+
+ROOT = Path(__file__).resolve().parent.parent
+HELPER = ROOT / "bin/omawhatsapp"
+WACLI = Path(os.environ.get("WACLI_BIN", Path.home() / ".local/bin/wacli"))
+
+
+def load_helper():
+    spec = importlib.util.spec_from_loader(
+        "omawhatsapp_parity", SourceFileLoader("omawhatsapp_parity", str(HELPER))
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("could not load OmaWhatsApp helper")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def children(path: tuple[str, ...]) -> list[str]:
+    result = subprocess.run(
+        [str(WACLI), *path, "--help"],
+        text=True,
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"wacli help failed for {' '.join(path) or '<root>'}")
+    match = re.search(
+        r"^Available Commands:\n(.*?)(?=^Flags:|^Global Flags:|^Use \"|\Z)",
+        result.stdout,
+        re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        return []
+    return [
+        line.strip().split()[0]
+        for line in match.group(1).splitlines()
+        if line.strip()
+    ]
+
+
+def leaves(path: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
+    commands = children(path)
+    if not commands:
+        return {path}
+    result: set[tuple[str, ...]] = set()
+    for command in commands:
+        result.update(leaves((*path, command)))
+    return result
+
+
+def main() -> int:
+    if not WACLI.is_file() or not os.access(WACLI, os.X_OK):
+        print(f"parity: wacli is not executable: {WACLI}", file=sys.stderr)
+        return 1
+    helper = load_helper()
+    discovered = leaves()
+    # `auth` is both an executable QR flow and a parent for status/logout.
+    discovered.add(("auth",))
+    registered = set(helper.WACLI_OPERATION_POLICIES)
+    missing = sorted(discovered - registered)
+    stale = sorted(registered - discovered)
+    if missing or stale:
+        for path in missing:
+            print(f"parity: unclassified wacli leaf: {' '.join(path)}", file=sys.stderr)
+        for path in stale:
+            print(f"parity: registered leaf missing from wacli: {' '.join(path)}", file=sys.stderr)
+        return 1
+    print(
+        f"OmaWhatsApp covers all {len(registered)} wacli "
+        f"{helper.WACLI_PARITY_VERSION} command leaves."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

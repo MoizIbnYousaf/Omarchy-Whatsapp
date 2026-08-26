@@ -35,9 +35,10 @@ native, and visually at home in Omarchy.
   from the active Omarchy theme.
 - **Keyboard-native.** Jump between chats, collapse the rail, search, attach,
   reply, and open media without leaving the keyboard.
-- **Agent-native.** The installer ships a shared `$omawhatsapp` skill so an
-  on-device Omarchy agent can search your local archive or carry out a clearly
-  requested WhatsApp action through the same guarded helper as the UI.
+- **Agent-native.** The installer ships a shared `$omawhatsapp` skill with
+  complete guarded wacli parity: ordinary chat work uses the app's exact-target
+  helpers, while all 103 advanced wacli 0.17.1 operations pass through a
+  classified, bounded JSON gateway.
 
 ## Everyday conversation flow
 
@@ -69,10 +70,11 @@ native, and visually at home in Omarchy.
   batch. New incoming messages light it up again, while muted and archived
   chats remain readable without raising the bar badge.
 
-The focused first release contains direct chats and standalone groups only.
-Channels/newsletters, calls, Community parents, and Community-linked subgroups
-remain untouched in wacli's local mirror and can be added later as deliberate
-top-level sections.
+The graphical client remains deliberately focused on direct chats and
+standalone groups. Channels/newsletters, calls, Community parents, and
+Community-linked subgroups stay out of the visual rail until they receive
+deliberate top-level interfaces. The bundled agent skill can still inspect and
+operate those wacli capabilities when the current request explicitly asks.
 
 Missing media is downloaded only after you ask for it. The helper verifies the
 chat and message against the local mirror before any wacli write crosses the
@@ -82,14 +84,19 @@ boundary.
 
 Installation also places the repository-owned skill at
 `~/.agents/skills/omawhatsapp`. Compatible agents can use `$omawhatsapp` to
-search or summarize local chats and, when you explicitly ask, send, reply,
-attach, react, mark read, or manage a chat on your behalf.
+search or summarize local chats and, when you explicitly ask, use every
+capability exposed by wacli 0.17.1: messaging, media, calls, channels,
+contacts, group administration, history, polls, presence, profiles, accounts,
+sync, exports, and maintenance.
 
-The skill is local-first and fail-closed: it never invents recipients, writes
-WhatsApp databases directly, treats opening a chat as a receipt, turns offline
-mode off by itself, or creates test messages. Every destination must first
-resolve to one exact DM or standalone group already present in the local
-OmaWhatsApp index.
+The skill is local-first and fail-closed. Every command is classified as a
+local read, remote read, local write, sync, WhatsApp write, destructive, or
+interactive operation. Local reads force wacli's read-only mode; every other
+class requires authorization from the current request. It never invents
+recipients, writes WhatsApp databases directly, treats opening a chat as a
+receipt, turns offline mode off by itself, creates test messages, or retries a
+possibly delivered mutation. Unknown future wacli commands remain blocked
+until they are classified.
 
 ## One app at every size
 
@@ -170,7 +177,7 @@ Add the `Super+Shift+W` binding from
 | `Ctrl+O` | Add documents |
 | `Ctrl+Shift+O` | Add photos and videos |
 | `J` / `K`, arrows | Move through messages or the focused chat list |
-| `Enter` | Open the selected chat from the chat list |
+| `Enter` | Open the selected chat and focus its composer immediately |
 | `C` | Focus the message composer |
 | `Space` | Open selected media; play/pause inside the viewer |
 | `Left` / `Right` | Previous/next gallery item |
@@ -189,9 +196,9 @@ can hide the notification badge entirely.
 ./scripts/test
 ```
 
-The release gate runs 46 backend boundary/write-path tests, 10 offscreen QML
-tests, an isolated installer preflight, manifest validation, QML lint, shell
-syntax checks, a diff check, and a heavyweight-runtime dependency guard.
+The release gate runs 58 backend boundary/write-path/parity tests, 11 offscreen
+QML tests, an isolated installer preflight, manifest validation, QML lint,
+shell syntax checks, a diff check, and a heavyweight-runtime dependency guard.
 Installed verification and screenshot rules live in [testing](docs/TESTING.md);
 the architecture and privacy boundaries are documented alongside the code.
 

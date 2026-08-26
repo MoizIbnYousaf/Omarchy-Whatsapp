@@ -1,4 +1,4 @@
-# OmaWhatsApp operations
+# Focused OmaWhatsApp operations
 
 All commands use the installed helper and emit one JSON object. Build requests
 with `jq` so user content is data, not shell syntax.
@@ -107,3 +107,8 @@ Account linking is interactive and must be explicitly requested:
 ```bash
 "$oma" auth
 ```
+
+For calls, channels, contacts, group administration, history/backfill, media
+recovery, poll voting, presence, profiles, accounts, status broadcasts,
+exports, or store maintenance, use the complete classified gateway in
+[wacli-parity.md](wacli-parity.md).

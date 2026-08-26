@@ -12,6 +12,15 @@ Evidence sources:
 - **App** — the private OmaWhatsApp worktree, installed Omarchy plugin, and
   rendered runtime checks.
 
+## Agent transport parity
+
+The shared `$omawhatsapp` skill and helper account for all 103 command leaves
+in wacli 0.17.1. This is separate from graphical parity: channels, calls,
+Communities, profiles, accounts, and maintenance remain absent from the visual
+chat rail, but agents can perform them after the exact current request passes
+the operation's local-read, remote-read, local-write, sync, WhatsApp-write,
+destructive, or interactive guard. Unknown future command leaves fail closed.
+
 Status: `done` is implemented and tested, `building` has an active code path
 but still needs complete rendered/live verification, `planned` is not yet
 implemented, `intentionally excluded` is deferred product scope, and

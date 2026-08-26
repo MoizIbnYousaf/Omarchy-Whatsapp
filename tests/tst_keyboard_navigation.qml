@@ -44,4 +44,13 @@ TestCase {
     compare(navigation.moveMessages(-1, 2), 0)
     compare(navigation.chatIndex, 1)
   }
+
+  function test_enter_on_chat_moves_directly_to_composer() {
+    var navigation = createTemporaryObject(navigationComponent, testCase)
+    navigation.enterChats(3, 2)
+    compare(navigation.context, "chats")
+    compare(navigation.openChat(3), 2)
+    compare(navigation.context, "composer")
+    compare(navigation.backTarget(), "messages")
+  }
 }

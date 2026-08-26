@@ -667,6 +667,164 @@ class BackendTests(unittest.TestCase):
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "too long"):
             self.backend.send("alex@s.whatsapp.net", "x" * 4097)
 
+    def test_wacli_parity_registry_covers_every_0171_leaf(self) -> None:
+        policies = backend_module.WACLI_OPERATION_POLICIES
+        self.assertEqual(len(policies), 103)
+        self.assertEqual(len(set(policies)), len(policies))
+        self.assertEqual(set(policies.values()), {
+            "local-read", "remote-read", "local-write", "sync",
+            "whatsapp-write", "destructive", "interactive",
+        })
+        capabilities = self.backend.capabilities()
+        self.assertEqual(capabilities["wacli_parity_version"], "0.17.1")
+        self.assertEqual(capabilities["operation_count"], len(policies))
+        self.assertEqual(len(capabilities["operations"]), len(policies))
+
+    def test_wacli_local_read_is_json_and_read_only(self) -> None:
+        completed = subprocess.CompletedProcess(
+            [], 0, '{"success":true,"data":{"version":"test"}}', ""
+        )
+        with mock.patch.object(self.backend, "_run", return_value=completed) as run:
+            result = self.backend.transport({"args": ["version"]})
+        command = run.call_args.args[0]
+        self.assertIn("--read-only", command)
+        self.assertIn("--json", command)
+        self.assertEqual(command[-1], "version")
+        self.assertEqual(result["data"], {"version": "test"})
+        self.assertEqual(result["policy"], "local-read")
+
+    def test_wacli_remote_read_requires_exact_authorization(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true,"data":[]}', "")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "remote-read"):
+            self.backend.transport({"args": ["channels", "list"]})
+        with mock.patch.object(self.backend, "_mutate", return_value=completed) as mutate:
+            result = self.backend.transport({
+                "args": ["channels", "list"],
+                "authorization": "remote-read",
+            })
+        self.assertEqual(result["policy"], "remote-read")
+        self.assertTrue(mutate.call_args.kwargs["require_online"])
+
+    def test_wacli_whatsapp_write_requires_exact_authorization(self) -> None:
+        request = {"args": ["send", "location", "--to", "team@g.us",
+                            "--latitude", "1", "--longitude", "2"]}
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "whatsapp-write"):
+            self.backend.transport(request)
+        completed = subprocess.CompletedProcess([], 0, '{"success":true,"data":{}}', "")
+        with mock.patch.object(self.backend, "_mutate", return_value=completed) as mutate:
+            request["authorization"] = "whatsapp-write"
+            result = self.backend.transport(request)
+        self.assertEqual(result["operation"], "send location")
+        self.assertTrue(mutate.call_args.kwargs["require_online"])
+
+    def test_wacli_chat_writes_reject_names_and_picks_before_transport(self) -> None:
+        for args in (
+            ["send", "text", "--to", "Design team", "--message", "hello"],
+            ["send", "text", "--to", "team@g.us", "--pick", "1",
+             "--message", "hello"],
+        ):
+            with self.subTest(args=args), mock.patch.object(self.backend, "_mutate") as mutate, \
+                 self.assertRaises(backend_module.OmaWhatsAppError):
+                self.backend.transport({
+                    "args": args,
+                    "authorization": "whatsapp-write",
+                })
+            mutate.assert_not_called()
+
+    def test_wacli_local_destructive_operation_stays_offline_capable(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true,"data":{}}', "")
+        with mock.patch.object(self.backend, "_mutate", return_value=completed) as mutate:
+            result = self.backend.transport({
+                "args": ["store", "cleanup", "--days", "365", "--confirm"],
+                "authorization": "destructive",
+            })
+        self.assertEqual(result["policy"], "destructive")
+        self.assertFalse(mutate.call_args.kwargs["require_online"])
+
+    def test_wacli_dry_runs_are_downgraded_to_local_reads(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true,"data":{}}', "")
+        cases = [
+            ["history", "fill", "--dry-run"],
+            ["messages", "purge", "--chat", "team@g.us", "--id", "t1", "--dry-run"],
+            ["store", "cleanup", "--dry-run"],
+        ]
+        for args in cases:
+            with self.subTest(args=args), \
+                 mock.patch.object(self.backend, "_run", return_value=completed) as run:
+                result = self.backend.transport({"args": args})
+            self.assertEqual(result["policy"], "local-read")
+            self.assertIn("--read-only", run.call_args.args[0])
+
+    def test_wacli_global_flags_cannot_bypass_request_contract(self) -> None:
+        for args in (["--store", "/tmp/other", "version"],
+                     ["version", "--read-only=false"],
+                     ["send", "text", "--json"]):
+            with self.subTest(args=args), \
+                 self.assertRaisesRegex(backend_module.OmaWhatsAppError,
+                                         "global options"):
+                self.backend.transport({"args": args})
+
+    def test_wacli_unknown_and_interactive_operations_fail_closed(self) -> None:
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "parity registry"):
+            self.backend.transport({"args": ["future-command", "go"]})
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "needs a terminal"):
+            self.backend.transport({"args": ["auth"], "authorization": "interactive"})
+
+    def test_wacli_interactive_mode_is_limited_and_exact(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(self.backend, "_sync_active", return_value=False), \
+             mock.patch.object(backend_module.subprocess, "run", return_value=completed) as run:
+            code = self.backend.transport_interactive(
+                ["auth", "--qr-format", "terminal"], authorization="interactive"
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(run.call_args.args[0], [
+            str(self.wacli), "auth", "--qr-format", "terminal"
+        ])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError,
+                                    "only for linking"):
+            self.backend.transport_interactive(
+                ["send", "text"], authorization="whatsapp-write"
+            )
+
+    def test_wacli_interactive_cli_parser_preserves_command(self) -> None:
+        args = backend_module.parser().parse_args([
+            "wacli", "--interactive", "--authorize", "interactive", "--",
+            "auth", "--qr-format", "terminal",
+        ])
+        self.assertTrue(args.interactive)
+        self.assertEqual(args.authorize, "interactive")
+        self.assertEqual(args.transport_args, [
+            "--", "auth", "--qr-format", "terminal",
+        ])
+
+    def test_wacli_cli_gateway_runs_end_to_end_with_json(self) -> None:
+        self.wacli.write_text(
+            "#!/bin/sh\nprintf '%s\\n' "
+            "'{\"success\":true,\"data\":{\"version\":\"fixture\"}}'\n",
+            encoding="utf-8",
+        )
+        self.wacli.chmod(0o700)
+        environment = dict(os.environ)
+        environment.update({
+            "WACLI_BIN": str(self.wacli),
+            "WACLI_STORE_DIR": str(self.store),
+            "XDG_STATE_HOME": str(self.root / "state-home"),
+        })
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "wacli"],
+            input=json.dumps({"args": ["version"]}),
+            text=True,
+            capture_output=True,
+            env=environment,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        value = json.loads(result.stdout)
+        self.assertTrue(value["ok"])
+        self.assertEqual(value["operation"], "version")
+        self.assertEqual(value["data"], {"version": "fixture"})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -43,6 +43,12 @@ QtObject {
     return chatIndex
   }
 
+  function openChat(count) {
+    chatIndex = boundedIndex(chatIndex, count)
+    enterComposer()
+    return chatIndex
+  }
+
   function backTarget() {
     if (context === "composer" || context === "message-search") return "messages"
     if (context === "messages" || context === "chat-search") return "chats"
