@@ -1148,6 +1148,23 @@ sys.exit(0)
         self.backend.use_account("work")
         self.assertTrue(self.backend.online())
 
+    def test_status_separates_what_is_aggregated_from_what_is_selected(self) -> None:
+        def unit_active(unit: str) -> bool:
+            return unit == "wacli-sync@work.service"
+
+        with mock.patch.object(self.backend, "_unit_active", side_effect=unit_active), \
+                mock.patch.object(self.backend, "_doctor",
+                                  return_value={"authenticated": True}):
+            self.backend.use_account("home")
+            status = self.backend.status()
+        # The rail is ready when any account can serve it...
+        self.assertTrue(status["authenticated"])
+        # ...but the header pill describes the account whose chat is open.
+        self.assertEqual(status["account"], "home")
+        self.assertFalse(status["sync_active"])
+        self.assertEqual({row["account"]: row["sync_active"] for row in status["accounts"]},
+                         {"work": True, "home": False})
+
     def test_gateway_validates_the_target_inside_the_named_account(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true,"data":{}}', "")
         request = {

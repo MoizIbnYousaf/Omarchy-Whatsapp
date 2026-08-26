@@ -966,11 +966,12 @@ class Backend:
             "ok": True,
             "installed": True,
             # The rail is unified, so readiness is true when any account can
-            # serve it. Everything the write path depends on stays scoped to
-            # the account this request selected.
+            # serve it. Everything a surface describes or a write depends on
+            # stays scoped to the account this request selected: the header
+            # pill must not read "online" because a different account syncs.
             "authenticated": any(report["authenticated"] for report in reports),
-            "sync_active": any(report["sync_active"] for report in reports),
             "database_ready": any(report["database_ready"] for report in reports),
+            "sync_active": current["sync_active"],
             "online": current["online"],
             "offline_mode": current["offline_mode"],
             "account": active.name,
