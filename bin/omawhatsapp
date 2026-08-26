@@ -949,6 +949,7 @@ class Backend:
                 reports.append({
                     "account": account.name,
                     "label": account.label,
+                    "store": account.key,
                     "default": account.default,
                     "active": account.key == active.key,
                     "authenticated": authenticated,

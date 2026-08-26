@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "SettingsPolicy.js" as SettingsPolicy
+import "AccountModel.js" as AccountModel
 
 // Resident state keeps the chat rail warm while the window is closed.
 Item {
@@ -34,7 +35,9 @@ Item {
   property bool storeRefreshPending: false
   property string activeWriteKind: ""
   property string activeWriteChatJid: ""
+  property string activeWriteAccount: ""
   property string selectedChatJid: ""
+  property string selectedChatAccount: ""
   property string selectedChatName: ""
   property string selectedChatKind: "unknown"
   property string query: ""
@@ -42,10 +45,17 @@ Item {
   property string mediaDownloadId: ""
   property string errorText: ""
   property var chats: []
+  property var accounts: []
   property var messages: []
   property var members: []
 
   readonly property bool windowOpen: appOpen || dropdownOpen
+  readonly property bool multiAccount: AccountModel.isMultiAccount(accounts)
+  readonly property var storeDirectories:
+    AccountModel.storeDirectories(accounts, storeDirectory)
+  function sameChat(chat, account, jid) {
+    return AccountModel.sameChat(chat, account, jid)
+  }
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
   property string pendingAppPayload: ""
@@ -124,13 +134,24 @@ Item {
   function runNotify() {
     if (!ready || !notificationsEnabled || notifyProcess.running) return
     notifyProcess.payload = JSON.stringify({
+      account: selectedChatAccount,
       skip_jid: windowOpen ? selectedChatJid : ""
     })
     notifyProcess.stdinEnabled = true
     notifyProcess.running = true
   }
+  function knownAccount(name) {
+    var target = String(name || "")
+    if (target === "") return ""
+    for (var i = 0; i < accounts.length; i++)
+      if (String(accounts[i].account || "") === target) return target
+    return ""
+  }
   function refreshStatus() {
-    if (!statusProcess.running) statusProcess.running = true
+    if (statusProcess.running) return
+    statusProcess.command = [helper, "status", "--account",
+                             knownAccount(selectedChatAccount)]
+    statusProcess.running = true
   }
   function refreshFromStore() {
     storeRefreshPending = true
@@ -147,7 +168,9 @@ Item {
     if (selectedChatJid === "") return
     if (messagesProcess.running) { messagesPending = true; return }
     loadingMessages = true
-    messagesProcess.payload = JSON.stringify({ jid: selectedChatJid, query: query })
+    messagesProcess.payload = JSON.stringify({
+      account: selectedChatAccount, jid: selectedChatJid, query: query
+    })
     messagesProcess.stdinEnabled = true
     messagesProcess.running = true
   }
@@ -157,16 +180,20 @@ Item {
       return
     }
     loadingMembers = true
-    membersProcess.payload = JSON.stringify({ jid: selectedChatJid })
+    membersProcess.payload = JSON.stringify({
+      account: selectedChatAccount, jid: selectedChatJid
+    })
     membersProcess.stdinEnabled = true
     membersProcess.running = true
   }
   function selectChat(chat) {
     if (!chat || !chat.jid) return
     var next = String(chat.jid)
-    dismissNotifications(next)
-    if (next !== selectedChatJid) {
+    var nextAccount = String(chat.account || "")
+    dismissNotifications(next, nextAccount)
+    if (next !== selectedChatJid || nextAccount !== selectedChatAccount) {
       selectedChatJid = next
+      selectedChatAccount = nextAccount
       selectedChatName = String(chat.name || "WhatsApp chat")
       selectedChatKind = String(chat.kind || "unknown")
       selectedId = ""
@@ -200,9 +227,12 @@ Item {
     writing = true
     activeWriteKind = kind
     activeWriteChatJid = selectedChatJid
+    activeWriteAccount = selectedChatAccount
     errorText = ""
     writeProcess.kind = kind
-    writeProcess.payload = JSON.stringify(payload || ({}))
+    var request = payload || ({})
+    request.account = selectedChatAccount
+    writeProcess.payload = JSON.stringify(request)
     writeProcess.command = [helper, kind]
     writeProcess.stdinEnabled = true
     writeProcess.running = true
@@ -292,22 +322,24 @@ Item {
       jid: selectedChatJid, action: String(action || "")
     })
   }
-  function clearNotificationCount(jid) {
+  function clearNotificationCount(jid, account) {
     var target = String(jid || "")
     root.chats = root.chats.map(function(chat) {
-      if (target !== "" && String(chat.jid || "") !== target) return chat
+      if (target !== "" && !root.sameChat(chat, account, target)) return chat
       var next = Object.assign({}, chat)
       next.notification_unread = 0
       return next
     })
   }
-  function dismissNotifications(jid) {
+  function dismissNotifications(jid, account) {
     if (controlProcess.running) return false
     var target = String(jid || "")
-    clearNotificationCount(target)
+    // An empty JID clears the aggregated badge across every account.
+    var scope = target === "" ? "" : String(account || "")
+    clearNotificationCount(target, scope)
     controlWriting = true
     controlProcess.kind = "acknowledge"
-    controlProcess.payload = JSON.stringify({ jid: target })
+    controlProcess.payload = JSON.stringify({ account: scope, jid: target })
     controlProcess.command = [helper, "acknowledge"]
     controlProcess.stdinEnabled = true
     controlProcess.running = true
@@ -330,7 +362,9 @@ Item {
     if (controlProcess.running || writing) return false
     controlWriting = true
     controlProcess.kind = "sync-mode"
-    controlProcess.payload = JSON.stringify({ online: online === true })
+    controlProcess.payload = JSON.stringify({
+      account: root.selectedChatAccount, online: online === true
+    })
     controlProcess.command = [helper, "sync-mode"]
     controlProcess.stdinEnabled = true
     controlProcess.running = true
@@ -341,13 +375,13 @@ Item {
     var settings = ({})
     settings[String(key || "")] = value
     settingsWriting = true
-    settingsProcess.payload = JSON.stringify({ settings: settings })
+    settingsProcess.payload = JSON.stringify({
+      account: root.selectedChatAccount, settings: settings
+    })
     settingsProcess.stdinEnabled = true
     settingsProcess.running = true
     return true
   }
-
-  Component.onCompleted: storeWatchProcess.running = true
 
   // The full window belongs to the one resident service, while the bar owns
   // the anchored dropdown. This avoids duplicate per-monitor app windows and
@@ -392,30 +426,41 @@ Item {
     }
   }
 
-  Process {
-    id: storeWatchProcess
-    command: [
-      "setpriv", "--pdeathsig", "TERM",
-      "inotifywait", "-m", "-q",
-      "-e", "close_write,create,delete,move,modify",
-      "--format", "%f", root.storeDirectory
-    ]
-    stdout: SplitParser {
-      splitMarker: "\n"
-      onRead: function(fileName) {
-        var name = String(fileName || "").trim()
-        if (name === "wacli.db" || name === "wacli.db-wal")
-          root.refreshFromStore()
+  // One watcher per account store; they share the debounce below.
+  Instantiator {
+    id: storeWatchers
+    model: root.storeDirectories
+    delegate: Process {
+      required property string modelData
+      running: true
+      command: [
+        "setpriv", "--pdeathsig", "TERM",
+        "inotifywait", "-m", "-q",
+        "-e", "close_write,create,delete,move,modify",
+        "--format", "%f", modelData
+      ]
+      stdout: SplitParser {
+        splitMarker: "\n"
+        onRead: function(fileName) {
+          var name = String(fileName || "").trim()
+          if (name === "wacli.db" || name === "wacli.db-wal")
+            root.refreshFromStore()
+        }
       }
+      onExited: storeWatchRestart.restart()
     }
-    onExited: storeWatchRestart.restart()
   }
 
   Timer {
     id: storeWatchRestart
     interval: 1500
     repeat: false
-    onTriggered: if (!storeWatchProcess.running) storeWatchProcess.running = true
+    onTriggered: {
+      for (var i = 0; i < storeWatchers.count; i++) {
+        var watcher = storeWatchers.objectAt(i)
+        if (watcher && !watcher.running) watcher.running = true
+      }
+    }
   }
 
   Timer {
@@ -452,9 +497,13 @@ Item {
     onTriggered: root.refreshStatus()
   }
 
+  // Switching to a chat in another account changes which account the header
+  // pills and the receipt preference describe.
+  onSelectedChatAccountChanged: refreshStatus()
+
   Process {
     id: statusProcess
-    command: [root.helper, "status"]
+    command: [root.helper, "status", "--account", ""]
     stdout: StdioCollector { id: statusOutput }
     stderr: StdioCollector { id: statusError }
     onExited: function(exitCode) {
@@ -471,6 +520,7 @@ Item {
       root.notificationsEnabled = !!notifications && notifications.enabled === true
       root.notificationsPreview = !notifications || notifications.preview !== false
       root.notifyAvailable = payload.notify_available !== false
+      root.accounts = Array.isArray(payload.accounts) ? payload.accounts : []
       root.sendReadReceipts = payload.send_read_receipts === true
       root.showUnreadCount = payload.show_unread_count !== false
       root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
@@ -500,14 +550,17 @@ Item {
       if (root.chats.length === 0) return
       var selected = null
       for (var i = 0; i < root.chats.length; i++)
-        if (String(root.chats[i].jid) === root.selectedChatJid) selected = root.chats[i]
+        if (root.sameChat(root.chats[i], root.selectedChatAccount, root.selectedChatJid))
+          selected = root.chats[i]
       if (!selected) {
         selected = root.chats[0]
         root.selectedChatJid = String(selected.jid)
+        root.selectedChatAccount = String(selected.account || "")
         root.query = ""
         root.messages = []
         root.members = []
-        if (root.windowOpen) root.dismissNotifications(root.selectedChatJid)
+        if (root.windowOpen)
+          root.dismissNotifications(root.selectedChatJid, root.selectedChatAccount)
       }
       root.selectedChatName = String(selected.name || "WhatsApp chat")
       root.selectedChatKind = String(selected.kind || "unknown")

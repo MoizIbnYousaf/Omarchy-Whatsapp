@@ -97,6 +97,7 @@ if $check_only; then
   jq -e --arg plugin_id "$plugin_id" '.id == $plugin_id' \
     "$staging_root/$install_plugin_dir/manifest.json" >/dev/null
   [[ -f "$staging_root/$install_plugin_dir/SettingsPolicy.js" ]]
+  [[ -f "$staging_root/$install_plugin_dir/AccountModel.js" ]]
   [[ -f "$staging_root/$install_plugin_dir/LICENSE" ]]
   rg -q '^name: omawhatsapp$' "$staging_root/skills/$skill_dir/SKILL.md"
   rg -q 'references/wacli-parity\.md' "$staging_root/skills/$skill_dir/SKILL.md"
