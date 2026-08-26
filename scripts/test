@@ -41,6 +41,16 @@ rg -q 'systemctl --user restart wacli-sync\.service' scripts/install || {
   exit 1
 }
 
+rg -q '"setpriv", "--pdeathsig", "TERM"' plugins/omawhatsapp/Service.qml || {
+  echo "test: store watcher must die with the Omarchy shell" >&2
+  exit 1
+}
+rg -q 'name === "wacli\.db".*name === "wacli\.db-wal"' \
+  plugins/omawhatsapp/Service.qml || {
+  echo "test: store watcher must ignore unrelated private-store files" >&2
+  exit 1
+}
+
 if rg -n 'QtWebEngine|WebEngineView|WebView|node_modules|Electron' \
   --glob '*.qml' --glob '*.js' --glob '*.sh' --glob '*.service' \
   --glob '!scripts/test' .; then

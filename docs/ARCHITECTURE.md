@@ -61,8 +61,9 @@ Installer upgrades preserve that choice.
 ## Performance
 
 - Chat and conversation reads are bounded and use wacli's chat/timestamp index.
-- The resident service refreshes chat metadata every 12 seconds and only polls
-  the selected conversation while the window is open.
+- The resident service watches only `wacli.db` and its SQLite WAL sibling,
+  then debounces change bursts before refreshing the chat rail and the visible
+  conversation. A 12-second timer remains only as a recovery fallback.
 - `ListView` virtualizes both rails; images decode asynchronously.
 - Static images use aspect-fit decoding, image GIFs and WebP stickers use
   `AnimatedImage`, and WhatsApp's MP4/F4V GIF messages use a muted looping

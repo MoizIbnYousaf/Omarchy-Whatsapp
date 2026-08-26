@@ -22,6 +22,7 @@ Item {
   property bool controlWriting: false
   property bool windowOpen: false
   property bool messagesPending: false
+  property bool storeRefreshPending: false
   property string activeWriteKind: ""
   property string activeWriteChatJid: ""
   property string selectedChatJid: ""
@@ -36,6 +37,13 @@ Item {
   property var members: []
 
   readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
+  readonly property string storeDirectory: {
+    var configured = String(Quickshell.env("WACLI_STORE_DIR") || "").trim()
+    if (configured !== "") return configured
+    var stateHome = String(Quickshell.env("XDG_STATE_HOME") || "").trim()
+    if (stateHome === "") stateHome = Quickshell.env("HOME") + "/.local/state"
+    return stateHome + "/wacli"
+  }
   readonly property int unreadCount: chats.reduce(function(total, chat) {
     return total + Number(chat.unread || 0)
   }, 0)
@@ -66,6 +74,10 @@ Item {
   }
   function refreshStatus() {
     if (!statusProcess.running) statusProcess.running = true
+  }
+  function refreshFromStore() {
+    storeRefreshPending = true
+    storeRefreshDebounce.restart()
   }
   function refreshChats() {
     if (chatsProcess.running) return
@@ -250,6 +262,49 @@ Item {
     return true
   }
 
+  Component.onCompleted: storeWatchProcess.running = true
+
+  Process {
+    id: storeWatchProcess
+    command: [
+      "setpriv", "--pdeathsig", "TERM",
+      "inotifywait", "-m", "-q",
+      "-e", "close_write,create,delete,move,modify",
+      "--format", "%f", root.storeDirectory
+    ]
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(fileName) {
+        var name = String(fileName || "").trim()
+        if (name === "wacli.db" || name === "wacli.db-wal")
+          root.refreshFromStore()
+      }
+    }
+    onExited: storeWatchRestart.restart()
+  }
+
+  Timer {
+    id: storeWatchRestart
+    interval: 1500
+    repeat: false
+    onTriggered: if (!storeWatchProcess.running) storeWatchProcess.running = true
+  }
+
+  Timer {
+    id: storeRefreshDebounce
+    interval: 160
+    repeat: false
+    onTriggered: {
+      if (chatsProcess.running) return
+      root.storeRefreshPending = false
+      root.refreshChats()
+      if (root.windowOpen) {
+        root.refreshMessages()
+        root.refreshMembers()
+      }
+    }
+  }
+
   Timer {
     interval: 12000
     running: true
@@ -298,6 +353,7 @@ Item {
     onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
     onExited: function(exitCode) {
       root.loadingChats = false
+      if (root.storeRefreshPending) storeRefreshDebounce.restart()
       var payload = root.parseJson(chatsOutput.text)
       if (!payload || payload.ok !== true) {
         root.errorText = (payload && payload.error) || String(chatsError.text || "Chats could not be read.").trim()

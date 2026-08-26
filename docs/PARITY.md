@@ -158,7 +158,7 @@ remaining selection can be recovered rather than silently duplicated.
 | Expired-media recovery | `media retry` | planned |
 | Typing/paused indicator | `presence typing/paused` | planned |
 | Incoming typing indicator | not exposed | transport gap |
-| Notification badge | local new-message delta; no receipt | done |
+| Notification badge | local new-message delta; muted/archived suppressed; no receipt | done |
 | Desktop message popups | none by default | intentionally excluded |
 | Offline draft/error recovery | local UI state | building |
 | Audio/video calls | call events only | intentionally excluded |

@@ -11,6 +11,12 @@ OmaWhatsApp is one Omarchy plugin with three entry points:
 `bin/omawhatsapp` is a bounded Python bridge, not a daemon. The only long-lived
 backend is the user-owned `wacli sync --follow` process.
 
+The resident service uses Omarchy's existing `inotifywait` utility to watch
+only the local mirror's database/WAL filenames. Events are debounced before a
+bounded read, and the original 12-second cadence remains as a fallback if the
+watcher exits. `setpriv --pdeathsig TERM` ensures the watcher cannot outlive the
+Quickshell process.
+
 ## Data and trust boundary
 
 Reads open wacli's discovered `wacli.db` with SQLite URI `mode=ro` and
@@ -38,7 +44,9 @@ locks are opened relative to an owner-checked directory descriptor with
 It stores only the online/offline preference and per-chat unread/timestamp
 acknowledgement snapshots. Acknowledgement affects the local notification
 delta, never `wacli.db`; read receipts use `wacli chats mark-read` only after
-an explicit chat-menu action.
+an explicit chat-menu action. Archived and currently muted chats retain their
+true unread count inside the chat rail while contributing zero to the bar's
+local notification total.
 
 ## Writes while sync is live
 

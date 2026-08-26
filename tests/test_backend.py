@@ -189,6 +189,34 @@ class BackendTests(unittest.TestCase):
                        if chat["jid"] == "team@g.us")
         self.assertEqual(updated["notification_unread"], 1)
 
+    def test_muted_and_archived_chats_stay_unread_without_alerting(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE chats SET muted_until = -1 WHERE jid = ?",
+                ["team@g.us"],
+            )
+            connection.execute(
+                "UPDATE chats SET archived = 1, unread_count = 2 WHERE jid = ?",
+                ["archive@g.us"],
+            )
+
+        chats = {chat["jid"]: chat for chat in self.backend.chats()["chats"]}
+        self.assertTrue(chats["team@g.us"]["muted"])
+        self.assertEqual(chats["team@g.us"]["unread"], 3)
+        self.assertEqual(chats["team@g.us"]["notification_unread"], 0)
+        self.assertTrue(chats["archive@g.us"]["archived"])
+        self.assertEqual(chats["archive@g.us"]["unread"], 2)
+        self.assertEqual(chats["archive@g.us"]["notification_unread"], 0)
+
+    def test_mute_deadlines_support_seconds_milliseconds_and_forever(self) -> None:
+        now = 2_000_000_000.0
+        self.assertTrue(backend_module.muted_until_active(-1, now))
+        self.assertTrue(backend_module.muted_until_active(2_000_000_001, now))
+        self.assertTrue(backend_module.muted_until_active(2_000_000_001_000, now))
+        self.assertFalse(backend_module.muted_until_active(1_999_999_999, now))
+        self.assertFalse(backend_module.muted_until_active(1_999_999_999_000, now))
+        self.assertFalse(backend_module.muted_until_active(0, now))
+
     def test_chat_surface_is_only_dms_and_standalone_groups(self) -> None:
         visible = {chat["jid"] for chat in self.backend.chats()["chats"]}
         self.assertEqual(visible, {"team@g.us", "alex@s.whatsapp.net", "archive@g.us"})

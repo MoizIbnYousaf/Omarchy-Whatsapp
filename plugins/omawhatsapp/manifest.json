@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.moizibnyousaf.omawhatsapp",
   "name": "OmaWhatsApp",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "author": "MoizIbnYousaf",
   "license": "MIT",
   "description": "WhatsApp in Quickshell—not Chromium. Fast local chats, rich media, keyboard workflows, and Omarchy themes powered by wacli.",

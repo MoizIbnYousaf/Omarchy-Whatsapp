@@ -75,6 +75,22 @@ def bounded_int(value: Any, fallback: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(parsed, maximum))
 
 
+def muted_until_active(value: Any, now: float | None = None) -> bool:
+    """Normalize WhatsApp's forever, seconds, and milliseconds mute values."""
+    try:
+        muted_until = int(value or 0)
+    except (TypeError, ValueError):
+        return False
+    if muted_until == -1:
+        return True
+    if muted_until <= 0:
+        return False
+    current = time.time() if now is None else now
+    if muted_until >= 10_000_000_000:
+        return muted_until > int(current * 1000)
+    return muted_until > int(current)
+
+
 def request() -> dict[str, Any]:
     raw = sys.stdin.buffer.read(65_537)
     if len(raw) > 65_536:
@@ -565,6 +581,8 @@ class Backend:
             jid = str(row["jid"])
             timestamp = int(row["last_message_ts"] or 0)
             unread = int(row["unread_count"] or 0)
+            archived = bool(row["archived"])
+            muted = muted_until_active(row["muted_until"])
             notification_unread = unread
             snapshot = acknowledged.get(jid) if isinstance(acknowledged, dict) else None
             if isinstance(snapshot, dict):
@@ -574,14 +592,16 @@ class Backend:
                     notification_unread = 0
                 elif unread > 0:
                     notification_unread = max(1, unread - acknowledged_count)
+            if archived or muted:
+                notification_unread = 0
             chats.append({
                 "jid": jid, "name": str(row["name"]),
                 "kind": str(row["kind"] or "unknown"),
                 "timestamp": timestamp,
                 "preview": " ".join(str(row["preview"] or "").split())[:512],
                 "last_from_me": bool(row["last_from_me"]),
-                "archived": bool(row["archived"]), "pinned": bool(row["pinned"]),
-                "muted": int(row["muted_until"] or 0) > int(time.time()),
+                "archived": archived, "pinned": bool(row["pinned"]),
+                "muted": muted,
                 "unread": unread,
                 "notification_unread": notification_unread,
             })

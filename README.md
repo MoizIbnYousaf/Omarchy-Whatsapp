@@ -19,6 +19,8 @@ native, and visually at home in Omarchy.
 
 - **Local-first opening.** Chats and messages render from SQLite immediately;
   network sync continues in a quiet user service.
+- **Change-driven refresh.** A tiny resident filesystem watcher debounces
+  SQLite/WAL changes, so new messages appear immediately without hot polling.
 - **A real offline switch.** Pause and disable background sync from the header;
   the complete local archive remains searchable and readable.
 - **Receipts stay deliberate.** Opening a chat or dismissing its badge is local
@@ -64,7 +66,8 @@ native, and visually at home in Omarchy.
   every chat while switching between conversations.
 - Get a quiet bar badge without persistent desktop popups. Opening a chat
   acknowledges that chat locally; middle-clicking the bar dismisses the current
-  batch. New incoming messages light it up again.
+  batch. New incoming messages light it up again, while muted and archived
+  chats remain readable without raising the bar badge.
 
 The focused first release contains direct chats and standalone groups only.
 Channels/newsletters, calls, Community parents, and Community-linked subgroups
@@ -114,7 +117,8 @@ Super+Shift+W / bar item
           │
           ▼
  disposable QML panel ◄── resident QML service
-          │                         │
+          │                   │        │
+          │                   │        └── debounced SQLite/WAL watcher
           ├── read-only SQLite ◄── wacli sync --follow ◄── WhatsApp
           └── bounded helper ─────► live companion / wacli CLI
 ```
@@ -129,8 +133,8 @@ Requirements:
 
 - Omarchy with the plugin-capable Quickshell shell
 - `wacli` 0.17.1 or newer at `~/.local/bin/wacli`
-- Qt Multimedia and Image Formats, `wl-clipboard`, `zenity`, `jq`, Python 3,
-  and systemd user services
+- Qt Multimedia and Image Formats, `wl-clipboard`, `zenity`, `inotify-tools`,
+  `jq`, Python 3, and systemd user services
 
 ```bash
 git clone https://github.com/MoizIbnYousaf/Omarchy-Whatsapp.git && \
@@ -185,7 +189,7 @@ can hide the notification badge entirely.
 ./scripts/test
 ```
 
-The release gate runs 44 backend boundary/write-path tests, 5 offscreen QML
+The release gate runs 46 backend boundary/write-path tests, 10 offscreen QML
 tests, an isolated installer preflight, manifest validation, QML lint, shell
 syntax checks, a diff check, and a heavyweight-runtime dependency guard.
 Installed verification and screenshot rules live in [testing](docs/TESTING.md);

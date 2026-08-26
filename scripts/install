@@ -21,7 +21,7 @@ if (( $# > 0 )); then
   exit 2
 fi
 
-for command_name in jq python3 qmllint rg systemctl wl-paste zenity omarchy; do
+for command_name in jq python3 qmllint rg systemctl wl-paste zenity omarchy inotifywait setpriv; do
   command -v "$command_name" >/dev/null || {
     echo "Missing requirement: $command_name" >&2
     exit 1
