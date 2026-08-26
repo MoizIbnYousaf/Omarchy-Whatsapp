@@ -8,7 +8,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/wacli sync --follow --download-media --max-reconnect 10m --stale-threshold 2m --presence-mode quiet --max-db-size 1GB --refresh-groups
+ExecStart=%h/.local/bin/wacli --lock-wait 30s sync --follow --download-media --max-reconnect 10m --stale-threshold 2m --presence-mode quiet --max-db-size 1GB --refresh-groups
 Restart=on-failure
 RestartSec=10
 NoNewPrivileges=true
