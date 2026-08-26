@@ -506,6 +506,16 @@ class BackendTests(unittest.TestCase):
         self.assertFalse(updated["show_unread_count"])
         self.assertEqual(updated["dropdown_rows"], 9)
         self.assertTrue(self.backend.settings()["send_read_receipts"])
+        preferences = self.root / "state" / "preferences.json"
+        self.assertEqual(preferences.stat().st_mode & 0o777, 0o600)
+
+        reloaded = backend_module.Backend(
+            store_dir=self.store, state_dir=self.root / "state", wacli=self.wacli
+        )
+        persisted = reloaded.settings()
+        self.assertTrue(persisted["send_read_receipts"])
+        self.assertFalse(persisted["show_unread_count"])
+        self.assertEqual(persisted["dropdown_rows"], 9)
 
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "5, 7, or 9"):
             self.backend.settings({"dropdown_rows": 8})

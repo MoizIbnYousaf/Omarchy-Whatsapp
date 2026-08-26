@@ -17,6 +17,10 @@
 - Move full-window ownership into the single resident service so bar clicks
   cannot race Omarchy's generic panel loader. `Super+Shift+W` remains the
   direct full-client toggle.
+- Make the receipt boundary regression-tested: private reading can never
+  auto-write, offline/busy states suppress opted-in receipts, opening the
+  already-warm conversation honors an enabled receipt preference, and demo
+  windows never refresh or acknowledge the real account.
 
 ## 0.7.0 — 2026-08-26
 

@@ -11,7 +11,8 @@ channels and Communities, single-line previews, literal search, strict
 conversation boundaries, media metadata, outgoing-media handoff and album
 identity, target validation, bounded messages, group-member mention scoping,
 local notification acknowledgement, private-reading defaults, bounded
-settings persistence, explicit receipt commands, persistent
+settings persistence and mode-0600 storage, automatic-receipt policy guards,
+demo isolation, explicit receipt commands, persistent
 offline write blocking, muted/archive badge suppression, mute-deadline
 normalization, the lock-free live-delegate path, exact coverage of all 103
 wacli 0.17.1 command leaves, authorization-class enforcement, global-flag

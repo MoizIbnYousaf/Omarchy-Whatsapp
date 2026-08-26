@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "SettingsPolicy.js" as SettingsPolicy
 
 // Resident state keeps the chat rail warm while the window is closed.
 Item {
@@ -167,7 +168,7 @@ Item {
     }
     // Reading stays private unless the user explicitly opts in. Local badge
     // acknowledgement above never talks to WhatsApp; this action does.
-    if (sendReadReceipts && !offlineMode && !writing)
+    if (SettingsPolicy.shouldSendAutomaticReceipt(sendReadReceipts, offlineMode, writing))
       Qt.callLater(function() { root.chatAction("read") })
   }
   function search(value) {

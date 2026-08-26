@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "SettingsPolicy.js" as SettingsPolicy
 
 // OmaWhatsApp keeps chat state resident, renders a responsive native timeline,
 // and follows Omarchy's semantic theme. All chats come from wacli's local mirror.
@@ -199,7 +200,8 @@ Item {
     editTarget = null
     keyboardNavigation.enterComposer()
     mediaViewer.closeViewer()
-    if (pendingOpenChatJid !== "") selectPendingOpenChat()
+    var selectedFromPayload = false
+    if (pendingOpenChatJid !== "") selectedFromPayload = selectPendingOpenChat()
     if (demoMode && payload.attachments === true) {
       pendingStickerPath = ""
       pendingAttachments = [
@@ -212,9 +214,18 @@ Item {
     }
     if (service) {
       service.appOpen = true
-      service.refresh()
-      if (service.selectedChatJid !== "")
-        service.dismissNotifications(service.selectedChatJid)
+      if (!demoMode) {
+        service.refresh()
+        if (SettingsPolicy.shouldSelectWarmChat(
+              demoMode, selectedFromPayload, pendingOpenChatJid, service.selectedChatJid)) {
+          var warmChat = Array.isArray(service.chats)
+            ? service.chats.find(function(chat) {
+                return String(chat.jid || "") === String(service.selectedChatJid || "")
+              }) : null
+          if (warmChat) service.selectChat(warmChat)
+          else service.dismissNotifications(service.selectedChatJid)
+        }
+      }
     }
     composerChatKey = currentChatKey()
     Qt.callLater(function() {
