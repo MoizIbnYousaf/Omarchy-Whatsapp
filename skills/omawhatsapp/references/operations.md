@@ -7,6 +7,21 @@ with `jq` so user content is data, not shell syntax.
 oma="$HOME/.local/bin/omawhatsapp"
 ```
 
+## Accounts
+
+Every request may carry `account`, naming one configured wacli account. An
+empty or absent value means the default account. `status` reports the
+configured accounts, and `chats` returns one merged rail where each row carries
+the `account` it came from. A chat target is resolved inside its own account's
+mirror, so pass back the exact `account` a row reported before mutating it:
+
+```bash
+jq -nc --arg jid "$resolved_jid" --arg account "$row_account" --arg text "$message" \
+  '{account:$account,jid:$jid,text:$text}' | "$oma" send
+```
+
+Never send to a JID resolved from a different account's rail.
+
 ## Read-only operations
 
 Status needs no stdin:
@@ -89,8 +104,8 @@ Inspect private app settings without changing them:
 printf '{}\n' | "$oma" settings
 ```
 
-The supported setting keys are `send_read_receipts` (default `false`),
-`show_unread_count`, and `dropdown_rows` (`5`, `7`, or `9`). Change them only
+The supported setting keys are `send_read_receipts` (default `false`, per
+account), `show_unread_count`, and `dropdown_rows` (`5`, `7`, or `9`). Change them only
 when the user explicitly asks; for example:
 
 ```bash
@@ -103,7 +118,8 @@ Dismiss the current notification batch without changing WhatsApp unread state:
 printf '{}\n' | "$oma" acknowledge
 ```
 
-Pass `{"jid":"..."}` to acknowledge one exact chat. This is a local state
+An empty request clears the aggregated badge across every account. Pass
+`{"account":"...","jid":"..."}` to acknowledge one exact chat. This is a local state
 change, not a receipt, but still perform it only when requested.
 
 Switch background sync only when requested:
@@ -113,8 +129,9 @@ printf '{"online":false}\n' | "$oma" sync-mode
 printf '{"online":true}\n' | "$oma" sync-mode
 ```
 
-Offline mode stops and disables the sync service while preserving local reads.
-It blocks WhatsApp mutations until the user returns online.
+Offline mode stops and disables that account's sync service while preserving
+local reads. It blocks that account's WhatsApp mutations until the user returns
+online, and leaves the other accounts alone.
 
 Account linking is interactive and must be explicitly requested:
 

@@ -35,6 +35,23 @@ Opening or dismissing never mutates WhatsApp by default. Users can explicitly
 opt into automatic exact-chat receipts in the in-app settings card; the
 labelled chat-menu action remains the one-off receipt path.
 
+## Accounts
+
+wacli owns the account list. The helper reads it from `accounts list`, which
+already resolves each account's absolute store, and keys its own private state
+by that store rather than by account name, so renaming an account keeps its
+history and registering an existing session with `store: .` needs no file to
+move. A machine with no account config stays single account and keeps the
+original sync unit; named accounts each get a `wacli-sync@<name>.service`
+instance.
+
+The chat rail merges every account and tags each row with the account it came
+from. An account that has never synced is reported as unready beside the rail
+instead of emptying it. Everything downstream of a row stays inside that row's
+account: its mirror resolves the exact chat, its store scopes the badge
+acknowledgement and the popup watermark, its unit is the one paused when the
+store lock is contended, and its offline choice governs only its own writes.
+
 ## Data boundary
 
 Read paths open wacli's SQLite mirror in URI read-only/query-only mode. Chat

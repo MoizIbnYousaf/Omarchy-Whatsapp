@@ -7,13 +7,33 @@ implementation.
 
 ## Starting position
 
-wacli 0.17.1 already supports named accounts. `--account NAME` is a global
-flag on every leaf, `accounts add|list|remove|show|use` manage
-`config.yaml` (`accounts[].label`, `accounts[].store`, `default_account`), and
-each account owns a separate store directory. The store path of an account is
-config data, not a fixed layout: the helper must discover it from
-`wacli --account NAME --read-only --json doctor` (`data.store_dir`) rather than
-deriving it from the account name.
+wacli 0.17.1 already supports named accounts. `--account NAME` is a global flag
+on every leaf, and `accounts add|list|remove|show|use` manage `config.yaml`.
+Verified against 0.17.1 in a throwaway `XDG_STATE_HOME`:
+
+```json
+{"accounts": [{"name": "probe", "configured_store": "accounts/probe",
+               "store_dir": "/…/wacli/accounts/probe", "default": true}],
+ "config_path": "/…/wacli/config.yaml", "default_account": "probe"}
+```
+
+Three properties matter for this work:
+
+- `accounts list` already resolves `store_dir` to an absolute path, so the
+  helper reads store locations straight from it and never has to guess a layout
+  or run `doctor` per account. The default layout is `<state>/wacli/accounts/<name>`.
+- `configured_store` accepts `.`, which resolves to the root store. The account
+  already linked on a machine can therefore be registered by name **without
+  moving a single file**, which is the migration path this project should take.
+- `--store` does not redirect the account config: `config_path` stays in the
+  XDG state directory no matter what `--store` says. The two are parallel ways
+  to pick a store, never a way to sandbox `config.yaml`.
+
+One migration hazard follows from this: the first named account added becomes
+`default_account`, so plain `wacli` commands stop pointing at the root store
+the moment a second account is introduced. Registering the existing session as
+a named account with `store: .` before adding any other account keeps the
+current mirror addressable.
 
 OmaWhatsApp assumes a single implicit account everywhere:
 
@@ -175,10 +195,9 @@ since changed `_preferences` (`send_read_receipts`, `show_unread_count`,
 
 ## Open questions and risks
 
-- The per-account store layout is unconfirmed: `accounts list` is empty on this
-  machine, and the binary carries a `defaultStoreDirFor` helper. Confirm with a
-  real second account before writing the unit template and the resolver, since
-  `ReadWritePaths` depends on it.
+- The systemd template still needs a real second account to confirm what
+  `ReadWritePaths` should cover: every account store under one root, or one
+  path per instance when an account points somewhere else entirely.
 - Cost of N SQLite connections and N inotify watchers in the resident service,
   against the current single-store budget in `docs/ARCHITECTURE.md`.
 - Machine and repository have diverged. Reinstalling `main` today would drop
@@ -188,8 +207,9 @@ since changed `_preferences` (`send_read_receipts`, `show_unread_count`,
 
 0. Port and commit the notification patch onto `main`, with tests, then
    reinstall. Repository and machine agree again.
-1. Helper-internal multi-account: resolver, `--account` on every command,
-   namespaced state, preference migration. No UI change.
+1. Helper-internal multi-account: resolver over `accounts list`, `--account` on
+   every command, namespaced state, preference migration, and registering the
+   existing session as a named account with `store: .`. No UI change.
 2. Unit template, installer and uninstaller, per-account online mode.
 3. QML unified rail, account marker, switcher, demo fixtures.
 4. Per-account notifications: global burst cap, account label, (account, JID)
