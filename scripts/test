@@ -38,8 +38,17 @@ jq -e '.id == "io.github.moizibnyousaf.omawhatsapp"' \
   exit 1
 }
 
-rg -q 'systemctl --user restart wacli-sync\.service' scripts/install || {
+rg -q 'systemctl --user restart "\$unit"' scripts/install || {
   echo "test: installer upgrades must activate the new sync unit" >&2
+  exit 1
+}
+rg -q 'wacli-sync@\$\{account_name\}\.service' scripts/install || {
+  echo "test: installer must activate one sync instance per named account" >&2
+  exit 1
+}
+rg -q 'ExecCondition=%h/\.local/bin/omawhatsapp session-ready --account %i' \
+  systemd/user/wacli-sync@.service || {
+  echo "test: the sync template must skip an account with no linked session" >&2
   exit 1
 }
 

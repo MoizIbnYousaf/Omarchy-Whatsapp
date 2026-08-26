@@ -2287,6 +2287,10 @@ class Backend:
                     check=False,
                 )
 
+    def session_ready(self) -> bool:
+        """True when the active account has a linked-device session on disk."""
+        return (self.active.store_dir / "session.db").is_file()
+
     def auth(self) -> int:
         result = subprocess.run([str(self.wacli), "auth"], check=False)
         if result.returncode == 0:
@@ -2303,6 +2307,8 @@ def parser() -> argparse.ArgumentParser:
     commands = value.add_subparsers(dest="command", required=True)
     status = commands.add_parser("status")
     status.add_argument("--account", default="")
+    session_ready = commands.add_parser("session-ready")
+    session_ready.add_argument("--account", default="")
     chats = commands.add_parser("chats")
     chats.add_argument("--limit", type=int, default=500)
     messages = commands.add_parser("messages")
@@ -2353,6 +2359,12 @@ def main() -> int:
         except OmaWhatsAppError as exc:
             return emit({"ok": False, "error": clean_error(exc, "OmaWhatsApp failed.")}, 1)
     try:
+        if args.command == "session-ready":
+            # ExecCondition contract: 0 runs the unit, 1 skips it quietly.
+            backend.use_account(str(getattr(args, "account", "") or ""))
+            ready = backend.session_ready()
+            return emit({"ok": True, "kind": "session-ready", "ready": ready},
+                        0 if ready else 1)
         if args.command == "status":
             backend.use_account(str(getattr(args, "account", "") or ""))
             return emit(backend.status())

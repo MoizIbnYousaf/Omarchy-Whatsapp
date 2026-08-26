@@ -28,6 +28,11 @@ jq --arg plugin_id "io.github.moizibnyousaf.omawhatsapp" '
 chmod --reference="$shell_config" "$temporary"
 
 systemctl --user disable --now wacli-sync.service >/dev/null 2>&1 || true
+while IFS= read -r unit; do
+  [[ -n $unit ]] || continue
+  systemctl --user disable --now "$unit" >/dev/null 2>&1 || true
+done < <(systemctl --user list-units --all --plain --no-legend 'wacli-sync@*.service' 2>/dev/null \
+  | awk '{print $1}')
 if command -v quickshell >/dev/null; then
   while timeout 5 quickshell kill -p /usr/share/omarchy/shell --any-display >/dev/null 2>&1; do :; done
 fi
@@ -36,7 +41,8 @@ rm -rf -- "$plugin_root/io.github.moizibnyousaf.omawhatsapp" \
   "$plugin_root/omawhatsapp" "$plugin_root/omawhatsapp-bar"
 rm -rf -- "$skill_root/omawhatsapp"
 rm -f -- "$user_home/.local/bin/omawhatsapp"
-rm -f -- "$user_home/.config/systemd/user/wacli-sync.service"
+rm -f -- "$user_home/.config/systemd/user/wacli-sync.service" \
+  "$user_home/.config/systemd/user/wacli-sync@.service"
 mv -- "$temporary" "$shell_config"
 trap - EXIT
 systemctl --user daemon-reload

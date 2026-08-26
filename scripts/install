@@ -138,21 +138,48 @@ rm -rf -- "$plugin_root/omawhatsapp-bar"
 
 install -Dm644 "$repo_root/systemd/user/wacli-sync.service" \
   "$user_home/.config/systemd/user/wacli-sync.service"
+install -Dm644 "$repo_root/systemd/user/wacli-sync@.service" \
+  "$user_home/.config/systemd/user/wacli-sync@.service"
 mv -- "$temporary" "$shell_config"
 trap - EXIT
 rmdir -- "$staging_root/skills" "$staging_root"
 
 systemctl --user daemon-reload
-preferences="$user_home/.local/state/omawhatsapp/preferences.json"
-if [[ -f $preferences ]] && jq -e '.online == false' "$preferences" >/dev/null 2>&1; then
-  # An upgrade must not silently undo the user's explicit offline choice.
-  systemctl --user disable --now wacli-sync.service
+
+# One sync instance per configured account; a machine that never named an
+# account keeps the original single-instance unit.
+mapfile -t account_names < <(
+  "$user_home/.local/bin/wacli" --read-only --json accounts list 2>/dev/null \
+    | jq -r '.data.accounts[]?.name // empty' 2>/dev/null || true
+)
+if (( ${#account_names[@]} == 0 )); then
+  account_units=(wacli-sync.service)
+  account_flags=("")
 else
-  systemctl --user enable wacli-sync.service
-  # `enable --now` does not restart an already-running unit after an upgrade,
-  # so explicitly restart to activate the new sandbox and ExecStart.
-  systemctl --user restart wacli-sync.service
+  account_units=()
+  account_flags=()
+  for account_name in "${account_names[@]}"; do
+    account_units+=("wacli-sync@${account_name}.service")
+    account_flags+=("$account_name")
+  done
+  # The legacy instance no longer owns any account's store.
+  systemctl --user disable --now wacli-sync.service >/dev/null 2>&1 || true
 fi
+
+for index in "${!account_units[@]}"; do
+  unit=${account_units[$index]}
+  # An upgrade must not silently undo the user's explicit offline choice, and
+  # that choice is per account.
+  if "$user_home/.local/bin/omawhatsapp" status --account "${account_flags[$index]}" 2>/dev/null \
+      | jq -e '.online == false' >/dev/null 2>&1; then
+    systemctl --user disable --now "$unit"
+  else
+    systemctl --user enable "$unit"
+    # `enable --now` does not restart an already-running unit after an upgrade,
+    # so explicitly restart to activate the new sandbox and ExecStart.
+    systemctl --user restart "$unit"
+  fi
+done
 
 if command -v omarchy-restart-shell >/dev/null; then
   omarchy-restart-shell
