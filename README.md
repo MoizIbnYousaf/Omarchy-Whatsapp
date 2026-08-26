@@ -23,10 +23,11 @@ native, and visually at home in Omarchy.
   SQLite/WAL changes, so new messages appear immediately without hot polling.
 - **A real offline switch.** Pause and disable background sync from the header;
   the complete local archive remains searchable and readable.
-- **Receipts stay deliberate.** Opening a chat or dismissing its badge is local
-  only. `Mark read · send receipt` is the explicit WhatsApp write.
-- **One native plugin.** The service, panel, and configurable bar item share a
-  single Omarchy plugin lifecycle.
+- **Private reading by default.** Opening a chat or dismissing its badge is
+  local only. A clear in-app setting can opt into automatic receipts, while
+  `Mark read · send receipt` remains the one-off explicit action.
+- **One native plugin.** The service, full app, and configurable recent-chat
+  dropdown share a single Omarchy plugin lifecycle.
 - **No duplicate sync process.** Sends use wacli's live companion path and a
   serialized fallback only when its store is locked.
 - **Responsive by design.** Wide, compact, narrow, and 360 px layouts are real
@@ -69,6 +70,13 @@ native, and visually at home in Omarchy.
   acknowledges that chat locally; middle-clicking the bar dismisses the current
   batch. New incoming messages light it up again, while muted and archived
   chats remain readable without raising the bar badge.
+- Click the bar badge for a compact, anchored mini client with local search,
+  unread state, recent messages, replies/reactions, clipboard attachments, a
+  real composer, and J/K navigation. `O` expands the exact conversation into
+  the full client; `Super+Shift+W` remains the direct full-app shortcut.
+- Open the native settings card to keep private reading on or opt into read
+  receipts, pause background sync, show/hide the local bar badge, and choose a
+  5/7/9-chat dropdown—all persisted privately on this device.
 
 The graphical client remains deliberately focused on direct chats and
 standalone groups. Channels/newsletters, calls, Community parents, and
@@ -120,10 +128,9 @@ included in this repository.
 ## Architecture
 
 ```text
-Super+Shift+W / bar item
-          │
-          ▼
- disposable QML panel ◄── resident QML service
+bar item ──► anchored mini client ──► messages + composer
+                       │
+Super+Shift+W ─────────┴──► full QML window ◄────── resident QML service
           │                   │        │
           │                   │        └── debounced SQLite/WAL watcher
           ├── read-only SQLite ◄── wacli sync --follow ◄── WhatsApp
@@ -131,7 +138,7 @@ Super+Shift+W / bar item
 ```
 
 The window performs no network request when it opens. The bar does not start a
-poller, and closing the panel does not throw away the warm chat rail. See
+poller, and closing either surface does not throw away the warm chat rail. See
 [technical notes](docs/TECHNICAL.md) and the [parity contract](docs/PARITY.md).
 
 ## Add it to Omarchy
@@ -167,6 +174,15 @@ Add the `Super+Shift+W` binding from
 | Input | Action |
 |---|---|
 | `Super+Shift+W` | Open or close OmaWhatsApp |
+| Bar item click | Open the anchored recent-chat dropdown |
+| Dropdown `J` / `K`, arrows | Move through recent chats |
+| Dropdown `/` | Search recent chats |
+| Dropdown `Enter` | Open the selected mini conversation and focus its composer |
+| Dropdown `Enter` / `Shift+Enter` | Send / add a line |
+| Dropdown paperclip / `Ctrl+O` | Choose and stage up to 10 local files |
+| Dropdown clipboard / `Ctrl+V` | Stage clipboard text, screenshots, GIFs, or files |
+| Dropdown `Esc` | Composer → messages → recent chats → close |
+| Dropdown `O` | Expand the exact chat into the full app |
 | `Ctrl+F` | Find in the current conversation |
 | `Ctrl+1` … `Ctrl+9` | Jump to that visible chat (search order respected) |
 | `Ctrl+B` | Collapse or restore the chat rail without losing context |
@@ -184,11 +200,12 @@ Add the `Super+Shift+W` binding from
 | `+` / `-` / `0` | Zoom in/out/fit |
 | `Esc` | Step back: composer → messages → chat list → close |
 | Header `online` / `offline` pill | Toggle background sync; local history stays available |
+| Header settings button | Private reading, badge, sync, and dropdown-size controls |
 | Chat menu `Mark read · send receipt` | Explicitly mark the chat read on WhatsApp |
 
 Middle-click the bar item to dismiss the current local notification batch;
-right-click refreshes. Neither action sends a read receipt. The widget setting
-can hide the notification badge entirely.
+right-click refreshes. Neither action sends a read receipt. The in-app settings
+card controls automatic receipts, the badge, background sync, and dropdown size.
 
 ## Release quality
 
@@ -196,7 +213,7 @@ can hide the notification badge entirely.
 ./scripts/test
 ```
 
-The release gate runs 58 backend boundary/write-path/parity tests, 11 offscreen
+The release gate runs 59 backend boundary/write-path/parity tests, 16 offscreen
 QML tests, an isolated installer preflight, manifest validation, QML lint,
 shell syntax checks, a diff check, and a heavyweight-runtime dependency guard.
 Installed verification and screenshot rules live in [testing](docs/TESTING.md);

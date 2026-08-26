@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.0 — 2026-08-26
+
+- Replace the bar item's full-window launch with a compact, bar-anchored mini
+  client backed by the already-resident local service.
+- Add unread badges, local chat search, online/offline state, configurable
+  5/7/9-row density, refresh, outside-click dismissal, and J/K, arrow, `/`,
+  Enter, Escape, and `O` keyboard flows.
+- Read recent messages and send text, replies, reactions, clipboard text, and
+  staged clipboard files directly from the dropdown; `O` expands the exact
+  chat into the full client with its composer focused.
+- Add a theme-native settings card for private reading/read receipts,
+  background sync, bar badge visibility, and 5/7/9-chat dropdown density.
+  Private reading remains the default; opting in is explicit and persisted in
+  the mode-0600 local preferences file.
+- Move full-window ownership into the single resident service so bar clicks
+  cannot race Omarchy's generic panel loader. `Super+Shift+W` remains the
+  direct full-client toggle.
+
 ## 0.7.0 — 2026-08-26
 
 - Give the shared `$omawhatsapp` skill guarded parity with all 103 command

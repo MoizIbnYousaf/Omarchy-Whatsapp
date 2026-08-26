@@ -25,6 +25,7 @@ Item {
   property bool narrowConversation: false
   property bool narrowSearchOpen: false
   property bool sidebarCollapsed: false
+  property bool settingsOpen: false
   property var replyTarget: null
   property var editTarget: null
   property var deleteTarget: null
@@ -45,6 +46,7 @@ Item {
   property bool pollMultiple: false
   property bool copyToastVisible: false
   property string toastText: ""
+  property string pendingOpenChatJid: ""
   property string demoSelectedJid: "demo-lab"
   property var demoChats: [
     { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", preview: "OmaWhatsApp is instant and native", timestamp: 1787539920, unread: 0, pinned: true },
@@ -189,12 +191,15 @@ Item {
     closingFromHost = false
     opened = true
     demoMode = payload.demo === true
+    pendingOpenChatJid = String(payload.jid || "")
     narrowConversation = payload.conversation === true
     narrowSearchOpen = false
+    settingsOpen = false
     replyTarget = null
     editTarget = null
     keyboardNavigation.enterComposer()
     mediaViewer.closeViewer()
+    if (pendingOpenChatJid !== "") selectPendingOpenChat()
     if (demoMode && payload.attachments === true) {
       pendingStickerPath = ""
       pendingAttachments = [
@@ -206,7 +211,7 @@ Item {
       pendingStickerPath = ""
     }
     if (service) {
-      service.windowOpen = true
+      service.appOpen = true
       service.refresh()
       if (service.selectedChatJid !== "")
         service.dismissNotifications(service.selectedChatJid)
@@ -225,16 +230,29 @@ Item {
     })
   }
 
+  function selectPendingOpenChat() {
+    var jid = String(pendingOpenChatJid || "")
+    if (jid === "") return false
+    var target = sourceChats.find(function(chat) {
+      return String(chat.jid || "") === jid
+    }) || null
+    if (!target) return false
+    pendingOpenChatJid = ""
+    selectChat(target, "composer")
+    return true
+  }
+
   function close() {
     saveComposerState()
     closingFromHost = true
+    settingsOpen = false
     opened = false
-    if (service) service.windowOpen = false
+    if (service) service.appOpen = false
     closingFromHost = false
   }
 
   function requestClose() {
-    if (shell && typeof shell.hide === "function") shell.hide(pluginId)
+    if (service && typeof service.closeApp === "function") service.closeApp()
     else close()
   }
 
@@ -273,6 +291,11 @@ Item {
   }
 
   function goBack() {
+    if (settingsOpen) {
+      settingsOpen = false
+      root.focusComposer()
+      return
+    }
     if (messageSearchField.activeFocus) {
       if (messageSearchField.text !== "") messageSearchField.text = ""
       root.focusMessages()
@@ -679,6 +702,9 @@ Item {
 
   Connections {
     target: root.service
+    function onChatsChanged() {
+      if (root.opened && root.pendingOpenChatJid !== "") root.selectPendingOpenChat()
+    }
     function onTextPasted(text, jid) {
       var key = String(jid || root.pendingWriteChatKey)
       if (key === root.composerChatKey) {
@@ -762,6 +788,12 @@ Item {
     }
     function onControlFailed(message) {
       root.showToast(String(message || "setting could not be changed"))
+    }
+    function onSettingsCompleted() {
+      root.showToast("settings saved privately on this device")
+    }
+    function onSettingsFailed(message) {
+      root.showToast(String(message || "settings could not be saved"))
     }
   }
 
@@ -916,6 +948,11 @@ Item {
 
       Keys.onPressed: function(event) {
         if (mediaViewer.opened) return
+        if (root.settingsOpen) {
+          if (event.key === Qt.Key_Escape) root.settingsOpen = false
+          event.accepted = true
+          return
+        }
         if ((event.modifiers & Qt.ControlModifier)
             && event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
           root.selectChatAt(event.key - Qt.Key_1)
@@ -1039,6 +1076,29 @@ Item {
             width: Style.space(30)
             height: width
             radius: Style.cornerRadius
+            color: settingsMouse.containsMouse || root.settingsOpen
+              ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+            Text {
+              textFormat: Text.PlainText
+              anchors.centerIn: parent
+              text: "󰒓"
+              color: root.settingsOpen ? root.accent : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+            }
+            MouseArea {
+              id: settingsMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.settingsOpen = !root.settingsOpen
+            }
+          }
+
+          Rectangle {
+            width: Style.space(30)
+            height: width
+            radius: Style.cornerRadius
             color: refreshMouse.containsMouse
               ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
             Text {
@@ -1064,6 +1124,303 @@ Item {
           anchors.bottom: parent.bottom
           height: 1
           color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.10)
+        }
+      }
+
+      // ---------------------------------------------------------- settings
+
+      Item {
+        z: 400
+        visible: root.settingsOpen
+        anchors.fill: parent
+
+        Rectangle {
+          anchors.fill: parent
+          color: Qt.rgba(0, 0, 0, 0.58)
+          MouseArea {
+            anchors.fill: parent
+            onClicked: root.settingsOpen = false
+          }
+        }
+
+        Rectangle {
+          id: settingsCard
+          anchors.centerIn: parent
+          width: Math.min(parent.width - Style.space(28), Style.space(560))
+          height: Math.min(parent.height - Style.space(28), settingsContent.implicitHeight + Style.space(32))
+          radius: Style.cornerRadius
+          color: root.background
+          border.width: 1
+          border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.52)
+
+          MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+            onClicked: function(mouse) { mouse.accepted = true }
+          }
+
+          Flickable {
+            id: settingsScroller
+            anchors.fill: parent
+            anchors.margins: Style.space(16)
+            contentWidth: width
+            contentHeight: settingsContent.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            Column {
+              id: settingsContent
+              width: settingsScroller.width
+              spacing: Style.space(10)
+
+            Item {
+              width: parent.width
+              height: Style.space(42)
+              Column {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(1)
+                Text {
+                  textFormat: Text.PlainText
+                  text: "OmaWhatsApp settings"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.heading
+                  font.weight: Font.DemiBold
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  text: "Private, local, and explicit by default"
+                  color: root.dimmer
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+              Rectangle {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: Style.space(30)
+                height: width
+                radius: Style.cornerRadius
+                color: closeSettingsHover.hovered
+                  ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+                Text {
+                  textFormat: Text.PlainText
+                  anchors.centerIn: parent
+                  text: "×"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.title
+                }
+                HoverHandler { id: closeSettingsHover }
+                TapHandler { onTapped: root.settingsOpen = false }
+              }
+            }
+
+            Rectangle {
+              width: parent.width
+              height: privateReadingColumn.implicitHeight + Style.space(24)
+              radius: Style.cornerRadius
+              color: root.service && root.service.sendReadReceipts
+                ? Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.09)
+                : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.12)
+              border.width: 1
+              border.color: root.service && root.service.sendReadReceipts
+                ? Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.45)
+                : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.45)
+              Column {
+                id: privateReadingColumn
+                anchors.left: parent.left
+                anchors.right: readReceiptSwitch.left
+                anchors.leftMargin: Style.space(12)
+                anchors.rightMargin: Style.space(12)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(3)
+                Text {
+                  textFormat: Text.PlainText
+                  text: root.service && root.service.sendReadReceipts
+                    ? "Read receipts enabled" : "Private reading enabled"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  font.weight: Font.DemiBold
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  width: parent.width
+                  wrapMode: Text.Wrap
+                  text: root.service && root.service.sendReadReceipts
+                    ? "Opening a conversation may tell the other side it was read."
+                    : "Read any locally synced message without telling the other side. Local badges still clear."
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+              ToggleSwitch {
+                id: readReceiptSwitch
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                checked: root.service ? root.service.sendReadReceipts : false
+                busy: root.service ? root.service.settingsWriting : false
+                foreground: root.foreground
+                accent: root.accent
+                onToggled: if (root.service)
+                  root.service.setPreference("send_read_receipts", !checked)
+              }
+            }
+
+            Rectangle {
+              width: parent.width
+              height: Style.space(62)
+              radius: Style.cornerRadius
+              color: Style.normalFillFor(root.foreground, root.accent)
+              Column {
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(12)
+                anchors.right: unreadSwitch.left
+                anchors.rightMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(2)
+                Text {
+                  textFormat: Text.PlainText
+                  text: "Unread count in the bar"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  text: "A local badge only—no desktop message popups"
+                  color: root.dimmer
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+              ToggleSwitch {
+                id: unreadSwitch
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                checked: root.service ? root.service.showUnreadCount : true
+                busy: root.service ? root.service.settingsWriting : false
+                foreground: root.foreground
+                accent: root.accent
+                onToggled: if (root.service)
+                  root.service.setPreference("show_unread_count", !checked)
+              }
+            }
+
+            Rectangle {
+              width: parent.width
+              height: Style.space(62)
+              radius: Style.cornerRadius
+              color: Style.normalFillFor(root.foreground, root.accent)
+              Column {
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(12)
+                anchors.right: onlineSwitch.left
+                anchors.rightMargin: Style.space(10)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(2)
+                Text {
+                  textFormat: Text.PlainText
+                  text: "Background sync"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  text: root.service && root.service.offlineMode
+                    ? "Paused; your local archive remains readable"
+                    : "Keep the encrypted local mirror warm"
+                  color: root.dimmer
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+              ToggleSwitch {
+                id: onlineSwitch
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                checked: root.demoMode || (root.service && !root.service.offlineMode)
+                busy: root.service ? root.service.controlWriting : false
+                foreground: root.foreground
+                accent: root.accent
+                onToggled: if (!root.demoMode && root.service)
+                  root.service.setOnline(!checked)
+              }
+            }
+
+            Rectangle {
+              width: parent.width
+              height: dropdownSizeColumn.implicitHeight + Style.space(22)
+              radius: Style.cornerRadius
+              color: Style.normalFillFor(root.foreground, root.accent)
+              Column {
+                id: dropdownSizeColumn
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.margins: Style.space(11)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(8)
+                Text {
+                  textFormat: Text.PlainText
+                  text: "Recent chats in the bar dropdown"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+                Row {
+                  width: parent.width
+                  spacing: Style.space(7)
+                  Repeater {
+                    model: [5, 7, 9]
+                    delegate: Rectangle {
+                      required property int modelData
+                      width: (dropdownSizeColumn.width - Style.space(14)) / 3
+                      height: Style.space(32)
+                      radius: Style.cornerRadius
+                      color: root.service && root.service.dropdownRows === modelData
+                        ? Style.selectedFillFor(root.foreground, root.accent)
+                        : Style.normalFillFor(root.foreground, root.accent)
+                      border.width: 1
+                      border.color: root.service && root.service.dropdownRows === modelData
+                        ? root.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+                      Text {
+                        textFormat: Text.PlainText
+                        anchors.centerIn: parent
+                        text: String(modelData)
+                        color: root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        font.weight: Font.DemiBold
+                      }
+                      TapHandler {
+                        enabled: root.service && !root.service.settingsWriting
+                        onTapped: root.service.setPreference("dropdown_rows", modelData)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+              Text {
+                textFormat: Text.PlainText
+                width: parent.width
+                wrapMode: Text.Wrap
+                text: "OmaWhatsApp stores these choices in a mode-0600 local preferences file. Private reading is the default and a read receipt is never sent unless you opt in or explicitly choose “Mark read · send receipt”."
+                color: root.dimmer
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+          }
         }
       }
 

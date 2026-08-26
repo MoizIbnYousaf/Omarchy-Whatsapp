@@ -28,8 +28,9 @@ invoking `wacli` directly.
 - Never create a test write. Never retry a possibly delivered send, vote,
   reaction, edit, deletion, membership change, profile change, status,
   channel/group action, or account mutation automatically.
-- Opening or reading a chat does not imply a read receipt. Send one only after
-  an explicit request to mark the chat read.
+- Opening or reading a chat does not grant an agent permission to send a read
+  receipt or change the user's private-reading preference. Send a receipt or
+  change that preference only after an explicit request.
 - Respect offline mode. Do not turn background sync on merely to complete
   another action. Local reads and explicitly requested local maintenance may
   continue; remote reads, sync, and WhatsApp mutations must stop.

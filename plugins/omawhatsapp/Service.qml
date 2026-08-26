@@ -20,7 +20,12 @@ Item {
   property bool loadingMembers: false
   property bool writing: false
   property bool controlWriting: false
-  property bool windowOpen: false
+  property bool settingsWriting: false
+  property bool sendReadReceipts: false
+  property bool showUnreadCount: true
+  property int dropdownRows: 7
+  property bool appOpen: false
+  property bool dropdownOpen: false
   property bool messagesPending: false
   property bool storeRefreshPending: false
   property string activeWriteKind: ""
@@ -35,6 +40,11 @@ Item {
   property var chats: []
   property var messages: []
   property var members: []
+
+  readonly property bool windowOpen: appOpen || dropdownOpen
+  readonly property string pluginId: manifest && manifest.id
+    ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
+  property string pendingAppPayload: ""
 
   readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
   readonly property string storeDirectory: {
@@ -61,6 +71,41 @@ Item {
   signal writeFailed(string message, string jid)
   signal controlCompleted(string kind)
   signal controlFailed(string message)
+  signal settingsCompleted()
+  signal settingsFailed(string message)
+
+  function injectApp() {
+    var target = appLoader.item
+    if (!target) return
+    if ("shell" in target) target.shell = root.shell
+    if ("manifest" in target) target.manifest = root.manifest
+    if ("service" in target) target.service = root
+  }
+
+  function openApp(payloadJson) {
+    pendingAppPayload = String(payloadJson || "{}")
+    injectApp()
+    if (!appLoader.item) return false
+    var payload = pendingAppPayload
+    pendingAppPayload = ""
+    appLoader.item.open(payload)
+    return true
+  }
+
+  function closeApp() {
+    pendingAppPayload = ""
+    if (appLoader.item && typeof appLoader.item.close === "function")
+      appLoader.item.close()
+  }
+
+  function toggleApp(payloadJson) {
+    if (!appLoader.item && pendingAppPayload !== "") {
+      pendingAppPayload = ""
+      return
+    }
+    if (appLoader.item && appLoader.item.opened === true) closeApp()
+    else openApp(payloadJson)
+  }
 
   function parseJson(raw) {
     try { return JSON.parse(String(raw || "{}")) } catch (error) { return null }
@@ -108,17 +153,22 @@ Item {
     if (!chat || !chat.jid) return
     var next = String(chat.jid)
     dismissNotifications(next)
-    if (next === selectedChatJid) return
-    selectedChatJid = next
-    selectedChatName = String(chat.name || "WhatsApp chat")
-    selectedChatKind = String(chat.kind || "unknown")
-    selectedId = ""
-    query = ""
-    messages = []
-    members = []
-    errorText = ""
-    refreshMessages()
-    refreshMembers()
+    if (next !== selectedChatJid) {
+      selectedChatJid = next
+      selectedChatName = String(chat.name || "WhatsApp chat")
+      selectedChatKind = String(chat.kind || "unknown")
+      selectedId = ""
+      query = ""
+      messages = []
+      members = []
+      errorText = ""
+      refreshMessages()
+      refreshMembers()
+    }
+    // Reading stays private unless the user explicitly opts in. Local badge
+    // acknowledgement above never talks to WhatsApp; this action does.
+    if (sendReadReceipts && !offlineMode && !writing)
+      Qt.callLater(function() { root.chatAction("read") })
   }
   function search(value) {
     var next = String(value || "").trim()
@@ -261,8 +311,61 @@ Item {
     controlProcess.running = true
     return true
   }
+  function setPreference(key, value) {
+    if (settingsProcess.running) return false
+    var settings = ({})
+    settings[String(key || "")] = value
+    settingsWriting = true
+    settingsProcess.payload = JSON.stringify({ settings: settings })
+    settingsProcess.stdinEnabled = true
+    settingsProcess.running = true
+    return true
+  }
 
   Component.onCompleted: storeWatchProcess.running = true
+
+  // The full window belongs to the one resident service, while the bar owns
+  // the anchored dropdown. This avoids duplicate per-monitor app windows and
+  // keeps a bar click on the compact surface.
+  Loader {
+    id: appLoader
+    active: true
+    asynchronous: true
+    source: Qt.resolvedUrl("App.qml")
+    onLoaded: {
+      root.injectApp()
+      if (root.pendingAppPayload !== "") Qt.callLater(function() {
+        root.openApp(root.pendingAppPayload)
+      })
+    }
+  }
+
+  IpcHandler {
+    target: root.pluginId
+
+    function status(): string {
+      return JSON.stringify({
+        appOpen: root.appOpen,
+        dropdownOpen: root.dropdownOpen,
+        ready: root.ready,
+        privateReading: !root.sendReadReceipts
+      })
+    }
+
+    function openApp(payload: string): string {
+      return root.openApp(payload) ? "ok" : "loading"
+    }
+
+    function closeApp(): string {
+      root.closeApp()
+      return "ok"
+    }
+
+    function toggleApp(payload: string): string {
+      root.toggleApp(payload)
+      return "ok"
+    }
+  }
 
   Process {
     id: storeWatchProcess
@@ -338,6 +441,10 @@ Item {
       root.authenticated = payload.authenticated === true
       root.syncActive = payload.sync_active === true
       root.offlineMode = payload.offline_mode === true
+      root.sendReadReceipts = payload.send_read_receipts === true
+      root.showUnreadCount = payload.show_unread_count !== false
+      root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
+        ? Number(payload.dropdown_rows) : 7
       root.ready = root.authenticated && payload.database_ready === true
       if (root.ready) root.errorText = ""
     }
@@ -409,6 +516,34 @@ Item {
       root.controlCompleted(finishedKind)
       root.refreshStatus()
       root.refreshChats()
+    }
+  }
+
+  Process {
+    id: settingsProcess
+    property string payload: ""
+    command: [root.helper, "settings"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: settingsOutput }
+    stderr: StdioCollector { id: settingsError }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      root.settingsWriting = false
+      var payload = root.parseJson(settingsOutput.text)
+      if (exitCode !== 0 || !payload || payload.ok !== true) {
+        var message = (payload && payload.error)
+          || String(settingsError.text || "OmaWhatsApp settings could not be saved.").trim()
+        root.errorText = message
+        root.settingsFailed(message)
+        root.refreshStatus()
+        return
+      }
+      root.sendReadReceipts = payload.send_read_receipts === true
+      root.showUnreadCount = payload.show_unread_count !== false
+      root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
+        ? Number(payload.dropdown_rows) : 7
+      root.errorText = ""
+      root.settingsCompleted()
     }
   }
 

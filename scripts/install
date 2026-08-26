@@ -148,6 +148,6 @@ if command -v omarchy-restart-shell >/dev/null; then
   omarchy-restart-shell
 fi
 
-echo "OmaWhatsApp installed as one service/panel/bar plugin with a shared agent skill."
+echo "OmaWhatsApp installed as one resident service/bar plugin with a shared agent skill."
 echo "Run ~/.local/bin/omawhatsapp auth if WhatsApp is not linked."
 echo "Bind Super+Shift+W using omarchy/bindings.lua.example if desired."

@@ -430,6 +430,9 @@ class Backend:
         default: dict[str, Any] = {
             "version": PREFERENCES_VERSION,
             "online": True,
+            "send_read_receipts": False,
+            "show_unread_count": True,
+            "dropdown_rows": 7,
             "acknowledged_unread": {},
         }
         value = self._read_state_json("preferences.json", MAX_PREFERENCES, default)
@@ -447,9 +450,15 @@ class Backend:
                     "unread": unread,
                     "timestamp": timestamp,
                 }
+        dropdown_rows = bounded_int(value.get("dropdown_rows"), 7, 5, 9)
+        if dropdown_rows not in {5, 7, 9}:
+            dropdown_rows = 7
         return {
             "version": PREFERENCES_VERSION,
             "online": value.get("online") is not False,
+            "send_read_receipts": value.get("send_read_receipts") is True,
+            "show_unread_count": value.get("show_unread_count") is not False,
+            "dropdown_rows": dropdown_rows,
             "acknowledged_unread": clean_acknowledged,
         }
 
@@ -465,6 +474,34 @@ class Backend:
 
     def online(self) -> bool:
         return self._preferences().get("online") is not False
+
+    def settings(self, update: Any = None) -> dict[str, Any]:
+        if update is None:
+            value = self._preferences()
+        else:
+            if not isinstance(update, dict):
+                raise OmaWhatsAppError("Settings must be a JSON object.")
+            allowed = {"send_read_receipts", "show_unread_count", "dropdown_rows"}
+            if any(key not in allowed for key in update):
+                raise OmaWhatsAppError("That OmaWhatsApp setting is not supported.")
+            if "send_read_receipts" in update and not isinstance(update["send_read_receipts"], bool):
+                raise OmaWhatsAppError("Read receipts must be on or off.")
+            if "show_unread_count" in update and not isinstance(update["show_unread_count"], bool):
+                raise OmaWhatsAppError("The unread badge must be on or off.")
+            if "dropdown_rows" in update and update["dropdown_rows"] not in {5, 7, 9}:
+                raise OmaWhatsAppError("Dropdown size must be 5, 7, or 9 chats.")
+
+            def apply(value: dict[str, Any]) -> None:
+                value.update(update)
+
+            value = self._update_preferences(apply)
+        return {
+            "ok": True,
+            "kind": "settings",
+            "send_read_receipts": value.get("send_read_receipts") is True,
+            "show_unread_count": value.get("show_unread_count") is not False,
+            "dropdown_rows": value.get("dropdown_rows", 7),
+        }
 
     @staticmethod
     def _media_hint_key(jid: str, message_id: str) -> str:
@@ -702,7 +739,8 @@ class Backend:
                     "sync_active": False, "error": "wacli is not installed."}
         doctor = self._doctor()
         authenticated = doctor.get("authenticated") is True
-        online = self.online()
+        preferences = self._preferences()
+        online = preferences.get("online") is not False
         return {
             "ok": True,
             "installed": True,
@@ -710,6 +748,9 @@ class Backend:
             "sync_active": self._sync_active(),
             "online": online,
             "offline_mode": not online,
+            "send_read_receipts": preferences.get("send_read_receipts") is True,
+            "show_unread_count": preferences.get("show_unread_count") is not False,
+            "dropdown_rows": preferences.get("dropdown_rows", 7),
             "fts_enabled": doctor.get("fts_enabled") is True,
             "database_ready": self._database(doctor).is_file(),
             "error": clean_error(doctor.get("store_error"), "") if authenticated else "",
@@ -1817,6 +1858,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("chat-action")
     commands.add_parser("acknowledge")
     commands.add_parser("sync-mode")
+    commands.add_parser("settings")
     commands.add_parser("capabilities")
     transport = commands.add_parser("wacli")
     transport.add_argument("--interactive", action="store_true")
@@ -1917,6 +1959,9 @@ def main() -> int:
             if not isinstance(payload.get("online"), bool):
                 raise OmaWhatsAppError("Online mode must be true or false.")
             return emit(backend.set_online(bool(payload["online"])))
+        if args.command == "settings":
+            update = payload.get("settings") if "settings" in payload else None
+            return emit(backend.settings(update))
     except OmaWhatsAppError as exc:
         return emit({"ok": False, "error": clean_error(exc, "OmaWhatsApp failed.")}, 1)
     return emit({"ok": False, "error": "Unknown command."}, 2)

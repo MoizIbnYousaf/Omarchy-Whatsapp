@@ -4,9 +4,10 @@
 
 - `Service.qml` is resident. It owns authentication/sync state, the chat rail,
   selected conversation, unread total, drafts-in-flight, and refresh cadence.
-- `App.qml` is disposable. It owns window composition, focus, filtering, and
-  the current visible draft.
-- `BarWidget.qml` is a thin view over the existing service.
+- `App.qml` is owned once by the resident service. Its window remains hidden
+  until summoned and owns composition, focus, filtering, and visible drafts.
+- `BarWidget.qml` hosts `Dropdown.qml`, a bar-anchored recent-chat view over
+  the existing service. It never creates another backend or poller.
 - `bin/omawhatsapp` is a bounded local bridge; it is not a daemon. Its focused
   commands serve the graphical client, while its classified `wacli` gateway
   accounts for every command leaf in the supported transport version.
@@ -15,11 +16,17 @@
 
 The window can disappear without making the data path cold.
 
+The bar click and global shortcut intentionally lead to different surfaces.
+The click opens a compact interactive conversation client; `Super+Shift+W`
+summons the full app. Both share the same selected exact JID, messages, write
+serialization, offline state, and resident refresh path.
+
 Unread state has two independent layers. wacli's `unread_count` remains the
 authoritative WhatsApp value. OmaWhatsApp stores a mode-`0600` local
 acknowledgement snapshot and derives only the bar's new-message delta from it.
-Opening or dismissing never mutates WhatsApp; the labelled chat-menu action is
-the sole read-receipt path.
+Opening or dismissing never mutates WhatsApp by default. Users can explicitly
+opt into automatic exact-chat receipts in the in-app settings card; the
+labelled chat-menu action remains the one-off receipt path.
 
 ## Data boundary
 

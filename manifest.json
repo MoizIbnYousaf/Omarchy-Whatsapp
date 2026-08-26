@@ -2,16 +2,15 @@
   "schemaVersion": 1,
   "id": "io.github.moizibnyousaf.omawhatsapp",
   "name": "OmaWhatsApp",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "author": "MoizIbnYousaf",
   "license": "MIT",
   "description": "WhatsApp in Quickshell—not Chromium. Fast local chats, rich media, keyboard workflows, and Omarchy themes powered by wacli.",
-  "kinds": ["service", "bar-widget", "panel"],
+  "kinds": ["service", "bar-widget"],
   "activation": "on-demand",
   "entryPoints": {
     "service": "plugins/omawhatsapp/Service.qml",
-    "barWidget": "plugins/omawhatsapp/BarWidget.qml",
-    "panel": "plugins/omawhatsapp/App.qml"
+    "barWidget": "plugins/omawhatsapp/BarWidget.qml"
   },
   "barWidget": {
     "displayName": "OmaWhatsApp",
@@ -19,19 +18,6 @@
     "category": "Communication",
     "aliases": ["whatsapp", "chat", "messages", "messaging"],
     "allowMultiple": false,
-    "defaultSection": "right",
-    "defaults": {
-      "showUnreadCount": "On"
-    },
-    "schema": [
-      {
-        "key": "showUnreadCount",
-        "type": "enum",
-        "label": "Show notification badge",
-        "options": ["On", "Off"],
-        "defaultValue": "On",
-        "description": "Show new messages since the last local dismissal; this never sends read receipts."
-      }
-    ]
+    "defaultSection": "right"
   }
 }

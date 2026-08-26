@@ -2,11 +2,12 @@
 
 ## Runtime shape
 
-OmaWhatsApp is one Omarchy plugin with three entry points:
+OmaWhatsApp is one Omarchy plugin with two shell entry points:
 
-- `Service.qml` stays resident and owns local sync/read state.
-- `App.qml` creates the disposable responsive window.
-- `BarWidget.qml` is a thin launcher/unread view over the service.
+- `Service.qml` stays resident, owns local sync/read state, and owns the one
+  lazily displayed `App.qml` responsive window.
+- `BarWidget.qml` owns a keyboard-capable `Dropdown.qml` anchored to the bar;
+  it reads and writes through the same resident service.
 
 `bin/omawhatsapp` is a bounded Python bridge, not a daemon. The only long-lived
 backend is the user-owned `wacli sync --follow` process.
@@ -41,10 +42,12 @@ must resolve to a participant or known sender in the selected indexed group.
 `preferences.json` is another atomic mode-`0600` helper file. State files and
 locks are opened relative to an owner-checked directory descriptor with
 `O_NOFOLLOW`; writes use same-directory descriptor-bound atomic replacement.
-It stores only the online/offline preference and per-chat unread/timestamp
+It stores the online/offline choice, private-reading/read-receipt preference,
+bar badge visibility, dropdown density, and per-chat unread/timestamp
 acknowledgement snapshots. Acknowledgement affects the local notification
-delta, never `wacli.db`; read receipts use `wacli chats mark-read` only after
-an explicit chat-menu action. Archived and currently muted chats retain their
+delta, never `wacli.db`; private reading is the default. Read receipts use
+`wacli chats mark-read` only after the user opts in or chooses the explicit
+chat-menu action. Archived and currently muted chats retain their
 true unread count inside the chat rail while contributing zero to the bar's
 local notification total.
 

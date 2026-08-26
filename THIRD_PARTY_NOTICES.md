@@ -2,7 +2,7 @@
 
 ## Omamail
 
-OmaWhatsApp's service, panel, and bar ownership model was informed by
+OmaWhatsApp's resident-service, full-window, and bar ownership model was informed by
 [Omamail](https://github.com/huacnlee/omamail).
 
 Copyright © 2026 Jason Lee. Omamail is available under the MIT License in its

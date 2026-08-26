@@ -491,6 +491,27 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(self.backend.online())
         self.assertIn("enable", run.call_args.args[0])
 
+    def test_private_reading_is_default_and_settings_are_bounded(self) -> None:
+        defaults = self.backend.settings()
+        self.assertFalse(defaults["send_read_receipts"])
+        self.assertTrue(defaults["show_unread_count"])
+        self.assertEqual(defaults["dropdown_rows"], 7)
+
+        updated = self.backend.settings({
+            "send_read_receipts": True,
+            "show_unread_count": False,
+            "dropdown_rows": 9,
+        })
+        self.assertTrue(updated["send_read_receipts"])
+        self.assertFalse(updated["show_unread_count"])
+        self.assertEqual(updated["dropdown_rows"], 9)
+        self.assertTrue(self.backend.settings()["send_read_receipts"])
+
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "5, 7, or 9"):
+            self.backend.settings({"dropdown_rows": 8})
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not supported"):
+            self.backend.settings({"surprise": True})
+
     def test_selectable_option_is_bounded(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
         with mock.patch.object(self.backend, "_write", return_value=completed) as write:

@@ -10,8 +10,9 @@ must still be reviewed before push.
 
 Runtime data remains under `~/.local/state/`. Clipboard images use a private
 runtime file, pass through wacli, and are removed in a `finally` path.
-OmaWhatsApp's mode-`0600` preferences contain the offline choice and local
-notification acknowledgements. State reads and locks are descriptor-bound,
+OmaWhatsApp's mode-`0600` preferences contain the offline choice, private
+reading/read-receipt choice, bar badge visibility, dropdown density, and local
+notification acknowledgements. Private reading is the default. State reads and locks are descriptor-bound,
 owner-checked, and no-follow; atomic replacement never follows a predictable
 state-file symlink. They never leave the machine and are never written into
 wacli's database.

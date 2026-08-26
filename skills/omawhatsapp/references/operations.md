@@ -83,6 +83,20 @@ never calls it.
 
 ## Local app state
 
+Inspect private app settings without changing them:
+
+```bash
+printf '{}\n' | "$oma" settings
+```
+
+The supported setting keys are `send_read_receipts` (default `false`),
+`show_unread_count`, and `dropdown_rows` (`5`, `7`, or `9`). Change them only
+when the user explicitly asks; for example:
+
+```bash
+printf '{"settings":{"send_read_receipts":false}}\n' | "$oma" settings
+```
+
 Dismiss the current notification batch without changing WhatsApp unread state:
 
 ```bash
