@@ -16,6 +16,9 @@ Item {
   property bool authenticated: false
   property bool syncActive: false
   property bool offlineMode: false
+  property bool notificationsEnabled: false
+  property bool notificationsPreview: true
+  property bool notifyAvailable: true
   property bool loadingChats: false
   property bool loadingMessages: false
   property bool loadingMembers: false
@@ -117,6 +120,14 @@ Item {
     refreshChats()
     refreshMessages()
     refreshMembers()
+  }
+  function runNotify() {
+    if (!ready || !notificationsEnabled || notifyProcess.running) return
+    notifyProcess.payload = JSON.stringify({
+      skip_jid: windowOpen ? selectedChatJid : ""
+    })
+    notifyProcess.stdinEnabled = true
+    notifyProcess.running = true
   }
   function refreshStatus() {
     if (!statusProcess.running) statusProcess.running = true
@@ -302,6 +313,19 @@ Item {
     controlProcess.running = true
     return true
   }
+  function setNotifications(enabled, preview) {
+    if (controlProcess.running || writing) return false
+    var request = ({})
+    if (enabled !== undefined && enabled !== null) request.enabled = enabled === true
+    if (preview !== undefined && preview !== null) request.preview = preview === true
+    controlWriting = true
+    controlProcess.kind = "notify-mode"
+    controlProcess.payload = JSON.stringify(request)
+    controlProcess.command = [helper, "notify-mode"]
+    controlProcess.stdinEnabled = true
+    controlProcess.running = true
+    return true
+  }
   function setOnline(online) {
     if (controlProcess.running || writing) return false
     controlWriting = true
@@ -416,6 +440,7 @@ Item {
     triggeredOnStart: true
     onTriggered: {
       root.refreshChats()
+      root.runNotify()
       if (root.windowOpen) root.refreshMessages()
     }
   }
@@ -442,6 +467,10 @@ Item {
       root.authenticated = payload.authenticated === true
       root.syncActive = payload.sync_active === true
       root.offlineMode = payload.offline_mode === true
+      var notifications = payload.notifications
+      root.notificationsEnabled = !!notifications && notifications.enabled === true
+      root.notificationsPreview = !notifications || notifications.preview !== false
+      root.notifyAvailable = payload.notify_available !== false
       root.sendReadReceipts = payload.send_read_receipts === true
       root.showUnreadCount = payload.show_unread_count !== false
       root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
@@ -514,6 +543,10 @@ Item {
         root.offlineMode = payload.online !== true
         root.syncActive = payload.online === true
       }
+      if (finishedKind === "notify-mode" && payload.notifications) {
+        root.notificationsEnabled = payload.notifications.enabled === true
+        root.notificationsPreview = payload.notifications.preview !== false
+      }
       root.controlCompleted(finishedKind)
       root.refreshStatus()
       root.refreshChats()
@@ -545,6 +578,21 @@ Item {
         ? Number(payload.dropdown_rows) : 7
       root.errorText = ""
       root.settingsCompleted()
+    }
+  }
+
+  Process {
+    id: notifyProcess
+    property string payload: ""
+    command: [root.helper, "notify"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: notifyOutput }
+    stderr: StdioCollector { }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      var payload = root.parseJson(notifyOutput.text)
+      if (payload && payload.ok === true && payload.available === false)
+        root.notifyAvailable = false
     }
   }
 

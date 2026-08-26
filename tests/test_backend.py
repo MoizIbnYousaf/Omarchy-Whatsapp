@@ -208,6 +208,150 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(chats["archive@g.us"]["unread"], 2)
         self.assertEqual(chats["archive@g.us"]["notification_unread"], 0)
 
+    def _enable_notifications(self, preview: bool = True) -> None:
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=True):
+            self.backend.set_notifications(True, preview)
+
+    def _arrive(self, jid: str, msg_id: str, timestamp: int, unread: int,
+                text: str = "new", sender: str = "Sam") -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE chats SET last_message_ts = ?, unread_count = ? WHERE jid = ?",
+                [timestamp, unread, jid],
+            )
+            connection.execute(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me,
+                 text, reaction_to_id, media_type, mime_type, local_path)
+                VALUES (?, '', ?, 'member@s.whatsapp.net', ?, ?, 0, ?, '', '', '', '')""",
+                [jid, msg_id, sender, timestamp, text],
+            )
+
+    def _notify(self, skip_jid: str = "") -> tuple[dict, list]:
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=True), \
+                mock.patch.object(self.backend, "_deliver_notification",
+                                  return_value=True) as deliver:
+            result = self.backend.notify(skip_jid)
+        return result, [call.args for call in deliver.call_args_list]
+
+    def test_desktop_notifications_are_off_until_notify_send_exists(self) -> None:
+        self.assertEqual(self.backend.notifications(), {"enabled": False, "preview": True})
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=False):
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "notify-send"):
+                self.backend.set_notifications(True, None)
+        result, sent = self._notify()
+        self.assertFalse(result["enabled"])
+        self.assertEqual(sent, [])
+
+    def test_enabling_notifications_adopts_the_archive_instead_of_replaying_it(self) -> None:
+        self.backend._update_preferences(
+            lambda value: value["notifications"].update({"enabled": True}))
+        result, sent = self._notify()
+        self.assertTrue(result["seeded"])
+        self.assertEqual(sent, [])
+
+        self._enable_notifications()
+        stored = json.loads((self.root / "state" / "preferences.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["notifications"], {"enabled": True, "preview": True})
+        self.assertIn("team@g.us", stored["notified"])
+
+        self._arrive("team@g.us", "t3", 31, 4)
+        result, sent = self._notify()
+        self.assertEqual(result["sent"], 1)
+
+    def test_group_popup_names_the_sender_and_counts_arrivals(self) -> None:
+        self._enable_notifications()
+        self._arrive("team@g.us", "t3", 31, 5, text="ship it now", sender="Sam")
+        result, sent = self._notify()
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(sent[0], ("Design team · 2 new", "Sam: ship it now"))
+
+    def test_preview_off_reports_counts_without_message_text(self) -> None:
+        self._enable_notifications(preview=False)
+        self._arrive("team@g.us", "t3", 31, 5, text="secret")
+        result, sent = self._notify()
+        self.assertEqual(sent[0], ("Design team · 2 new", "2 new messages"))
+
+    def test_a_chat_read_elsewhere_still_notifies_with_zero_unread(self) -> None:
+        self._enable_notifications()
+        self._arrive("alex@s.whatsapp.net", "a2", 41, 0, text="on my way")
+        rail = {chat["jid"]: chat for chat in self.backend.chats()["chats"]}
+        self.assertEqual(rail["alex@s.whatsapp.net"]["unread"], 0)
+        self.assertEqual(rail["alex@s.whatsapp.net"]["notification_unread"], 0)
+        result, sent = self._notify()
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(sent[0], ("Alex", "on my way"))
+
+    def test_bar_badge_settings_and_dismissal_never_silence_popups(self) -> None:
+        self._enable_notifications()
+        self.backend.settings({"show_unread_count": False})
+        self._arrive("team@g.us", "t3", 31, 4)
+        with mock.patch.object(self.backend, "_write") as write:
+            self.backend.acknowledge_notifications("team@g.us")
+        write.assert_not_called()
+        rail = {chat["jid"]: chat for chat in self.backend.chats()["chats"]}
+        self.assertEqual(rail["team@g.us"]["notification_unread"], 0)
+        result, sent = self._notify()
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(sent[0][0], "Design team")
+
+    def test_only_the_visible_chat_is_skipped_while_a_surface_is_open(self) -> None:
+        self._enable_notifications()
+        self._arrive("team@g.us", "t3", 31, 4)
+        self._arrive("alex@s.whatsapp.net", "a2", 42, 2)
+        result, sent = self._notify("team@g.us")
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(sent[0][0], "Alex")
+
+        # A skipped chat still adopts the watermark, so only later arrivals
+        # count. With every surface closed nothing is skipped.
+        self._arrive("team@g.us", "t4", 33, 6)
+        result, sent = self._notify()
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(sent[0][0], "Design team · 2 new")
+
+    def test_muted_and_archived_chats_never_pop_up(self) -> None:
+        self._enable_notifications()
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("UPDATE chats SET muted_until = -1 WHERE jid = ?",
+                               ["team@g.us"])
+            connection.execute("UPDATE chats SET archived = 1 WHERE jid = ?",
+                               ["archive@g.us"])
+        self._arrive("team@g.us", "t3", 31, 4)
+        self._arrive("archive@g.us", "r1", 32, 2)
+        result, sent = self._notify()
+        self.assertEqual(result["pending"], 0)
+        self.assertEqual(sent, [])
+
+    def test_popup_text_stays_one_markup_inert_line(self) -> None:
+        self._enable_notifications()
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("UPDATE chats SET name = ? WHERE jid = ?",
+                               ["<b>Design</b> team", "team@g.us"])
+        self._arrive("team@g.us", "t3", 31, 4, text="line one\nline <i>two</i>",
+                     sender="S&M")
+        result, sent = self._notify()
+        summary, body = sent[0]
+        self.assertEqual(summary, "&lt;b&gt;Design&lt;/b&gt; team")
+        self.assertEqual(body, "S&amp;M: line one line &lt;i&gt;two&lt;/i&gt;")
+
+    def test_notification_burst_is_bounded_by_one_summary(self) -> None:
+        self._enable_notifications()
+        arrivals = backend_module.MAX_NOTIFY_BURST + 2
+        for index in range(arrivals):
+            jid = f"burst{index}@s.whatsapp.net"
+            with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+                connection.execute(
+                    "INSERT INTO chats VALUES (?, 'dm', ?, 0, 0, 0, 0, 0, 0)",
+                    [jid, f"Burst {index}"],
+                )
+            self._arrive(jid, f"b{index}", 60 + index, 1, text="hi")
+        result, sent = self._notify()
+        self.assertEqual(result["pending"], arrivals)
+        self.assertEqual(len(sent), backend_module.MAX_NOTIFY_BURST + 1)
+        self.assertEqual(sent[-1][0], "OmaWhatsApp")
+        self.assertEqual(sent[-1][1], "2 more chats have new messages")
+
     def test_mute_deadlines_support_seconds_milliseconds_and_forever(self) -> None:
         now = 2_000_000_000.0
         self.assertTrue(backend_module.muted_until_active(-1, now))

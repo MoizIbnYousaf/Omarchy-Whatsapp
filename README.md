@@ -149,6 +149,7 @@ Requirements:
 - `wacli` 0.17.1 or newer at `~/.local/bin/wacli`
 - Qt Multimedia and Image Formats, `wl-clipboard`, `zenity`, `inotify-tools`,
   `jq`, Python 3, and systemd user services
+- Optional: `libnotify` (`notify-send`) for desktop popups
 
 ```bash
 git clone https://github.com/MoizIbnYousaf/Omarchy-Whatsapp.git && \
@@ -199,6 +200,7 @@ Add the `Super+Shift+W` binding from
 | `Left` / `Right` | Previous/next gallery item |
 | `+` / `-` / `0` | Zoom in/out/fit |
 | `Esc` | Step back: composer → messages → chat list → close |
+| Header `quiet` / `notify` pill | Left click toggles desktop popups; right click drops the message preview |
 | Header `online` / `offline` pill | Toggle background sync; local history stays available |
 | Header settings button | Private reading, badge, sync, and dropdown-size controls |
 | Chat menu `Mark read · send receipt` | Explicitly mark the chat read on WhatsApp |
@@ -206,6 +208,10 @@ Add the `Super+Shift+W` binding from
 Middle-click the bar item to dismiss the current local notification batch;
 right-click refreshes. Neither action sends a read receipt. The in-app settings
 card controls automatic receipts, the badge, background sync, and dropdown size.
+
+Desktop popups are a separate surface from the bar badge and are off until you
+turn them on. They need `notify-send` from libnotify, stay quiet for muted and
+archived chats, and never send a read receipt.
 
 ## Release quality
 

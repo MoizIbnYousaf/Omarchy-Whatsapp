@@ -21,6 +21,13 @@ The click opens a compact interactive conversation client; `Super+Shift+W`
 summons the full app. Both share the same selected exact JID, messages, write
 serialization, offline state, and resident refresh path.
 
+Desktop popups are a third, opt-in surface with their own watermark. They
+read the same chat rail but never the badge's acknowledged delta, so the badge
+preference, a dismissal, and a closed window cannot silence them, and a chat
+read on another device still notifies once when its timestamp advances. Only
+the chat currently on screen is skipped, a burst is capped, and muted and
+archived chats stay silent.
+
 Unread state has two independent layers. wacli's `unread_count` remains the
 authoritative WhatsApp value. OmaWhatsApp stores a mode-`0600` local
 acknowledgement snapshot and derives only the bar's new-message delta from it.

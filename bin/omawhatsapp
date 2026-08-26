@@ -32,6 +32,7 @@ WACLI = Path(os.environ.get("WACLI_BIN", HOME / ".local/bin/wacli"))
 SYSTEMCTL = Path("/usr/bin/systemctl")
 WL_PASTE = Path("/usr/bin/wl-paste")
 XDG_OPEN = Path("/usr/bin/xdg-open")
+NOTIFY_SEND = Path("/usr/bin/notify-send")
 MAX_MESSAGE = 4096
 MAX_FILE = 100 * 1024 * 1024
 MAX_ATTACHMENTS = 10
@@ -43,6 +44,12 @@ MAX_CLIPBOARD_TEXT = MAX_MESSAGE * 4
 MAX_PREFERENCES = 1024 * 1024
 MAX_SENT_MEDIA_STATE = 2 * 1024 * 1024
 PREFERENCES_VERSION = 1
+MAX_NOTIFY_BURST = 5
+MAX_NOTIFY_SUMMARY = 96
+MAX_NOTIFY_SENDER = 48
+MAX_NOTIFY_BODY = 180
+MAX_NOTIFY_WATERMARKS = 500
+NOTIFY_EXPIRE_MS = 8000
 SUPPORTED_CHAT_WHERE = """(chats.kind = 'dm' OR (
   chats.kind = 'group'
   AND COALESCE(groups.is_parent, 0) = 0
@@ -426,6 +433,21 @@ class Backend:
             if descriptor >= 0:
                 os.close(descriptor)
 
+    @staticmethod
+    def _chat_snapshots(value: Any) -> dict[str, dict[str, int]]:
+        """Sanitize a persisted {jid: {unread, timestamp}} map from disk."""
+        snapshots: dict[str, dict[str, int]] = {}
+        if not isinstance(value, dict):
+            return snapshots
+        for jid, item in list(value.items())[:MAX_NOTIFY_WATERMARKS]:
+            if not isinstance(jid, str) or not isinstance(item, dict):
+                continue
+            snapshots[jid[:160]] = {
+                "unread": bounded_int(item.get("unread"), 0, 0, 1_000_000_000),
+                "timestamp": bounded_int(item.get("timestamp"), 0, 0, 9_999_999_999),
+            }
+        return snapshots
+
     def _preferences(self) -> dict[str, Any]:
         default: dict[str, Any] = {
             "version": PREFERENCES_VERSION,
@@ -434,22 +456,15 @@ class Backend:
             "show_unread_count": True,
             "dropdown_rows": 7,
             "acknowledged_unread": {},
+            "notifications": {"enabled": False, "preview": True},
+            "notified": {},
         }
         value = self._read_state_json("preferences.json", MAX_PREFERENCES, default)
         if not isinstance(value, dict):
             return default
-        acknowledged = value.get("acknowledged_unread")
-        clean_acknowledged: dict[str, dict[str, int]] = {}
-        if isinstance(acknowledged, dict):
-            for jid, item in acknowledged.items():
-                if not isinstance(jid, str) or not isinstance(item, dict):
-                    continue
-                unread = bounded_int(item.get("unread"), 0, 0, 1_000_000_000)
-                timestamp = bounded_int(item.get("timestamp"), 0, 0, 9_999_999_999)
-                clean_acknowledged[jid[:160]] = {
-                    "unread": unread,
-                    "timestamp": timestamp,
-                }
+        notifications = value.get("notifications")
+        if not isinstance(notifications, dict):
+            notifications = {}
         dropdown_rows = bounded_int(value.get("dropdown_rows"), 7, 5, 9)
         if dropdown_rows not in {5, 7, 9}:
             dropdown_rows = 7
@@ -459,7 +474,14 @@ class Backend:
             "send_read_receipts": value.get("send_read_receipts") is True,
             "show_unread_count": value.get("show_unread_count") is not False,
             "dropdown_rows": dropdown_rows,
-            "acknowledged_unread": clean_acknowledged,
+            "acknowledged_unread": self._chat_snapshots(value.get("acknowledged_unread")),
+            # The desktop popup is a separate surface from the bar badge, so it
+            # keeps its own settings and its own watermark.
+            "notifications": {
+                "enabled": notifications.get("enabled") is True,
+                "preview": notifications.get("preview") is not False,
+            },
+            "notified": self._chat_snapshots(value.get("notified")),
         }
 
     def _write_preferences(self, value: dict[str, Any]) -> None:
@@ -748,6 +770,8 @@ class Backend:
             "sync_active": self._sync_active(),
             "online": online,
             "offline_mode": not online,
+            "notifications": preferences["notifications"],
+            "notify_available": self._notify_send_ready(),
             "send_read_receipts": preferences.get("send_read_receipts") is True,
             "show_unread_count": preferences.get("show_unread_count") is not False,
             "dropdown_rows": preferences.get("dropdown_rows", 7),
@@ -778,7 +802,8 @@ class Backend:
                           NULLIF(latest.filename, ''), '[' || latest.media_type || ']')
                       ELSE COALESCE(NULLIF(latest.text, ''),
                         NULLIF(latest.display_text, ''), '') END AS preview,
-                      COALESCE(latest.from_me, 0) AS last_from_me
+                      COALESCE(latest.from_me, 0) AS last_from_me,
+                      COALESCE(latest.sender_name, '') AS last_sender
                     FROM chats
                     LEFT JOIN groups ON groups.jid = chats.jid
                     LEFT JOIN contacts ON contacts.jid = chats.jid
@@ -819,6 +844,7 @@ class Backend:
                 "timestamp": timestamp,
                 "preview": " ".join(str(row["preview"] or "").split())[:512],
                 "last_from_me": bool(row["last_from_me"]),
+                "last_sender": " ".join(str(row["last_sender"] or "").split())[:MAX_NOTIFY_SENDER],
                 "archived": archived, "pinned": bool(row["pinned"]),
                 "muted": muted,
                 "unread": unread,
@@ -851,6 +877,152 @@ class Backend:
 
         self._update_preferences(update)
         return {"ok": True, "kind": "acknowledge", "count": len(selected)}
+
+    @staticmethod
+    def _notify_send_ready() -> bool:
+        return NOTIFY_SEND.is_file() and os.access(NOTIFY_SEND, os.X_OK)
+
+    @staticmethod
+    def _notification_text(value: Any, limit: int, *, markup: bool = False) -> str:
+        """Collapse external chat text to one printable, markup-inert line."""
+        printable = "".join(character for character in str(value or "")
+                            if character.isprintable())
+        text = " ".join(printable.split())[:limit]
+        if not markup:
+            return text
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    @staticmethod
+    def _notification_watermark(chats: Sequence[dict[str, Any]]) -> dict[str, dict[str, int]]:
+        return {
+            str(chat["jid"])[:160]: {
+                "unread": int(chat.get("unread") or 0),
+                "timestamp": int(chat.get("timestamp") or 0),
+            }
+            for chat in list(chats)[:MAX_NOTIFY_WATERMARKS]
+        }
+
+    def _current_watermark(self) -> dict[str, dict[str, int]]:
+        return self._notification_watermark(self.chats(limit=MAX_NOTIFY_WATERMARKS)["chats"])
+
+    def _deliver_notification(self, summary: str, body: str) -> bool:
+        """Hand one popup to the desktop; a failing daemon must not raise."""
+        command = [str(NOTIFY_SEND), "--app-name=OmaWhatsApp", "--urgency=normal",
+                   "--category=im.received", f"--expire-time={NOTIFY_EXPIRE_MS}",
+                   "--", summary or "OmaWhatsApp"]
+        if body:
+            command.append(body)
+        try:
+            result = run_bounded(
+                command, timeout=8, stdout_limit=16 * 1024, stderr_limit=MAX_PROCESS_ERROR
+            )
+        except (ProcessOutputLimitExceeded, subprocess.TimeoutExpired, OSError):
+            return False
+        return result.returncode == 0
+
+    def _notify_chat(self, chat: dict[str, Any], count: int, preview: bool) -> bool:
+        # Summary and body both reach markup-capable daemons, so neither may
+        # carry live markup from a chat name or a message.
+        name = self._notification_text(
+            chat.get("name"), MAX_NOTIFY_SUMMARY, markup=True) or "WhatsApp chat"
+        summary = f"{name} · {count} new" if count > 1 else name
+        if not preview:
+            body = "1 new message" if count == 1 else f"{count} new messages"
+            return self._deliver_notification(summary, body)
+        body = self._notification_text(chat.get("preview"), MAX_NOTIFY_BODY, markup=True)
+        sender = self._notification_text(chat.get("last_sender"), MAX_NOTIFY_SENDER, markup=True)
+        if str(chat.get("kind") or "") == "group" and sender and body:
+            body = f"{sender}: {body}"
+        return self._deliver_notification(summary, body)
+
+    def notifications(self) -> dict[str, Any]:
+        return self._preferences()["notifications"]
+
+    def set_notifications(self, enabled: Any = None, preview: Any = None) -> dict[str, Any]:
+        if enabled is None and preview is None:
+            raise OmaWhatsAppError("Choose what to change about desktop notifications.")
+        if enabled is not None and not isinstance(enabled, bool):
+            raise OmaWhatsAppError("Desktop notifications must be on or off.")
+        if preview is not None and not isinstance(preview, bool):
+            raise OmaWhatsAppError("Message previews must be on or off.")
+        if enabled is True and not self._notify_send_ready():
+            raise OmaWhatsAppError(
+                "Desktop notifications need notify-send from libnotify."
+            )
+        watermark: dict[str, dict[str, int]] | None = None
+        if enabled is True:
+            # Adopt the archive on the way in so switching on never replays it.
+            try:
+                watermark = self._current_watermark()
+            except OmaWhatsAppError:
+                watermark = {}
+
+        def update(value: dict[str, Any]) -> None:
+            settings = value["notifications"]
+            if enabled is not None:
+                settings["enabled"] = bool(enabled)
+            if preview is not None:
+                settings["preview"] = bool(preview)
+            if watermark is not None:
+                value["notified"] = watermark
+
+        value = self._update_preferences(update)
+        return {"ok": True, "kind": "notify-mode", "notifications": value["notifications"]}
+
+    def notify(self, skip_jid: str = "") -> dict[str, Any]:
+        """Pop one popup per chat that gained incoming messages since last run.
+
+        The popup is deliberately independent of the bar badge. It ignores
+        ``notification_unread``, so neither ``show_unread_count`` nor a
+        dismissal can silence it, and the caller only suppresses the chat the
+        user is currently looking at.
+        """
+        preferences = self._preferences()
+        settings = preferences["notifications"]
+        if not settings["enabled"]:
+            return {"ok": True, "kind": "notify", "enabled": False, "sent": 0}
+        if not self._notify_send_ready():
+            return {"ok": True, "kind": "notify", "enabled": True, "sent": 0,
+                    "available": False,
+                    "error": "Desktop notifications need notify-send from libnotify."}
+        chats = self.chats(limit=MAX_NOTIFY_WATERMARKS)["chats"]
+        watermark = self._notification_watermark(chats)
+        seen = preferences["notified"]
+        if not seen:
+            # A missing watermark means a fresh install, not an unread archive.
+            self._update_preferences(lambda value: value.update({"notified": watermark}))
+            return {"ok": True, "kind": "notify", "enabled": True, "sent": 0, "seeded": True}
+        skip = skip_jid.strip()[:160]
+        pending: list[tuple[dict[str, Any], int]] = []
+        for chat in chats:
+            jid = str(chat["jid"])
+            previous = seen.get(jid) or {}
+            timestamp = int(chat.get("timestamp") or 0)
+            if timestamp <= int(previous.get("timestamp") or 0):
+                continue
+            if chat["last_from_me"] or chat["muted"] or chat["archived"] or jid == skip:
+                continue
+            # WhatsApp reports no unread when the chat was read elsewhere or
+            # read privately here. An advanced timestamp is still a new
+            # message, so it is worth exactly one popup.
+            unread = int(chat.get("unread") or 0)
+            arrived = unread - int(previous.get("unread") or 0)
+            pending.append((chat, max(1, arrived) if unread > 0 else 1))
+        sent = 0
+        failed = 0
+        for chat, count in pending[:MAX_NOTIFY_BURST]:
+            if self._notify_chat(chat, count, settings["preview"]):
+                sent += 1
+            else:
+                failed += 1
+        overflow = len(pending) - MAX_NOTIFY_BURST
+        if overflow > 0 and self._deliver_notification(
+                "OmaWhatsApp", f"{overflow} more chats have new messages"):
+            sent += 1
+        if watermark != seen:
+            self._update_preferences(lambda value: value.update({"notified": watermark}))
+        return {"ok": True, "kind": "notify", "enabled": True, "sent": sent,
+                "failed": failed, "pending": len(pending)}
 
     def set_online(self, online: bool) -> dict[str, Any]:
         command = "enable" if online else "disable"
@@ -1857,6 +2029,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("select")
     commands.add_parser("chat-action")
     commands.add_parser("acknowledge")
+    commands.add_parser("notify")
+    commands.add_parser("notify-mode")
     commands.add_parser("sync-mode")
     commands.add_parser("settings")
     commands.add_parser("capabilities")
@@ -1955,6 +2129,11 @@ def main() -> int:
                                             str(payload.get("action") or "")))
         if args.command == "acknowledge":
             return emit(backend.acknowledge_notifications(str(payload.get("jid") or "")))
+        if args.command == "notify":
+            return emit(backend.notify(str(payload.get("skip_jid") or "")))
+        if args.command == "notify-mode":
+            return emit(backend.set_notifications(payload.get("enabled"),
+                                                  payload.get("preview")))
         if args.command == "sync-mode":
             if not isinstance(payload.get("online"), bool):
                 raise OmaWhatsAppError("Online mode must be true or false.")

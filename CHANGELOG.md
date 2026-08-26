@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.0 — 2026-08-26
+
+- Add optional desktop notifications: one bounded popup per chat that gained
+  incoming messages, delivered through `notify-send` and off by default.
+  The header pill toggles quiet/notify on left click and drops the message
+  preview on right click.
+- Keep popups independent of the bar badge. A chat WhatsApp reports as read
+  elsewhere still notifies when its timestamp advances, hiding the badge with
+  the unread-count preference does not silence anything, and a closed window
+  and dropdown suppress nothing. Only the chat currently on screen is skipped.
+- Adopt the existing archive when notifications are switched on, and seed the
+  watermark on first run, so enabling the feature never replays history.
+- Keep muted and archived chats silent, cap a burst at five popups plus one
+  summary, and render every chat name, sender, and preview as a single
+  markup-inert line.
+
 ## 0.8.1 — 2026-08-26
 
 - Use the same crisp, theme-native WhatsApp mark in the bar, compact client,

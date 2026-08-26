@@ -44,7 +44,13 @@ wacli help tree before the offscreen QML tests.
    middle-clicking the bar clears only the local notification badge. Verify the
    settings switch with a mocked write; test a real receipt only with explicit
    permission.
-8. Only with explicit permission, send a meaningful text/image to a known chat.
+8. Turn the header pill to `notify` and confirm the next incoming message
+   pops up once, that right-clicking the pill drops the preview to chat names,
+   and that muted and archived chats stay silent. Check that the popup still
+   arrives with the bar badge preference off, with every window closed, and for
+   a chat already read on the phone, while the chat visibly on screen does not
+   pop up. Without `notify-send` the pill reports `unavailable`.
+9. Only with explicit permission, send a meaningful text/image to a known chat.
 
 ## Screenshot
 

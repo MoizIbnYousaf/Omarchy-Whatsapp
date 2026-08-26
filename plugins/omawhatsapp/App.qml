@@ -73,6 +73,9 @@ Item {
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
   readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
+  readonly property bool notifyOn: !!root.service && root.service.notificationsEnabled
+  readonly property bool notifyPreviewOn: !root.service || root.service.notificationsPreview
+  readonly property bool notifyAvailable: !root.service || root.service.notifyAvailable
   readonly property color foreground: Color.foreground
   readonly property color background: Color.background
   readonly property color accent: Color.accent
@@ -796,6 +799,11 @@ Item {
       if (kind === "sync-mode")
         root.showToast(root.service && root.service.offlineMode
           ? "offline · local archive stays available" : "online · background sync resumed")
+      if (kind === "notify-mode")
+        root.showToast(!root.notifyOn
+          ? "notifications off · bar badge only"
+          : (root.notifyPreviewOn ? "notifications on · shows message preview"
+            : "notifications on · chat names only"))
     }
     function onControlFailed(message) {
       root.showToast(String(message || "setting could not be changed"))
@@ -1036,6 +1044,46 @@ Item {
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(10)
+
+          Rectangle {
+            id: notifyModeButton
+            height: Style.space(28)
+            width: notifyModeLabel.implicitWidth + Style.space(20)
+            radius: height / 2
+            color: notifyModeMouse.containsMouse
+              ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+            border.width: !root.demoMode && root.notifyOn ? 1 : 0
+            border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.65)
+
+            Text {
+              textFormat: Text.PlainText
+              id: notifyModeLabel
+              anchors.centerIn: parent
+              text: !root.notifyOn ? "󰂛 quiet"
+                : (!root.notifyAvailable ? "󰂚 notify · unavailable"
+                  : (root.notifyPreviewOn ? "󰂚 notify" : "󰂚 notify · names"))
+              color: !root.notifyOn ? root.dim
+                : (root.notifyAvailable ? root.accent : root.urgent)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            MouseArea {
+              id: notifyModeMouse
+              anchors.fill: parent
+              enabled: !root.demoMode && root.service && !root.service.controlWriting
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              acceptedButtons: Qt.LeftButton | Qt.RightButton
+              // Left click switches popups on or off; right click drops the preview.
+              onClicked: function(mouse) {
+                if (mouse.button === Qt.RightButton)
+                  root.service.setNotifications(null, !root.notifyPreviewOn)
+                else
+                  root.service.setNotifications(!root.notifyOn, null)
+              }
+            }
+          }
 
           Rectangle {
             id: syncModeButton
