@@ -32,7 +32,8 @@ if command -v quickshell >/dev/null; then
   while timeout 5 quickshell kill -p /usr/share/omarchy/shell --any-display >/dev/null 2>&1; do :; done
 fi
 
-rm -rf -- "$plugin_root/omawhatsapp" "$plugin_root/omawhatsapp-bar"
+rm -rf -- "$plugin_root/io.github.moizibnyousaf.omawhatsapp" \
+  "$plugin_root/omawhatsapp" "$plugin_root/omawhatsapp-bar"
 rm -rf -- "$skill_root/omawhatsapp"
 rm -f -- "$user_home/.local/bin/omawhatsapp"
 rm -f -- "$user_home/.config/systemd/user/wacli-sync.service"

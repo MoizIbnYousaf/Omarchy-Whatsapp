@@ -8,9 +8,10 @@ skill_root="$user_home/.agents/skills"
 shell_config="$user_home/.config/omarchy/shell.json"
 shell_source="/usr/share/omarchy/shell"
 check_only=false
-plugin_dir=omawhatsapp
+source_plugin_dir=omawhatsapp
 skill_dir=omawhatsapp
 plugin_id=io.github.moizibnyousaf.omawhatsapp
+install_plugin_dir=$plugin_id
 
 if [[ ${1:-} == "--check" ]]; then
   check_only=true
@@ -60,11 +61,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-install -d "$staging_root/$plugin_dir"
+install -d "$staging_root/$install_plugin_dir"
 while IFS= read -r -d '' source_file; do
-  relative=${source_file#"$repo_root/plugins/$plugin_dir/"}
-  install -Dm644 "$source_file" "$staging_root/$plugin_dir/$relative"
-done < <(find "$repo_root/plugins/$plugin_dir" -type f -print0)
+  relative=${source_file#"$repo_root/plugins/$source_plugin_dir/"}
+  install -Dm644 "$source_file" "$staging_root/$install_plugin_dir/$relative"
+done < <(find "$repo_root/plugins/$source_plugin_dir" -type f -print0)
+install -Dm644 "$repo_root/LICENSE" "$staging_root/$install_plugin_dir/LICENSE"
+install -Dm644 "$repo_root/THIRD_PARTY_NOTICES.md" \
+  "$staging_root/$install_plugin_dir/THIRD_PARTY_NOTICES.md"
 install -d "$staging_root/skills/$skill_dir"
 while IFS= read -r -d '' source_file; do
   relative=${source_file#"$repo_root/skills/$skill_dir/"}
@@ -91,7 +95,9 @@ chmod --reference="$shell_config" "$temporary"
 
 if $check_only; then
   jq -e --arg plugin_id "$plugin_id" '.id == $plugin_id' \
-    "$staging_root/$plugin_dir/manifest.json" >/dev/null
+    "$staging_root/$install_plugin_dir/manifest.json" >/dev/null
+  [[ -f "$staging_root/$install_plugin_dir/SettingsPolicy.js" ]]
+  [[ -f "$staging_root/$install_plugin_dir/LICENSE" ]]
   rg -q '^name: omawhatsapp$' "$staging_root/skills/$skill_dir/SKILL.md"
   rg -q 'references/wacli-parity\.md' "$staging_root/skills/$skill_dir/SKILL.md"
   python3 "$repo_root/bin/omawhatsapp" capabilities \
@@ -117,8 +123,12 @@ if command -v quickshell >/dev/null; then
 fi
 
 install -Dm755 "$repo_root/bin/omawhatsapp" "$user_home/.local/bin/omawhatsapp"
-rm -rf -- "$plugin_root/$plugin_dir"
-mv -- "$staging_root/$plugin_dir" "$plugin_root/$plugin_dir"
+# The shell registry keys third-party plugins by manifest id. Older installers
+# used a short directory name; keeping both lets lexicographic scan order pick
+# an arbitrary duplicate manifest. Replace the canonical directory atomically
+# and remove that exact legacy directory during the migration.
+rm -rf -- "$plugin_root/$install_plugin_dir" "$plugin_root/$source_plugin_dir"
+mv -- "$staging_root/$install_plugin_dir" "$plugin_root/$install_plugin_dir"
 install -d "$skill_root"
 rm -rf -- "$skill_root/$skill_dir"
 mv -- "$staging_root/skills/$skill_dir" "$skill_root/$skill_dir"

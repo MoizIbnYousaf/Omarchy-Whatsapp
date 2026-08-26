@@ -21,6 +21,9 @@
   auto-write, offline/busy states suppress opted-in receipts, opening the
   already-warm conversation honors an enabled receipt preference, and demo
   windows never refresh or acknowledge the real account.
+- Install into Omarchy's canonical manifest-id directory and remove the old
+  short-name directory, preventing a stale marketplace copy from winning a
+  duplicate-id scan after shell restart.
 
 ## 0.7.0 — 2026-08-26
 

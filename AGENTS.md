@@ -25,7 +25,7 @@ workflow assumptions and no WhatsApp history.
 ```text
 ~/.local/state/wacli/                  private linked-device state and mirror
 ~/.local/state/omawhatsapp/            private helper serialization state
-~/.config/omarchy/plugins/omawhatsapp/ installed full app
+~/.config/omarchy/plugins/io.github.moizibnyousaf.omawhatsapp/ installed full app
 ```
 
 ## Required verification

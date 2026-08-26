@@ -43,6 +43,15 @@ rg -q 'systemctl --user restart wacli-sync\.service' scripts/install || {
   exit 1
 }
 
+rg -q 'install_plugin_dir=\$plugin_id' scripts/install || {
+  echo "test: installer must target Omarchy's canonical manifest-id directory" >&2
+  exit 1
+}
+rg -q 'plugin_root/\$install_plugin_dir.*plugin_root/\$source_plugin_dir' scripts/install || {
+  echo "test: installer must remove the exact legacy duplicate directory" >&2
+  exit 1
+}
+
 rg -q '"setpriv", "--pdeathsig", "TERM"' plugins/omawhatsapp/Service.qml || {
   echo "test: store watcher must die with the Omarchy shell" >&2
   exit 1
