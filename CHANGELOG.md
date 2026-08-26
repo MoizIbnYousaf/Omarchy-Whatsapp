@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.10.0 — 2026-08-26
+
+- Support every wacli account on the machine. The chat rail merges them into
+  one list, each row named by the account it came from, and the bar badge sums
+  them.
+- Keep each account's world separate where it matters: a chat is resolved in
+  its own mirror, every wacli command carries `--account`, and sending,
+  receipts, drafts, forwarding, the badge, and offline mode all stay inside the
+  account of the chat on screen. An account that has never synced is reported
+  as unready beside the rail instead of emptying it.
+- Key private state by store rather than by account name, so renaming an
+  account keeps its history and the same contact reachable from two linked
+  phones keeps two independent badges. Version 1 preferences migrate into the
+  default account on first read.
+- Run one `wacli-sync@<account>.service` instance per account, asking the
+  helper whether that account has a linked session. A machine that never named
+  an account keeps the original unit and pays for no extra work.
+- Sweep every account in one notification pass, under one shared burst cap,
+  naming the account in the popup when more than one is linked.
+- Fix the agent gateway's exact-chat guard, which validated a `--to` JID
+  against the default store even when the request named another account.
+
 ## 0.9.0 — 2026-08-26
 
 - Add optional desktop notifications: one bounded popup per chat that gained

@@ -12,8 +12,14 @@ OmaWhatsApp is one Omarchy plugin with two shell entry points:
 `bin/omawhatsapp` is a bounded Python bridge, not a daemon. The only long-lived
 backend is the user-owned `wacli sync --follow` process.
 
+One account is one store. The helper reads the account list from wacli, opens
+each account's mirror separately, passes `--account` on every command it runs,
+and keys its own private state by store path so a rename cannot orphan a badge.
+The chat rail is merged in the helper and re-limited after the merge, so a
+bounded read stays bounded no matter how many accounts are linked.
+
 The resident service uses Omarchy's existing `inotifywait` utility to watch
-only the local mirror's database/WAL filenames. Events are debounced before a
+each account store's database/WAL filenames. Events are debounced before a
 bounded read, and the original 12-second cadence remains as a fallback if the
 watcher exits. `setpriv --pdeathsig TERM` ensures the watcher cannot outlive the
 Quickshell process.
@@ -35,7 +41,7 @@ JID, or media byte is stored in the repository.
 
 Successful outgoing uploads are reconciled with a bounded private
 `sent-media.json` index (mode `0600`) because wacli's outgoing database row
-does not retain the original local path. Keys include both chat and message ID,
+does not retain the original local path. Keys include the account store, the chat, and the message ID,
 and missing/stale paths are ignored. Group mentions are likewise bounded and
 must resolve to a participant or known sender in the selected indexed group.
 

@@ -50,7 +50,13 @@ wacli help tree before the offscreen QML tests.
    arrives with the bar badge preference off, with every window closed, and for
    a chat already read on the phone, while the chat visibly on screen does not
    pop up. Without `notify-send` the pill reports `unavailable`.
-9. Only with explicit permission, send a meaningful text/image to a known chat.
+9. With more than one account configured, confirm the rail merges them, each
+   row names its account, the header follows the open chat's account, the bar
+   badge sums every account, and a middle-click clears all of them. Confirm a
+   send, a receipt, and the offline pill act only on the open chat's account,
+   and that `systemctl --user list-units 'wacli-sync@*'` shows one instance per
+   linked account.
+10. Only with explicit permission, send a meaningful text/image to a known chat.
 
 ## Screenshot
 

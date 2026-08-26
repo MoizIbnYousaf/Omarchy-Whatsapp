@@ -203,15 +203,33 @@ since changed `_preferences` (`send_read_receipts`, `show_unread_count`,
 - Machine and repository have diverged. Reinstalling `main` today would drop
   working notifications; committing the port is what makes the two agree again.
 
-## Suggested sequence
+## Delivered
 
-0. Port and commit the notification patch onto `main`, with tests, then
-   reinstall. Repository and machine agree again.
-1. Helper-internal multi-account: resolver over `accounts list`, `--account` on
-   every command, namespaced state, preference migration, and registering the
-   existing session as a named account with `store: .`. No UI change.
-2. Unit template, installer and uninstaller, per-account online mode.
-3. QML unified rail, account marker, switcher, demo fixtures.
-4. Per-account notifications: global burst cap, account label, (account, JID)
-   skip.
-5. Documentation, parity notes, changelog.
+All five steps landed in 0.9.0 and 0.10.0:
+
+0. The notification patch was ported onto `main`, tested, and released as
+   0.9.0. Repository and machine agree again.
+1. The helper resolves accounts from `accounts list`, scopes every command,
+   mirror, and unit to one of them, merges the rail, keys state by store, and
+   migrates version 1 preferences into the default account.
+2. `wacli-sync@.service` runs one instance per account, gated by the helper's
+   `session-ready`, with the installer and uninstaller following.
+3. The rail, selection, drafts, forwarding, badge, header, and store watchers
+   are account aware, with the shared rules in `AccountModel.js` under
+   offscreen tests, and demo mode showing two accounts.
+4. One notification pass sweeps every account under a shared burst cap and
+   names the account when more than one is linked.
+5. Architecture, technical, privacy, testing, README, skill, and changelog
+   notes describe the account boundary.
+
+## Still open
+
+- None of this has run against two real linked accounts yet. The suites cover
+  two stores with a stubbed account list; a second phone is what would exercise
+  session handling, the store lock across instances, and per-instance sync.
+- An account whose store lives outside wacli's state directory needs a
+  systemd drop-in adding that path to `ReadWritePaths`. The template documents
+  it rather than guessing.
+- The full window has no account switcher, by design: the rail is merged and
+  the open chat decides the account. If per-account filtering is ever wanted,
+  the rows already carry what a filter would need.
