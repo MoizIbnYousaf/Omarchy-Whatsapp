@@ -87,7 +87,7 @@ button must remain reachable at every supported size.
 | Forwarded marker | `is_forwarded` | building |
 | Edited marker | `edited`, `edited_ts` | building |
 | Deleted/revoked | deletion columns | planned |
-| Reactions and counts | reaction rows | building |
+| Reactions and counts | reaction rows | done |
 | Star marker | `starred` table | building |
 | Images | image media | done |
 | WhatsApp GIF loops | `gif` + MP4/F4V | done |
@@ -110,7 +110,7 @@ button must remain reachable at every supported size.
 | Action | Transport | App |
 |---|---|---|
 | Reply | `send ... --reply-to` | building |
-| React / change / remove own reaction | `send react` | building |
+| React / change / remove own reaction | `send react` | done |
 | Edit own recent text | `messages edit` | building |
 | Delete for me | `messages delete --for-me` | building |
 | Delete for everyone | `messages delete` | building |

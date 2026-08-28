@@ -927,11 +927,24 @@ class Backend:
                 if message_ids:
                     placeholders = ",".join("?" for _ in message_ids)
                     reaction_rows = connection.execute(
-                        f"""SELECT reaction_to_id, reaction_emoji, from_me,
+                        f"""WITH ranked_reactions AS (
+                          SELECT reaction_to_id, reaction_emoji, from_me,
+                            sender_name, sender_jid, ts, rowid,
+                            ROW_NUMBER() OVER (
+                              PARTITION BY reaction_to_id,
+                                CASE WHEN from_me != 0 THEN 'me' ELSE
+                                  COALESCE(NULLIF(sender_jid, ''),
+                                    NULLIF(sender_name, ''), msg_id) END
+                              ORDER BY ts DESC, rowid DESC
+                            ) AS actor_rank
+                          FROM messages
+                          WHERE chat_jid = ? AND reaction_to_id IN ({placeholders})
+                            AND deleted_at IS NULL
+                        )
+                        SELECT reaction_to_id, reaction_emoji, from_me,
                           sender_name, sender_jid
-                        FROM messages
-                        WHERE chat_jid = ? AND reaction_to_id IN ({placeholders})
-                          AND deleted_at IS NULL AND COALESCE(reaction_emoji, '') <> ''
+                        FROM ranked_reactions
+                        WHERE actor_rank = 1 AND COALESCE(reaction_emoji, '') <> ''
                         ORDER BY ts ASC, rowid ASC""",
                         [chat["jid"], *message_ids],
                     ).fetchall()

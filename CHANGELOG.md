@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.3 — 2026-08-28
+
+- Show only each participant's latest reaction on a message, so changing an
+  emoji replaces the old one and removing a reaction clears it.
+- Keep reactions from different participants independently countable, with
+  backend regressions for changes and removals.
+
 ## 0.8.2 — 2026-08-26
 
 - Press `/` from the full-app chat list to focus chat search immediately;

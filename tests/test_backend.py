@@ -276,6 +276,48 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(item["starred"])
         self.assertEqual(item["location_name"], "Studio")
 
+    def test_reaction_changes_keep_only_each_users_latest_emoji(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.executemany(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+                 from_me, text, reaction_to_id, reaction_emoji)
+                VALUES (?, 'Design team', ?, ?, ?, ?, 0, '', 't2', ?)""",
+                [
+                    ("team@g.us", "r-old", "member@s.whatsapp.net", "Sam", 31, "🔥"),
+                    ("team@g.us", "r-new", "member@s.whatsapp.net", "Sam", 32, "❤️"),
+                    ("team@g.us", "r-other", "admin@s.whatsapp.net", "Alex", 33, "❤️"),
+                ],
+            )
+        item = next(value for value in self.backend.messages("team@g.us")["messages"]
+                    if value["id"] == "t2")
+        self.assertEqual([reaction["emoji"] for reaction in item["reactions"]],
+                         ["❤️", "❤️"])
+        self.assertEqual({reaction["sender"] for reaction in item["reactions"]},
+                         {"Sam", "Alex"})
+
+    def test_reaction_removal_hides_the_users_previous_emoji(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.executemany(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+                 from_me, text, reaction_to_id, reaction_emoji)
+                VALUES (?, 'Design team', ?, ?, ?, ?, 0, '', 't2', ?)""",
+                [
+                    ("team@g.us", "r-old", "member@s.whatsapp.net", "Sam", 31, "🔥"),
+                    ("team@g.us", "r-remove", "member@s.whatsapp.net", "Sam", 32, ""),
+                    ("team@g.us", "r-other", "admin@s.whatsapp.net", "Alex", 33, "👍"),
+                ],
+            )
+        item = next(value for value in self.backend.messages("team@g.us")["messages"]
+                    if value["id"] == "t2")
+        self.assertEqual(item["reactions"], [{
+            "emoji": "👍",
+            "from_me": False,
+            "sender": "Alex",
+            "sender_jid": "admin@s.whatsapp.net",
+        }])
+
     def test_media_placeholder_is_not_rendered_as_a_caption(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.execute(
