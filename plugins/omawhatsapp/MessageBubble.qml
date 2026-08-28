@@ -115,6 +115,7 @@ Item {
 
     Column {
       id: bubbleColumn
+      anchors.top: parent.top
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.margins: Style.space(9)
