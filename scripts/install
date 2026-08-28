@@ -29,6 +29,11 @@ for command_name in jq python3 qmllint rg systemctl wl-paste zenity omarchy inot
   }
 done
 
+if [[ ! -f /usr/lib/qt6/qml/QtMultimedia/qmldir ]]; then
+  echo "Missing requirement: Qt Multimedia QML module (Arch package: qt6-multimedia)" >&2
+  exit 1
+fi
+
 if [[ ! -x "$user_home/.local/bin/wacli" ]]; then
   echo "Install wacli at ~/.local/bin/wacli before installing OmaWhatsApp." >&2
   exit 1

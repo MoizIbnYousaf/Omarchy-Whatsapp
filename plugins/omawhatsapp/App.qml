@@ -49,6 +49,7 @@ Item {
   property string toastText: ""
   property string pendingOpenChatJid: ""
   property string demoSelectedJid: "demo-lab"
+  property string demoVoiceState: "idle"
   property var demoChats: [
     { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", preview: "OmaWhatsApp is instant and native", timestamp: 1787539920, unread: 0, pinned: true },
     { jid: "demo-team", name: "Design team", kind: "group", preview: "The interaction pass is ready", timestamp: 1787539000, unread: 3, pinned: false },
@@ -151,6 +152,10 @@ Item {
     && root.displayKind === "group" && root.mentionCandidates.length > 0
   readonly property bool sendingAttachments: !root.demoMode && root.service
     && root.service.writing && root.service.activeWriteKind === "files"
+  readonly property bool voiceForCurrentChat: root.demoMode
+    ? root.demoVoiceState !== "idle"
+    : (root.service && String(root.service.voiceDraftJid || "") === root.currentChatKey()
+      && String(root.service.voiceState || "idle") !== "idle")
 
   KeyboardNavigation { id: keyboardNavigation }
 
@@ -192,6 +197,7 @@ Item {
     closingFromHost = false
     opened = true
     demoMode = payload.demo === true
+    demoVoiceState = demoMode && payload.voice === true ? "review" : "idle"
     pendingOpenChatJid = String(payload.jid || "")
     narrowConversation = payload.conversation === true
     narrowSearchOpen = false
@@ -314,6 +320,12 @@ Item {
   }
 
   function goBack() {
+    if (root.voiceForCurrentChat && root.service
+        && (root.service.voiceState === "recording"
+            || root.service.voiceState === "preparing")) {
+      root.service.stopVoiceRecording()
+      return
+    }
     if (settingsOpen) {
       settingsOpen = false
       root.focusComposer()
@@ -377,6 +389,27 @@ Item {
       ? service.editMessage(editTarget, value)
       : service.sendText(value, replyTarget ? replyTarget.id : "", mentionJids)
     if (started) composer.text = ""
+  }
+
+  function toggleVoiceRecording() {
+    if (demoMode) {
+      root.showToast("voice notes record only in a real chat")
+      return false
+    }
+    if (!service || currentChatKey() === "") return false
+    if (service.writing) {
+      attachmentError = "Finish the current WhatsApp action before recording."
+      return false
+    }
+    if (String(service.voiceState || "idle") === "idle"
+        && (composer.text.trim() !== "" || pendingAttachments.length > 0
+            || pendingStickerPath !== "" || editTarget !== null)) {
+      attachmentError = "Send or clear the current draft before recording a voice note."
+      return false
+    }
+    attachmentError = ""
+    return service.toggleVoice(currentChatKey(), displayGroupName,
+      replyTarget ? replyTarget.id : "")
   }
 
   function closeMentionCompletion() {
@@ -793,6 +826,7 @@ Item {
         pollQuestion.text = ""
         pollOptions.text = ""
       }
+      if (sameChat && kind === "voice") root.cancelComposerContext(false)
       if (kind === "forward") root.forwardTarget = null
       if (sameChat) root.focusComposer()
     }
@@ -859,6 +893,13 @@ Item {
         sequence: "Ctrl+Shift+O"
         context: Qt.WindowShortcut
         onActivated: root.openFilePicker("media")
+      }
+
+      Shortcut {
+        sequence: "Ctrl+Shift+V"
+        context: Qt.WindowShortcut
+        autoRepeat: false
+        onActivated: root.toggleVoiceRecording()
       }
 
       Shortcut {
@@ -2328,6 +2369,7 @@ Item {
 
           Rectangle {
             id: pasteButton
+            visible: !root.voiceForCurrentChat
             anchors.left: parent.left
             anchors.leftMargin: Style.space(12)
             anchors.verticalCenter: parent.verticalCenter
@@ -2436,6 +2478,7 @@ Item {
 
           Rectangle {
             id: composerSurface
+            visible: !root.voiceForCurrentChat
             anchors.left: pasteButton.right
             anchors.leftMargin: Style.space(8)
             anchors.right: sendButton.left
@@ -2480,6 +2523,11 @@ Item {
                 } else if (root.mentionStart >= 0 && event.key === Qt.Key_Escape) {
                   root.closeMentionCompletion()
                   event.accepted = true
+                } else if ((event.modifiers & Qt.ControlModifier)
+                           && (event.modifiers & Qt.ShiftModifier)
+                           && event.key === Qt.Key_V) {
+                  root.toggleVoiceRecording()
+                  event.accepted = true
                 } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V) {
                   root.pasteDraft()
                   event.accepted = true
@@ -2511,6 +2559,7 @@ Item {
 
           Rectangle {
             id: sendButton
+            visible: !root.voiceForCurrentChat
             anchors.right: parent.right
             anchors.rightMargin: Style.space(12)
             anchors.verticalCenter: parent.verticalCenter
@@ -2519,21 +2568,47 @@ Item {
             height: width
             radius: width / 2
             color: composer.text.trim() !== "" || root.pendingAttachments.length > 0
-              ? root.accent : "transparent"
+              || root.currentChatKey() !== "" ? root.accent : "transparent"
             opacity: root.service && root.service.writing ? 0.45 : 1
             Text {
               textFormat: Text.PlainText
               anchors.centerIn: parent
-              text: "➤"
-              color: composer.text.trim() !== "" || root.pendingAttachments.length > 0
-                ? root.background : root.dimmer
+              text: composer.text.trim() !== "" || root.pendingAttachments.length > 0
+                ? "➤" : "󰍬"
+              color: root.currentChatKey() !== "" ? root.background : root.dimmer
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
             }
             MouseArea {
               anchors.fill: parent
-              onClicked: root.sendDraft()
+              onClicked: {
+                if (composer.text.trim() !== "" || root.pendingAttachments.length > 0)
+                  root.sendDraft()
+                else root.toggleVoiceRecording()
+              }
             }
+          }
+
+          VoiceComposer {
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(12)
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(12)
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.verticalCenterOffset: composerBar.contextHeight / 2
+            service: root.demoMode ? null : root.service
+            jid: root.currentChatKey()
+            offline: root.service ? root.service.offlineMode : false
+            foreground: root.foreground
+            background: root.background
+            accent: root.accent
+            urgent: root.urgent
+            muted: root.dim
+            fontFamily: root.fontFamily
+            demoState: root.demoVoiceState
+            demoJid: root.currentChatKey()
+            demoDurationMs: 42000
+            demoPositionMs: 13000
           }
         }
 

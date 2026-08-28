@@ -42,6 +42,16 @@ Item {
   property var messages: []
   property var members: []
 
+  readonly property string voiceState: voiceRecorder.state
+  readonly property string voiceDraftJid: voiceRecorder.chatJid
+  readonly property string voiceDraftChatName: voiceRecorder.chatName
+  readonly property string voiceDraftPath: voiceRecorder.draftPath
+  readonly property string voiceErrorText: voiceRecorder.errorText
+  readonly property int voiceDurationMs: voiceRecorder.durationMs
+  readonly property int voicePlaybackPosition: voiceRecorder.playbackPosition
+  readonly property bool voicePlaying: voiceRecorder.playing
+  readonly property bool voiceCapturing: voiceRecorder.capturing
+
   readonly property bool windowOpen: appOpen || dropdownOpen
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
@@ -95,6 +105,7 @@ Item {
 
   function closeApp() {
     pendingAppPayload = ""
+    voiceRecorder.stopForSurfaceClose()
     if (appLoader.item && typeof appLoader.item.close === "function")
       appLoader.item.close()
   }
@@ -153,6 +164,7 @@ Item {
   function selectChat(chat) {
     if (!chat || !chat.jid) return
     var next = String(chat.jid)
+    voiceRecorder.stopForChatChange(next)
     dismissNotifications(next)
     if (next !== selectedChatJid) {
       selectedChatJid = next
@@ -178,24 +190,30 @@ Item {
     refreshMessages()
   }
   function selectItem(id) { selectedId = String(id || "") }
-  function runWrite(kind, payload) {
-    if (writing || writeProcess.running || selectedChatJid === "") return false
+  function runWriteForChat(kind, payload, jid) {
+    var target = String(jid || "")
+    if (writing || writeProcess.running || target === "") return false
     if (offlineMode && kind !== "paste") {
       var message = "Offline mode is on. Go online before sending or changing WhatsApp state."
       errorText = message
-      writeFailed(message, selectedChatJid)
+      writeFailed(message, target)
       return false
     }
     writing = true
     activeWriteKind = kind
-    activeWriteChatJid = selectedChatJid
+    activeWriteChatJid = target
     errorText = ""
+    var request = Object.assign({}, payload || ({}))
+    request.jid = target
     writeProcess.kind = kind
-    writeProcess.payload = JSON.stringify(payload || ({}))
+    writeProcess.payload = JSON.stringify(request)
     writeProcess.command = [helper, kind]
     writeProcess.stdinEnabled = true
     writeProcess.running = true
     return true
+  }
+  function runWrite(kind, payload) {
+    return runWriteForChat(kind, payload, selectedChatJid)
   }
   function sendText(text, replyId, mentions) {
     var value = String(text || "").trim()
@@ -224,6 +242,15 @@ Item {
       reply_id: String(replyId || "")
     })
   }
+  function toggleVoice(jid, chatName, replyId) {
+    return voiceRecorder.toggle(String(jid || ""), String(chatName || ""),
+      String(replyId || ""))
+  }
+  function stopVoiceRecording() { return voiceRecorder.stopToReview() }
+  function stopVoiceForSurfaceClose() { voiceRecorder.stopForSurfaceClose() }
+  function discardVoice() { return voiceRecorder.discard() }
+  function sendVoiceDraft() { return voiceRecorder.requestSend() }
+  function toggleVoicePlayback() { return voiceRecorder.playPause() }
   function sendSticker(path, replyId) {
     return runWrite("sticker", {
       jid: selectedChatJid,
@@ -324,6 +351,21 @@ Item {
   }
 
   Component.onCompleted: storeWatchProcess.running = true
+
+  VoiceRecorder {
+    id: voiceRecorder
+    helper: root.helper
+    onNotice: function(message) { root.errorText = String(message || "") }
+    onSendRequested: function(jid, path, replyId) {
+      var started = root.runWriteForChat("voice", {
+        jid: String(jid || ""),
+        path: String(path || ""),
+        reply_id: String(replyId || "")
+      }, jid)
+      if (started) voiceRecorder.markSending(jid)
+      else voiceRecorder.markSendFailed(root.errorText, jid)
+    }
+  }
 
   // The full window belongs to the one resident service, while the bar owns
   // the anchored dropdown. This avoids duplicate per-monitor app windows and
@@ -610,6 +652,7 @@ Item {
         var message = (payload && payload.error) || String(writeError.text || "WhatsApp could not complete that request.").trim()
         root.errorText = message
         if (finishedKind === "media") root.mediaDownloadId = ""
+        if (finishedKind === "voice") voiceRecorder.markSendFailed(message, finishedJid)
         root.writeFailed(message, finishedJid)
         return
       }
@@ -624,6 +667,7 @@ Item {
       }
       root.errorText = ""
       if (finishedKind === "media") root.mediaDownloadId = ""
+      if (finishedKind === "voice") voiceRecorder.markSent(finishedJid)
       root.writeCompleted(finishedKind, finishedJid)
       refreshDelay.restart()
     }

@@ -142,7 +142,7 @@ the message belongs to the selected chat before crossing the helper boundary.
 | Photos/videos | `send file --as auto` | building |
 | Documents | `send file --as auto` | building |
 | Sticker | `send sticker` | building |
-| Voice-note recording | `send voice`; recorder UI needed | planned |
+| Voice-note recording | `send voice` + Qt Multimedia OGG/Opus | building |
 | Location | `send location` | planned |
 | Poll creation | `send poll` | building |
 | Group mention completion | `send text --mention` | building |

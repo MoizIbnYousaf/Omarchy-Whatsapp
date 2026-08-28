@@ -460,6 +460,59 @@ class BackendTests(unittest.TestCase):
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "WebP"):
             self.backend.send_sticker("team@g.us", self.preview.as_uri())
 
+    def test_voice_drafts_are_private_and_require_ogg_opus(self) -> None:
+        created = self.backend.voice_draft("create")
+        draft = Path(created["path"])
+        self.assertEqual(draft.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(draft.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(draft.stat().st_size, 0)
+
+        draft.write_bytes(b"not an opus recording")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "OGG/Opus"):
+            self.backend.voice_draft("finalize", draft)
+
+        draft.write_bytes(b"OggS" + bytes(24) + b"OpusHead" + bytes(64))
+        finalized = self.backend.voice_draft("finalize", draft.as_uri())
+        self.assertEqual(finalized["path"], str(draft))
+        self.assertEqual(finalized["size"], draft.stat().st_size)
+        self.assertEqual(draft.stat().st_mode & 0o777, 0o600)
+
+    def test_voice_send_is_exact_reply_aware_and_removes_confirmed_draft(self) -> None:
+        draft = Path(self.backend.voice_draft("create")["path"])
+        draft.write_bytes(b"OggS" + bytes(24) + b"OpusHead" + bytes(64))
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            result = self.backend.send_voice("team@g.us", draft, "t1")
+        command = write.call_args.args[0]
+        self.assertEqual(command[1:3], ["send", "voice"])
+        self.assertEqual(command[command.index("--to") + 1], "team@g.us")
+        self.assertEqual(command[command.index("--file") + 1], str(draft))
+        self.assertEqual(command[command.index("--mime") + 1], "audio/ogg")
+        self.assertEqual(command[command.index("--reply-to") + 1], "t1")
+        self.assertEqual(command[command.index("--reply-to-sender") + 1],
+                         "member@s.whatsapp.net")
+        self.assertTrue(result["draft_cleaned"])
+        self.assertFalse(draft.exists())
+
+    def test_failed_voice_send_preserves_review_draft(self) -> None:
+        draft = Path(self.backend.voice_draft("create")["path"])
+        draft.write_bytes(b"OggS" + bytes(24) + b"OpusHead" + bytes(64))
+        rejected = subprocess.CompletedProcess(
+            [], 1, '{"success":false,"error":{"message":"rejected"}}', ""
+        )
+        with mock.patch.object(self.backend, "_write", return_value=rejected), \
+             self.assertRaisesRegex(backend_module.OmaWhatsAppError, "rejected"):
+            self.backend.send_voice("team@g.us", draft)
+        self.assertTrue(draft.exists())
+
+    def test_voice_draft_commands_reject_paths_outside_private_store(self) -> None:
+        external = self.root / "voice-deadbeefdeadbeefdeadbeefdeadbeef.ogg"
+        external.write_bytes(b"OggS" + bytes(24) + b"OpusHead")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "private voice draft"):
+            self.backend.voice_draft("finalize", external)
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "private voice draft"):
+            self.backend.send_voice("team@g.us", external)
+
     def test_poll_is_validated_and_transport_is_exact(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
         with mock.patch.object(self.backend, "_write", return_value=completed) as write:

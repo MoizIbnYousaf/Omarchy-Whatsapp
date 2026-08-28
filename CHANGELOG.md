@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0 — 2026-08-28
+
+- Add native OGG/Opus voice-note recording to the full client and compact bar
+  conversation, with `Ctrl+Shift+V` as the shared start/stop shortcut.
+- Stop into a WhatsApp-style review draft: preview playback, elapsed time,
+  explicit discard, and explicit send. Stopping never sends automatically.
+- Keep one resident recorder across both surfaces, release the microphone
+  before review, bind the draft to its original exact chat/reply, and stop
+  safely when its surface closes or the user switches conversations.
+- Create recordings only inside an owner-private directory, validate the final
+  bytes as OGG/Opus, retain failed sends for retry, and delete a draft only
+  after wacli confirms delivery.
+- Cover the lifecycle with backend boundary tests and an offscreen state-model
+  suite without opening a microphone or creating a WhatsApp test message.
+
 ## 0.8.3 — 2026-08-28
 
 - Show only each participant's latest reaction on a message, so changing an

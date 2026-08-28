@@ -3,7 +3,8 @@
 ## Lifetimes
 
 - `Service.qml` is resident. It owns authentication/sync state, the chat rail,
-  selected conversation, unread total, drafts-in-flight, and refresh cadence.
+  selected conversation, unread total, drafts-in-flight, one native voice
+  recorder, and refresh cadence.
 - `App.qml` is owned once by the resident service. Its window remains hidden
   until summoned and owns composition, focus, filtering, and visible drafts.
 - `BarWidget.qml` hosts `Dropdown.qml`, a bar-anchored recent-chat view over
@@ -19,7 +20,13 @@ The window can disappear without making the data path cold.
 The bar click and global shortcut intentionally lead to different surfaces.
 The click opens a compact interactive conversation client; `Super+Shift+W`
 summons the full app. Both share the same selected exact JID, messages, write
-serialization, offline state, and resident refresh path.
+serialization, offline state, voice draft, and resident refresh path.
+
+The resident voice recorder opens the system microphone only after a click or
+`Ctrl+Shift+V`. A second toggle, Escape, surface close, or chat switch stops
+capture into review and releases the microphone. It does not send. The review
+draft remains tied to the exact chat and optional reply ID captured at start;
+only its explicit send action crosses the helper boundary.
 
 Unread state has two independent layers. wacli's `unread_count` remains the
 authoritative WhatsApp value. OmaWhatsApp stores a mode-`0600` local
@@ -66,6 +73,13 @@ and syncs each standards-compliant WhatsApp media message independently.
 Group mention choices come only from participants and senders already indexed
 inside that exact group. The helper rejects arbitrary mention JIDs before
 passing the verified set to wacli.
+
+Voice recordings live only in OmaWhatsApp's owner-private `voice-drafts`
+directory. The helper accepts its own random filenames, rejects links and
+paths outside that directory, requires a regular single-link file under 100
+MiB, and verifies the final OGG/Opus header. A failed send retains the draft;
+a confirmed send removes it without turning cleanup trouble into a duplicate
+send opportunity.
 
 `wacli sync --follow` normally owns the store. Supported sends delegate through
 its companion socket. If that path is unavailable, the helper serializes a

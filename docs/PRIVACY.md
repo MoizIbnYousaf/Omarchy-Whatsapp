@@ -17,6 +17,13 @@ owner-checked, and no-follow; atomic replacement never follows a predictable
 state-file symlink. They never leave the machine and are never written into
 wacli's database.
 
+Voice drafts are created under the mode-`0700`
+`~/.local/state/omawhatsapp/voice-drafts` directory and finalized to mode
+`0600`. They never leave the device during recording or preview. Capture opens
+only after an explicit UI action, stops before review, and crosses WhatsApp
+only after the user explicitly submits the reviewed draft. Failed sends remain
+local for retry or discard; confirmed sends remove their draft.
+
 Child-process and clipboard pipes are drained incrementally under hard byte
 caps. Chat names, senders, message bodies, filenames, button labels, and error
 strings are always rendered as plain text in QML.

@@ -51,6 +51,15 @@ chat-menu action. Archived and currently muted chats retain their
 true unread count inside the chat rail while contributing zero to the bar's
 local notification total.
 
+`VoiceRecorder.qml` is instantiated once by the resident service and shared by
+both composers. Qt Multimedia writes 48 kHz mono OGG/Opus into a random path
+allocated below the helper's private state directory. Stopping capture runs a
+separate finalize check before exposing preview playback. The focused `voice`
+command revalidates the exact local chat, optional reply message, private path,
+owner, link count, size, and OGG/Opus signature before invoking `wacli send
+voice` with an argument array. A transport error keeps the review draft; a
+confirmed send deletes it and never retries automatically.
+
 ## Writes while sync is live
 
 wacli's companion socket handles supported mutations without stopping sync.
@@ -104,6 +113,7 @@ Build/test artifacts remain outside the installed plugin tree.
 | `~/.config/systemd/user/wacli-sync.service` | background sync unit |
 | `~/.local/state/wacli` | linked-device store owned by wacli |
 | `~/.local/state/omawhatsapp` | helper lock/disposable app state |
+| `~/.local/state/omawhatsapp/voice-drafts` | private reviewed voice drafts |
 
 ## Verification
 

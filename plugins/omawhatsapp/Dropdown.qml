@@ -81,6 +81,9 @@ Panel {
   readonly property bool offline: !demoMode && service && service.offlineMode
   readonly property bool sending: !demoMode && service && service.writing
     && String(service.activeWriteChatJid || "") === currentJid()
+  readonly property bool voiceForCurrentChat: !demoMode && service
+    && String(service.voiceDraftJid || "") === currentJid()
+    && String(service.voiceState || "idle") !== "idle"
 
   signal fullAppRequested(var payload)
   signal refreshRequested()
@@ -121,6 +124,7 @@ Panel {
   function close() {
     searchField.focus = false
     composer.focus = false
+    if (!demoMode && service) service.stopVoiceForSurfaceClose()
     if (!demoMode && service) service.dropdownOpen = false
     controller.hide()
   }
@@ -176,6 +180,7 @@ Panel {
   }
 
   function backToChats() {
+    if (!demoMode && service) service.stopVoiceForSurfaceClose()
     replyTarget = null
     composer.focus = false
     viewMode = "chats"
@@ -251,6 +256,27 @@ Panel {
     if (started && pendingAttachments.length === 0) composer.text = ""
   }
 
+  function toggleVoiceRecording() {
+    if (demoMode) {
+      errorText = "Voice notes record only in a real chat"
+      return false
+    }
+    if (!service || currentJid() === "") return false
+    if (service.writing) {
+      errorText = "Finish the current WhatsApp action before recording"
+      return false
+    }
+    if (String(service.voiceState || "idle") === "idle"
+        && (String(composer.text || "").trim() !== ""
+            || pendingAttachments.length > 0)) {
+      errorText = "Send or clear the current draft before recording a voice note"
+      return false
+    }
+    errorText = ""
+    return service.toggleVoice(currentJid(), String(currentChat.name || "WhatsApp chat"),
+      replyTarget ? replyTarget.id : "")
+  }
+
   function removeAttachment(index) {
     var next = pendingAttachments.slice()
     next.splice(index, 1)
@@ -313,6 +339,7 @@ Panel {
         root.pendingAttachments = []
         root.replyTarget = null
       }
+      if (kind === "voice") root.replyTarget = null
       root.focusComposer()
     }
     function onWriteFailed(message, jid) {
@@ -387,7 +414,11 @@ Panel {
       }
       onActivateRequested: root.activateSelection()
       onCloseRequested: {
-        if (root.viewMode === "conversation") root.backToChats()
+        if (root.viewMode === "conversation" && root.voiceForCurrentChat
+            && root.service && (root.service.voiceState === "recording"
+                || root.service.voiceState === "preparing"))
+          root.service.stopVoiceRecording()
+        else if (root.viewMode === "conversation") root.backToChats()
         else root.close()
       }
       onTabRequested: function(direction) {
@@ -399,6 +430,14 @@ Panel {
         else if (text === "r" || text === "R") root.refresh()
         else if (text === "o" || text === "O") root.openFullApp()
         else if (text === "i" || text === "I") root.focusComposer()
+      }
+
+      Shortcut {
+        sequence: "Ctrl+Shift+V"
+        context: Qt.WindowShortcut
+        autoRepeat: false
+        enabled: root.opened && root.viewMode === "conversation"
+        onActivated: root.toggleVoiceRecording()
       }
 
       Item {
@@ -991,7 +1030,9 @@ Panel {
                 }
               }
               Row {
+                visible: !root.voiceForCurrentChat
                 width: parent.width
+                height: visible ? implicitHeight : 0
                 spacing: Style.space(7)
                 Rectangle {
                   width: Style.space(34)
@@ -1041,7 +1082,12 @@ Panel {
                   font.pixelSize: Style.font.body
                   background: null
                   Keys.onPressed: function(event) {
-                    if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V) {
+                    if ((event.modifiers & Qt.ControlModifier)
+                        && (event.modifiers & Qt.ShiftModifier)
+                        && event.key === Qt.Key_V) {
+                      root.toggleVoiceRecording()
+                      event.accepted = true
+                    } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V) {
                       root.pasteClipboard()
                       event.accepted = true
                     } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_O) {
@@ -1065,18 +1111,41 @@ Panel {
                   width: Style.space(34)
                   height: width
                   radius: width / 2
-                  color: root.offline || root.sending ? root.subtle : root.accent
-                  opacity: root.offline ? 0.5 : 1
+                  color: root.sending ? root.subtle : root.accent
+                  opacity: root.sending ? 0.5 : 1
                   Text {
                     textFormat: Text.PlainText
                     anchors.centerIn: parent
-                    text: root.sending ? "…" : "󰒊"
-                    color: root.offline || root.sending ? root.muted : root.background
+                    text: root.sending ? "…"
+                      : (String(composer.text || "").trim() !== ""
+                          || root.pendingAttachments.length > 0 ? "󰒊" : "󰍬")
+                    color: root.sending ? root.muted : root.background
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
                   }
-                  TapHandler { enabled: !root.offline && !root.sending; onTapped: root.sendDraft() }
+                  TapHandler {
+                    enabled: !root.sending
+                    onTapped: {
+                      if (String(composer.text || "").trim() !== ""
+                          || root.pendingAttachments.length > 0) root.sendDraft()
+                      else root.toggleVoiceRecording()
+                    }
+                  }
                 }
+              }
+              VoiceComposer {
+                width: parent.width
+                height: visible ? implicitHeight : 0
+                service: root.service
+                jid: root.currentJid()
+                offline: root.offline
+                foreground: root.foreground
+                background: root.background
+                accent: root.accent
+                urgent: root.urgent
+                muted: root.muted
+                fontFamily: root.fontFamily
+                compact: true
               }
               Text {
                 textFormat: Text.PlainText

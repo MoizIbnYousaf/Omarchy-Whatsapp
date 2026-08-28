@@ -67,8 +67,15 @@ The other bounded message commands accept these objects:
 | `forward` | `jid`, `id`, `to_jid` |
 | `media` | `jid`, `id` |
 | `sticker` | `jid`, `path`, optional `reply_id` |
+| `voice` | `jid`, private OmaWhatsApp voice-draft `path`, optional `reply_id` |
 | `poll` | `jid`, `question`, `options`, `multi` |
 | `select` | `jid`, `id`, `index` |
+
+The graphical client alone creates and finalizes private voice drafts. Agents
+must not manufacture a draft path or record the microphone implicitly. For an
+explicitly requested pre-existing audio file, use the guarded `wacli send
+voice` operation with the exact `whatsapp-write` authorization described in
+[wacli-parity.md](wacli-parity.md).
 
 Chat state uses one allowlisted action:
 

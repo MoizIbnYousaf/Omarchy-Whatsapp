@@ -36,6 +36,8 @@ native, and visually at home in Omarchy.
   from the active Omarchy theme.
 - **Keyboard-native.** Jump between chats, collapse the rail, search, attach,
   reply, and open media without leaving the keyboard.
+- **Draft-first voice notes.** Record native OGG/Opus audio, stop into a local
+  preview, then explicitly send or discard it—never auto-send on stop.
 - **Agent-native.** The installer ships a shared `$omawhatsapp` skill with
   complete guarded wacli parity: ordinary chat work uses the app's exact-target
   helpers, while all 103 advanced wacli 0.17.1 operations pass through a
@@ -47,6 +49,9 @@ native, and visually at home in Omarchy.
   current conversation.
 - Send multiline text, replies, edits, reactions, interactive options, polls,
   stickers, and up to 10 files with a caption.
+- Press `Ctrl+Shift+V` to start or stop a voice note from either client. The
+  microphone is released before a review card appears with playback, elapsed
+  time, discard, and one explicit send action.
 - Type `@` in a group for a filtered member picker; OmaWhatsApp sends a real
   WhatsApp mention rather than decorative text.
 - Paste text, screenshots, GIFs, or local files; drag files into the window;
@@ -181,6 +186,7 @@ Add the `Super+Shift+W` binding from
 | Dropdown `Enter` / `Shift+Enter` | Send / add a line |
 | Dropdown paperclip / `Ctrl+O` | Choose and stage up to 10 local files |
 | Dropdown clipboard / `Ctrl+V` | Stage clipboard text, screenshots, GIFs, or files |
+| Dropdown `Ctrl+Shift+V` | Start/stop a voice note; stopping opens review and does not send |
 | Dropdown `Esc` | Composer → messages → recent chats → close |
 | Dropdown `O` | Expand the exact chat into the full app |
 | `Ctrl+F` | Find in the current conversation |
@@ -193,6 +199,7 @@ Add the `Super+Shift+W` binding from
 | `Ctrl+V` | Stage clipboard text, image, GIF, or local file |
 | `Ctrl+O` | Add documents |
 | `Ctrl+Shift+O` | Add photos and videos |
+| `Ctrl+Shift+V` | Start/stop a voice note; preview, discard, or explicitly send |
 | `J` / `K`, arrows | Move through messages or the focused chat list |
 | `Enter` | Open the selected chat and focus its composer immediately |
 | `C` | Focus the message composer |
@@ -214,7 +221,7 @@ card controls automatic receipts, the badge, background sync, and dropdown size.
 ./scripts/test
 ```
 
-The release gate runs 59 backend boundary/write-path/parity tests, 16 offscreen
+The release gate runs 65 backend boundary/write-path/parity tests, 20 offscreen
 QML tests, an isolated installer preflight, manifest validation, QML lint,
 shell syntax checks, a diff check, and a heavyweight-runtime dependency guard.
 Installed verification and screenshot rules live in [testing](docs/TESTING.md);

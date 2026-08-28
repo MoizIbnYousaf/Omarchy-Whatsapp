@@ -42,6 +42,8 @@ MAX_CLIPBOARD_TYPES = 64 * 1024
 MAX_CLIPBOARD_TEXT = MAX_MESSAGE * 4
 MAX_PREFERENCES = 1024 * 1024
 MAX_SENT_MEDIA_STATE = 2 * 1024 * 1024
+VOICE_DRAFT_DIRECTORY = "voice-drafts"
+VOICE_DRAFT_PATTERN = re.compile(r"voice-[0-9a-f]{32}\.ogg\Z")
 PREFERENCES_VERSION = 1
 SUPPORTED_CHAT_WHERE = """(chats.kind = 'dm' OR (
   chats.kind = 'group'
@@ -425,6 +427,146 @@ class Backend:
         finally:
             if descriptor >= 0:
                 os.close(descriptor)
+
+    @contextmanager
+    def _voice_draft_directory(self, *, create: bool) -> Iterator[int]:
+        """Open the private recorder directory without following path links."""
+        descriptor = -1
+        try:
+            with self._state_directory(create=create) as state_directory:
+                if create:
+                    try:
+                        os.mkdir(
+                            VOICE_DRAFT_DIRECTORY,
+                            mode=0o700,
+                            dir_fd=state_directory,
+                        )
+                    except FileExistsError:
+                        pass
+                flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                descriptor = os.open(
+                    VOICE_DRAFT_DIRECTORY,
+                    flags,
+                    dir_fd=state_directory,
+                )
+                metadata = os.fstat(descriptor)
+                if (not stat.S_ISDIR(metadata.st_mode)
+                        or metadata.st_uid != os.getuid()):
+                    raise OmaWhatsAppError(
+                        "OmaWhatsApp refused an unsafe voice-draft directory."
+                    )
+                if create:
+                    os.fchmod(descriptor, 0o700)
+                yield descriptor
+        except OSError as exc:
+            raise OmaWhatsAppError(
+                "OmaWhatsApp could not open its private voice-draft directory."
+            ) from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+    def _voice_draft_name(self, value: Any) -> str:
+        path = self._local_path(value)
+        normalized = Path(os.path.abspath(path))
+        expected_parent = Path(os.path.abspath(
+            self.state_dir / VOICE_DRAFT_DIRECTORY
+        ))
+        if normalized.parent != expected_parent or not VOICE_DRAFT_PATTERN.fullmatch(
+            normalized.name
+        ):
+            raise OmaWhatsAppError(
+                "That recording is not an OmaWhatsApp private voice draft."
+            )
+        return normalized.name
+
+    def _inspect_voice_draft(self, value: Any, *, require_audio: bool) -> tuple[str, int]:
+        name = self._voice_draft_name(value)
+        flags = os.O_RDONLY | os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = -1
+        try:
+            with self._voice_draft_directory(create=False) as directory:
+                descriptor = os.open(name, flags, dir_fd=directory)
+                metadata = os.fstat(descriptor)
+                if (not stat.S_ISREG(metadata.st_mode)
+                        or metadata.st_uid != os.getuid()
+                        or metadata.st_nlink != 1):
+                    raise OmaWhatsAppError(
+                        "OmaWhatsApp refused an unsafe voice draft."
+                    )
+                if metadata.st_size > MAX_FILE:
+                    raise OmaWhatsAppError(
+                        "The voice note is too large (maximum 100 MB)."
+                    )
+                os.fchmod(descriptor, 0o600)
+                header = os.read(descriptor, min(65_536, metadata.st_size))
+                if require_audio:
+                    if metadata.st_size <= 0:
+                        raise OmaWhatsAppError("The voice note is empty.")
+                    if not header.startswith(b"OggS") or b"OpusHead" not in header:
+                        raise OmaWhatsAppError(
+                            "The voice note must be an OGG/Opus recording."
+                        )
+                return name, metadata.st_size
+        except FileNotFoundError as exc:
+            raise OmaWhatsAppError("That voice draft is no longer available.") from exc
+        except OSError as exc:
+            raise OmaWhatsAppError("OmaWhatsApp could not read that voice draft.") from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+    def voice_draft(self, action: str, value: Any = None) -> dict[str, Any]:
+        operation = str(action or "").strip().lower()
+        if operation == "create":
+            name = f"voice-{secrets.token_hex(16)}.ogg"
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            descriptor = -1
+            try:
+                with self._voice_draft_directory(create=True) as directory:
+                    descriptor = os.open(name, flags, 0o600, dir_fd=directory)
+                    os.fchmod(descriptor, 0o600)
+            except OSError as exc:
+                raise OmaWhatsAppError(
+                    "OmaWhatsApp could not create a private voice draft."
+                ) from exc
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
+            return {
+                "ok": True,
+                "kind": "voice-draft",
+                "action": "create",
+                "path": str(self.state_dir / VOICE_DRAFT_DIRECTORY / name),
+            }
+        if operation == "finalize":
+            name, size = self._inspect_voice_draft(value, require_audio=True)
+            return {
+                "ok": True,
+                "kind": "voice-draft",
+                "action": "finalize",
+                "path": str(self.state_dir / VOICE_DRAFT_DIRECTORY / name),
+                "size": size,
+            }
+        if operation == "discard":
+            name, _ = self._inspect_voice_draft(value, require_audio=False)
+            try:
+                with self._voice_draft_directory(create=False) as directory:
+                    os.unlink(name, dir_fd=directory)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise OmaWhatsAppError(
+                    "OmaWhatsApp could not discard that private voice draft."
+                ) from exc
+            return {"ok": True, "kind": "voice-draft", "action": "discard"}
+        raise OmaWhatsAppError("Choose create, finalize, or discard for the voice draft.")
 
     def _preferences(self) -> dict[str, Any]:
         default: dict[str, Any] = {
@@ -1399,6 +1541,37 @@ class Backend:
         self._envelope(self._write(command, timeout=120))
         return {"ok": True, "kind": "sticker"}
 
+    def send_voice(self, jid: str, value: Any, reply_id: str = "") -> dict[str, Any]:
+        """Send one helper-created OGG/Opus draft to one exact local chat."""
+        chat = self._chat(jid)
+        name, size = self._inspect_voice_draft(value, require_audio=True)
+        path = self.state_dir / VOICE_DRAFT_DIRECTORY / name
+        command = [
+            "--json", "send", "voice", "--to", chat["jid"],
+            "--file", str(path), "--mime", "audio/ogg",
+        ]
+        if reply_id.strip():
+            _, reply = self._message(chat["jid"], reply_id)
+            command.extend(["--reply-to", str(reply["msg_id"])])
+            sender = str(reply["sender_jid"] or "")
+            if chat["kind"] == "group" and sender:
+                command.extend(["--reply-to-sender", sender])
+        command.extend(["--post-send-wait", "0"])
+        self._envelope(self._write(command, timeout=120))
+        cleaned = True
+        try:
+            self.voice_draft("discard", path)
+        except OmaWhatsAppError:
+            # The send is already confirmed. Do not surface cleanup as a send
+            # failure, which could invite an accidental duplicate.
+            cleaned = False
+        return {
+            "ok": True,
+            "kind": "voice",
+            "size": size,
+            "draft_cleaned": cleaned,
+        }
+
     def send_poll(self, jid: str, question: str, options: Any, multi: Any = 1) -> dict[str, Any]:
         chat = self._chat(jid)
         value = question.strip()
@@ -1859,6 +2032,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("send")
     commands.add_parser("paste")
     commands.add_parser("files")
+    commands.add_parser("voice-draft")
+    commands.add_parser("voice")
     commands.add_parser("sticker")
     commands.add_parser("poll")
     commands.add_parser("open-media")
@@ -1929,6 +2104,13 @@ def main() -> int:
             return emit(backend.send_files(str(payload.get("jid") or ""),
                                            payload.get("paths"),
                                            str(payload.get("caption") or ""),
+                                           str(payload.get("reply_id") or "")))
+        if args.command == "voice-draft":
+            return emit(backend.voice_draft(str(payload.get("action") or ""),
+                                            payload.get("path")))
+        if args.command == "voice":
+            return emit(backend.send_voice(str(payload.get("jid") or ""),
+                                           payload.get("path"),
                                            str(payload.get("reply_id") or "")))
         if args.command == "sticker":
             return emit(backend.send_sticker(str(payload.get("jid") or ""),
