@@ -6,6 +6,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "SettingsPolicy.js" as SettingsPolicy
+import "AccountModel.js" as AccountModel
 
 // OmaWhatsApp keeps chat state resident, renders a responsive native timeline,
 // and follows Omarchy's semantic theme. All chats come from wacli's local mirror.
@@ -49,11 +50,12 @@ Item {
   property string toastText: ""
   property string pendingOpenChatJid: ""
   property string demoSelectedJid: "demo-lab"
+  property string demoSelectedAccount: "work"
   property string demoVoiceState: "idle"
   property var demoChats: [
-    { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", preview: "OmaWhatsApp is instant and native", timestamp: 1787539920, unread: 0, pinned: true },
-    { jid: "demo-team", name: "Design team", kind: "group", preview: "The interaction pass is ready", timestamp: 1787539000, unread: 3, pinned: false },
-    { jid: "demo-alex", name: "Alex", kind: "dm", preview: "Looks perfect — ship it", timestamp: 1787538200, unread: 1, pinned: false }
+    { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", account: "work", account_label: "work", preview: "OmaWhatsApp is instant and native", timestamp: 1787539920, unread: 0, pinned: true },
+    { jid: "demo-team", name: "Design team", kind: "group", account: "work", account_label: "work", preview: "The interaction pass is ready", timestamp: 1787539000, unread: 3, pinned: false },
+    { jid: "demo-alex", name: "Alex", kind: "dm", account: "personal", account_label: "personal", preview: "Looks perfect — ship it", timestamp: 1787538200, unread: 1, pinned: false }
   ]
   property var demoItems: [
     { id: "demo-5", text: "Yep — shipped.", sender: "Sam Rivera", sender_jid: "sam@s.whatsapp.net", timestamp: 1787540100, from_me: false, done: false, media_type: "", mime_type: "", local_path: "", tags: [] },
@@ -74,6 +76,9 @@ Item {
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
   readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
+  readonly property bool notifyOn: !!root.service && root.service.notificationsEnabled
+  readonly property bool notifyPreviewOn: !root.service || root.service.notificationsPreview
+  readonly property bool notifyAvailable: !root.service || root.service.notifyAvailable
   readonly property color foreground: Color.foreground
   readonly property color background: Color.background
   readonly property color accent: Color.accent
@@ -101,10 +106,19 @@ Item {
   readonly property string displayKind: root.demoMode
     ? (root.demoChats.find(function(chat) { return chat.jid === root.demoSelectedJid }) || root.demoChats[0]).kind
     : (root.service ? root.service.selectedChatKind : "chat")
+  readonly property string selectedAccount: root.demoMode
+    ? String(root.demoSelectedAccount || "")
+    : String(root.service ? root.service.selectedChatAccount || "" : "")
+  readonly property bool multiAccount: root.demoMode
+    ? true : !!root.service && root.service.multiAccount === true
   readonly property var selectedChat: {
     var jid = root.demoMode ? root.demoSelectedJid
       : (root.service ? root.service.selectedChatJid : "")
-    return root.sourceChats.find(function(chat) { return String(chat.jid) === String(jid) }) || null
+    var account = root.selectedAccount
+    return root.sourceChats.find(function(chat) {
+      return String(chat.jid) === String(jid)
+        && String(chat.account || "") === account
+    }) || null
   }
   readonly property var visibleChats: {
     var needle = chatSearchField ? String(chatSearchField.text || "").trim().toLowerCase() : ""
@@ -155,6 +169,7 @@ Item {
   readonly property bool voiceForCurrentChat: root.demoMode
     ? root.demoVoiceState !== "idle"
     : (root.service && String(root.service.voiceDraftJid || "") === root.currentChatKey()
+      && String(root.service.voiceDraftAccount || "") === root.selectedAccount
       && String(root.service.voiceState || "idle") !== "idle")
 
   KeyboardNavigation { id: keyboardNavigation }
@@ -227,9 +242,11 @@ Item {
           var warmChat = Array.isArray(service.chats)
             ? service.chats.find(function(chat) {
                 return String(chat.jid || "") === String(service.selectedChatJid || "")
+                  && String(chat.account || "") === String(service.selectedChatAccount || "")
               }) : null
           if (warmChat) service.selectChat(warmChat)
-          else service.dismissNotifications(service.selectedChatJid)
+          else service.dismissNotifications(service.selectedChatJid,
+                                            service.selectedChatAccount)
         }
       }
     }
@@ -408,7 +425,7 @@ Item {
       return false
     }
     attachmentError = ""
-    return service.toggleVoice(currentChatKey(), displayGroupName,
+    return service.toggleVoice(selectedAccount, currentChatKey(), displayGroupName,
       replyTarget ? replyTarget.id : "")
   }
 
@@ -468,8 +485,9 @@ Item {
   }
 
   function currentChatKey() {
-    return demoMode ? String(demoSelectedJid || "")
+    var jid = demoMode ? String(demoSelectedJid || "")
       : String(service ? service.selectedChatJid || "" : "")
+    return AccountModel.chatKey(root.selectedAccount, jid)
   }
 
   function saveComposerState() {
@@ -842,6 +860,11 @@ Item {
       if (kind === "sync-mode")
         root.showToast(root.service && root.service.offlineMode
           ? "offline · local archive stays available" : "online · background sync resumed")
+      if (kind === "notify-mode")
+        root.showToast(!root.notifyOn
+          ? "notifications off · bar badge only"
+          : (root.notifyPreviewOn ? "notifications on · shows message preview"
+            : "notifications on · chat names only"))
     }
     function onControlFailed(message) {
       root.showToast(String(message || "setting could not be changed"))
@@ -1092,6 +1115,58 @@ Item {
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
           spacing: Style.space(10)
+
+          Text {
+            textFormat: Text.PlainText
+            id: accountLabel
+            visible: root.multiAccount
+            anchors.verticalCenter: parent.verticalCenter
+            text: "󰀄 " + (root.selectedChat
+              ? AccountModel.labelOf(root.selectedChat) : root.selectedAccount)
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Rectangle {
+            id: notifyModeButton
+            height: Style.space(28)
+            width: notifyModeLabel.implicitWidth + Style.space(20)
+            radius: height / 2
+            color: notifyModeMouse.containsMouse
+              ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+            border.width: !root.demoMode && root.notifyOn ? 1 : 0
+            border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.65)
+
+            Text {
+              textFormat: Text.PlainText
+              id: notifyModeLabel
+              anchors.centerIn: parent
+              text: !root.notifyOn ? "󰂛 quiet"
+                : (!root.notifyAvailable ? "󰂚 notify · unavailable"
+                  : (root.notifyPreviewOn ? "󰂚 notify" : "󰂚 notify · names"))
+              color: !root.notifyOn ? root.dim
+                : (root.notifyAvailable ? root.accent : root.urgent)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            MouseArea {
+              id: notifyModeMouse
+              anchors.fill: parent
+              enabled: !root.demoMode && root.service && !root.service.controlWriting
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              acceptedButtons: Qt.LeftButton | Qt.RightButton
+              // Left click switches popups on or off; right click drops the preview.
+              onClicked: function(mouse) {
+                if (mouse.button === Qt.RightButton)
+                  root.service.setNotifications(null, !root.notifyPreviewOn)
+                else
+                  root.service.setNotifications(!root.notifyOn, null)
+              }
+            }
+          }
 
           Rectangle {
             id: syncModeButton
@@ -1585,9 +1660,10 @@ Item {
               width: chatList.width
               height: Style.space(66)
               radius: Style.cornerRadius
-              readonly property bool selected: root.demoMode
-                ? String(modelData.jid) === root.demoSelectedJid
-                : root.service && String(modelData.jid) === root.service.selectedChatJid
+              readonly property bool selected: String(modelData.account || "") === root.selectedAccount
+                && (root.demoMode
+                  ? String(modelData.jid) === root.demoSelectedJid
+                  : !!root.service && String(modelData.jid) === root.service.selectedChatJid)
               readonly property bool keyboardSelected: root.keyboardContext === "chats"
                 && index === root.chatCursorIndex
               color: keyboardSelected || selected
@@ -1647,7 +1723,9 @@ Item {
                 Text {
                   textFormat: Text.PlainText
                   width: parent.width
-                  text: (modelData.last_from_me ? "You · " : "") + String(modelData.preview || "No local messages yet")
+                  text: AccountModel.previewPrefix(modelData, root.multiAccount)
+                    + (modelData.last_from_me ? "You · " : "")
+                    + String(modelData.preview || "No local messages yet")
                   color: root.dim
                   elide: Text.ElideRight
                   font.family: root.fontFamily
@@ -2597,6 +2675,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             anchors.verticalCenterOffset: composerBar.contextHeight / 2
             service: root.demoMode ? null : root.service
+            account: root.selectedAccount
             jid: root.currentChatKey()
             offline: root.service ? root.service.offlineMode : false
             foreground: root.foreground
@@ -2606,6 +2685,7 @@ Item {
             muted: root.dim
             fontFamily: root.fontFamily
             demoState: root.demoVoiceState
+            demoAccount: root.selectedAccount
             demoJid: root.currentChatKey()
             demoDurationMs: 42000
             demoPositionMs: 13000
@@ -2928,11 +3008,12 @@ Item {
             height: forwardPicker.height - Style.space(116)
             clip: true
             spacing: Style.space(3)
-            model: root.sourceChats.filter(function(chat) {
-              var needle = String(forwardSearch.text || "").trim().toLowerCase()
-              return String(chat.jid) !== String(root.selectedChat ? root.selectedChat.jid : "")
-                && (needle === "" || String(chat.name || "").toLowerCase().indexOf(needle) >= 0)
-            })
+            model: AccountModel.forwardTargets(root.sourceChats, root.selectedChat)
+              .filter(function(chat) {
+                var needle = String(forwardSearch.text || "").trim().toLowerCase()
+                return needle === ""
+                  || String(chat.name || "").toLowerCase().indexOf(needle) >= 0
+              })
             delegate: Rectangle {
               required property var modelData
               width: parent.width

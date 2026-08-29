@@ -102,6 +102,7 @@ if $check_only; then
   jq -e --arg plugin_id "$plugin_id" '.id == $plugin_id' \
     "$staging_root/$install_plugin_dir/manifest.json" >/dev/null
   [[ -f "$staging_root/$install_plugin_dir/SettingsPolicy.js" ]]
+  [[ -f "$staging_root/$install_plugin_dir/AccountModel.js" ]]
   [[ -f "$staging_root/$install_plugin_dir/LICENSE" ]]
   rg -q '^name: omawhatsapp$' "$staging_root/skills/$skill_dir/SKILL.md"
   rg -q 'references/wacli-parity\.md' "$staging_root/skills/$skill_dir/SKILL.md"
@@ -143,21 +144,48 @@ rm -rf -- "$plugin_root/omawhatsapp-bar"
 
 install -Dm644 "$repo_root/systemd/user/wacli-sync.service" \
   "$user_home/.config/systemd/user/wacli-sync.service"
+install -Dm644 "$repo_root/systemd/user/wacli-sync@.service" \
+  "$user_home/.config/systemd/user/wacli-sync@.service"
 mv -- "$temporary" "$shell_config"
 trap - EXIT
 rmdir -- "$staging_root/skills" "$staging_root"
 
 systemctl --user daemon-reload
-preferences="$user_home/.local/state/omawhatsapp/preferences.json"
-if [[ -f $preferences ]] && jq -e '.online == false' "$preferences" >/dev/null 2>&1; then
-  # An upgrade must not silently undo the user's explicit offline choice.
-  systemctl --user disable --now wacli-sync.service
+
+# One canonical status snapshot supplies both the helper-validated account
+# list and every account's persisted online state.
+status_json=$("$user_home/.local/bin/omawhatsapp" status)
+if jq -e '.accounts | length == 1 and .[0].account == ""' \
+    <<<"$status_json" >/dev/null; then
+  account_units=(wacli-sync.service)
+  account_flags=("")
 else
-  systemctl --user enable wacli-sync.service
-  # `enable --now` does not restart an already-running unit after an upgrade,
-  # so explicitly restart to activate the new sandbox and ExecStart.
-  systemctl --user restart wacli-sync.service
+  mapfile -t account_names < <(jq -r '.accounts[].account' <<<"$status_json")
+  account_units=()
+  account_flags=()
+  for account_name in "${account_names[@]}"; do
+    account_units+=("wacli-sync@${account_name}.service")
+    account_flags+=("$account_name")
+  done
+  # The legacy instance no longer owns any account's store.
+  systemctl --user disable --now wacli-sync.service >/dev/null 2>&1 || true
 fi
+
+for index in "${!account_units[@]}"; do
+  unit=${account_units[$index]}
+  # An upgrade must not silently undo the user's explicit offline choice, and
+  # that choice is per account.
+  if jq -e --arg account "${account_flags[$index]}" \
+      '.accounts[] | select(.account == $account) | .online == false' \
+      <<<"$status_json" >/dev/null; then
+    systemctl --user disable --now "$unit"
+  else
+    systemctl --user enable "$unit"
+    # `enable --now` does not restart an already-running unit after an upgrade,
+    # so explicitly restart to activate the new sandbox and ExecStart.
+    systemctl --user restart "$unit"
+  fi
+done
 
 if command -v omarchy-restart-shell >/dev/null; then
   omarchy-restart-shell

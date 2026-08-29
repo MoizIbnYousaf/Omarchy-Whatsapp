@@ -33,8 +33,10 @@ QtObject {
     context = "chats"
   }
 
-  function moveMessages(delta, count) {
-    messageIndex = boundedIndex(messageIndex + Number(delta || 0), count)
+  // Message index 0 is the newest item and the timeline renders BottomToTop.
+  // Accept visual movement here so positive always means down on screen.
+  function moveMessages(visualDelta, count) {
+    messageIndex = boundedIndex(messageIndex - Number(visualDelta || 0), count)
     return messageIndex
   }
 

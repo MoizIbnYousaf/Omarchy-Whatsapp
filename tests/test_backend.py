@@ -208,6 +208,151 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(chats["archive@g.us"]["unread"], 2)
         self.assertEqual(chats["archive@g.us"]["notification_unread"], 0)
 
+    def _enable_notifications(self, preview: bool = True) -> None:
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=True):
+            self.backend.set_notifications(True, preview)
+
+    def _arrive(self, jid: str, msg_id: str, timestamp: int, unread: int,
+                text: str = "new", sender: str = "Sam") -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE chats SET last_message_ts = ?, unread_count = ? WHERE jid = ?",
+                [timestamp, unread, jid],
+            )
+            connection.execute(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me,
+                 text, reaction_to_id, media_type, mime_type, local_path)
+                VALUES (?, '', ?, 'member@s.whatsapp.net', ?, ?, 0, ?, '', '', '', '')""",
+                [jid, msg_id, sender, timestamp, text],
+            )
+
+    def _notify(self, skip_jid: str = "") -> tuple[dict, list]:
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=True), \
+                mock.patch.object(self.backend, "_deliver_notification",
+                                  return_value=True) as deliver:
+            result = self.backend.notify(skip_jid)
+        return result, [call.args for call in deliver.call_args_list]
+
+    def test_desktop_notifications_are_off_until_notify_send_exists(self) -> None:
+        self.assertEqual(self.backend._preferences()["notifications"],
+                         {"enabled": False, "preview": True})
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=False):
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "notify-send"):
+                self.backend.set_notifications(True, None)
+        result, sent = self._notify()
+        self.assertFalse(result["enabled"])
+        self.assertEqual(sent, [])
+
+    def test_enabling_notifications_adopts_the_archive_instead_of_replaying_it(self) -> None:
+        self.backend._update_preferences(
+            lambda value: value["notifications"].update({"enabled": True}))
+        result, sent = self._notify()
+        self.assertTrue(result["seeded"])
+        self.assertEqual(sent, [])
+
+        self._enable_notifications()
+        stored = json.loads((self.root / "state" / "preferences.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["notifications"], {"enabled": True, "preview": True})
+        self.assertIn("team@g.us", stored["stores"][str(self.store)]["notified"])
+
+        self._arrive("team@g.us", "t3", 31, 4)
+        result, sent = self._notify()
+        self.assertEqual(result["sent"], 1)
+
+    def test_group_popup_names_the_sender_and_counts_arrivals(self) -> None:
+        self._enable_notifications()
+        self._arrive("team@g.us", "t3", 31, 5, text="ship it now", sender="Sam")
+        result, sent = self._notify()
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(sent[0], ("Design team · 2 new", "Sam: ship it now"))
+
+    def test_preview_off_reports_counts_without_message_text(self) -> None:
+        self._enable_notifications(preview=False)
+        self._arrive("team@g.us", "t3", 31, 5, text="secret")
+        result, sent = self._notify()
+        self.assertEqual(sent[0], ("Design team · 2 new", "2 new messages"))
+
+    def test_a_chat_read_elsewhere_still_notifies_with_zero_unread(self) -> None:
+        self._enable_notifications()
+        self._arrive("alex@s.whatsapp.net", "a2", 41, 0, text="on my way")
+        rail = {chat["jid"]: chat for chat in self.backend.chats()["chats"]}
+        self.assertEqual(rail["alex@s.whatsapp.net"]["unread"], 0)
+        self.assertEqual(rail["alex@s.whatsapp.net"]["notification_unread"], 0)
+        result, sent = self._notify()
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(sent[0], ("Alex", "on my way"))
+
+    def test_bar_badge_settings_and_dismissal_never_silence_popups(self) -> None:
+        self._enable_notifications()
+        self.backend.settings({"show_unread_count": False})
+        self._arrive("team@g.us", "t3", 31, 4)
+        with mock.patch.object(self.backend, "_write") as write:
+            self.backend.acknowledge_notifications("team@g.us")
+        write.assert_not_called()
+        rail = {chat["jid"]: chat for chat in self.backend.chats()["chats"]}
+        self.assertEqual(rail["team@g.us"]["notification_unread"], 0)
+        result, sent = self._notify()
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(sent[0][0], "Design team")
+
+    def test_only_the_visible_chat_is_skipped_while_a_surface_is_open(self) -> None:
+        self._enable_notifications()
+        self._arrive("team@g.us", "t3", 31, 4)
+        self._arrive("alex@s.whatsapp.net", "a2", 42, 2)
+        result, sent = self._notify("team@g.us")
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(sent[0][0], "Alex")
+
+        # A skipped chat still adopts the watermark, so only later arrivals
+        # count. With every surface closed nothing is skipped.
+        self._arrive("team@g.us", "t4", 33, 6)
+        result, sent = self._notify()
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(sent[0][0], "Design team · 2 new")
+
+    def test_muted_and_archived_chats_never_pop_up(self) -> None:
+        self._enable_notifications()
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("UPDATE chats SET muted_until = -1 WHERE jid = ?",
+                               ["team@g.us"])
+            connection.execute("UPDATE chats SET archived = 1 WHERE jid = ?",
+                               ["archive@g.us"])
+        self._arrive("team@g.us", "t3", 31, 4)
+        self._arrive("archive@g.us", "r1", 32, 2)
+        result, sent = self._notify()
+        self.assertEqual(result["pending"], 0)
+        self.assertEqual(sent, [])
+
+    def test_popup_text_stays_one_markup_inert_line(self) -> None:
+        self._enable_notifications()
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute("UPDATE chats SET name = ? WHERE jid = ?",
+                               ["<b>Design</b> team", "team@g.us"])
+        self._arrive("team@g.us", "t3", 31, 4, text="line one\nline <i>two</i>",
+                     sender="S&M")
+        result, sent = self._notify()
+        summary, body = sent[0]
+        self.assertEqual(summary, "&lt;b&gt;Design&lt;/b&gt; team")
+        self.assertEqual(body, "S&amp;M: line one line &lt;i&gt;two&lt;/i&gt;")
+
+    def test_notification_burst_is_bounded_by_one_summary(self) -> None:
+        self._enable_notifications()
+        arrivals = backend_module.MAX_NOTIFY_BURST + 2
+        for index in range(arrivals):
+            jid = f"burst{index}@s.whatsapp.net"
+            with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+                connection.execute(
+                    "INSERT INTO chats VALUES (?, 'dm', ?, 0, 0, 0, 0, 0, 0)",
+                    [jid, f"Burst {index}"],
+                )
+            self._arrive(jid, f"b{index}", 60 + index, 1, text="hi")
+        result, sent = self._notify()
+        self.assertEqual(result["pending"], arrivals)
+        self.assertEqual(len(sent), backend_module.MAX_NOTIFY_BURST + 1)
+        self.assertEqual(sent[-1][0], "OmaWhatsApp")
+        self.assertEqual(sent[-1][1], "2 more chats have new messages")
+
     def test_mute_deadlines_support_seconds_milliseconds_and_forever(self) -> None:
         now = 2_000_000_000.0
         self.assertTrue(backend_module.muted_until_active(-1, now))
@@ -746,7 +891,8 @@ class BackendTests(unittest.TestCase):
         (state / "preferences.json").symlink_to(victim)
 
         self.assertTrue(self.backend.online())
-        self.backend._update_preferences(lambda value: value.update({"online": False}))
+        self.backend._update_account_state(
+            lambda account_state: account_state.update({"online": False}))
         self.assertFalse((state / "preferences.json").is_symlink())
         self.assertEqual(victim.read_text(encoding="utf-8"), '{"online":false}')
         self.assertFalse(self.backend.online())
@@ -898,7 +1044,7 @@ class BackendTests(unittest.TestCase):
 
     def test_wacli_interactive_mode_is_limited_and_exact(self) -> None:
         completed = subprocess.CompletedProcess([], 0, "", "")
-        with mock.patch.object(self.backend, "_sync_active", return_value=False), \
+        with mock.patch.object(self.backend, "_unit_active", return_value=False), \
              mock.patch.object(backend_module.subprocess, "run", return_value=completed) as run:
             code = self.backend.transport_interactive(
                 ["auth", "--qr-format", "terminal"], authorization="interactive"
@@ -950,6 +1096,231 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(value["ok"])
         self.assertEqual(value["operation"], "version")
         self.assertEqual(value["data"], {"version": "fixture"})
+
+
+class MultiAccountTests(unittest.TestCase):
+    """Two linked accounts, two stores, one rail."""
+
+    FAKE_WACLI = """#!/usr/bin/env python3
+import pathlib
+import sys
+
+args = sys.argv[1:]
+if "accounts" in args and "list" in args:
+    sys.stdout.write(pathlib.Path(PAYLOAD).read_text(encoding="utf-8"))
+sys.exit(0)
+"""
+
+    WORK_CHATS = [
+        ("team@g.us", "group", "Design team", 30, 1, 3),
+        ("shared@s.whatsapp.net", "dm", "Robin", 20, 0, 2),
+    ]
+    HOME_CHATS = [
+        ("family@g.us", "group", "Family", 40, 0, 1),
+        ("shared@s.whatsapp.net", "dm", "Robin", 10, 0, 5),
+    ]
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.work = self.root / "stores" / "work"
+        self.home = self.root / "stores" / "home"
+        for store, chats in ((self.work, self.WORK_CHATS), (self.home, self.HOME_CHATS)):
+            store.mkdir(parents=True)
+            self._build(store, chats)
+        self.config = self.root / "config.yaml"
+        self.config.write_text("accounts: {}\n", encoding="utf-8")
+        payload = self.root / "accounts.json"
+        payload.write_text(json.dumps({"success": True, "error": None, "data": {
+            "accounts": [
+                {"name": "work", "configured_store": "stores/work",
+                 "store_dir": str(self.work), "default": True},
+                {"name": "home", "configured_store": "stores/home",
+                 "store_dir": str(self.home), "default": False},
+            ],
+            "config_path": str(self.config),
+            "default_account": "work",
+        }}), encoding="utf-8")
+        self.wacli = self.root / "wacli-bin"
+        self.wacli.write_text(
+            self.FAKE_WACLI.replace("PAYLOAD", repr(str(payload))), encoding="utf-8")
+        self.wacli.chmod(0o700)
+        self.backend = backend_module.Backend(
+            store_dir=self.work, state_dir=self.root / "state", wacli=self.wacli,
+            account_config=self.config,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    @staticmethod
+    def _build(store: Path, chats: list) -> None:
+        with closing(sqlite3.connect(store / "wacli.db")) as connection, connection:
+            connection.executescript(SCHEMA)
+            connection.executemany(
+                "INSERT INTO chats VALUES (?, ?, ?, ?, 0, ?, 0, 0, ?)", chats)
+            connection.executemany(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts, from_me,
+                 text, reaction_to_id, media_type, mime_type, local_path)
+                VALUES (?, '', ?, 'member@s.whatsapp.net', 'Sam', ?, 0, ?, '', '', '', '')""",
+                [(chat[0], f"m-{chat[0]}", chat[3], "hello") for chat in chats])
+
+    def test_accounts_come_from_wacli_with_the_default_resolved_first(self) -> None:
+        self.assertEqual([account.name for account in self.backend.accounts()],
+                         ["work", "home"])
+        self.assertEqual(self.backend.account("").name, "work")
+        self.assertEqual(self.backend.account("home").store_dir, self.home)
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not configured"):
+            self.backend.account("missing")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "valid named"):
+            self.backend.account("../escape")
+
+    def test_a_machine_without_an_account_config_stays_single_account(self) -> None:
+        backend = backend_module.Backend(
+            store_dir=self.work, state_dir=self.root / "state", wacli=self.wacli,
+            account_config=self.root / "absent.yaml",
+        )
+        accounts = backend.accounts()
+        self.assertEqual([account.name for account in accounts], [""])
+        self.assertEqual(accounts[0].store_dir, self.work)
+        self.assertEqual(accounts[0].unit, "wacli-sync.service")
+
+    def test_rail_merges_every_account_and_tags_each_row(self) -> None:
+        result = self.backend.chats()
+        self.assertEqual(
+            [(chat["name"], chat["account"]) for chat in result["chats"]],
+            [("Design team", "work"), ("Family", "home"),
+             ("Robin", "work"), ("Robin", "home")],
+        )
+        self.assertEqual(result["accounts"],
+                         [{"account": "work", "ready": True, "error": ""},
+                          {"account": "home", "ready": True, "error": ""}])
+
+    def test_an_unreadable_account_never_empties_the_rail(self) -> None:
+        (self.home / "wacli.db").unlink()
+        result = self.backend.chats()
+        self.assertEqual({chat["account"] for chat in result["chats"]}, {"work"})
+        report = {row["account"]: row for row in result["accounts"]}
+        self.assertFalse(report["home"]["ready"])
+        self.assertTrue(report["home"]["error"])
+
+    def test_the_same_chat_in_two_accounts_keeps_separate_state(self) -> None:
+        self.backend.use_account("work")
+        self.backend.acknowledge_notifications("shared@s.whatsapp.net")
+        rail = {(chat["account"], chat["jid"]): chat
+                for chat in self.backend.chats()["chats"]}
+        self.assertEqual(rail[("work", "shared@s.whatsapp.net")]["notification_unread"], 0)
+        self.assertEqual(rail[("home", "shared@s.whatsapp.net")]["notification_unread"], 5)
+        stored = json.loads(
+            (self.root / "state" / "preferences.json").read_text(encoding="utf-8"))
+        self.assertEqual(list(stored["stores"]), [str(self.work)])
+
+    def test_dismissing_the_bar_badge_covers_every_account(self) -> None:
+        self.backend.acknowledge_notifications("")
+        rail = self.backend.chats()["chats"]
+        self.assertEqual(sum(chat["notification_unread"] for chat in rail), 0)
+        self.assertEqual(sum(chat["unread"] for chat in rail), 11)
+
+    def test_every_wacli_command_carries_its_account(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true,"data":{}}', "")
+        self.backend.use_account("home")
+        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
+            self.backend.send("family@g.us", "hello")
+        command = run.call_args.args[0]
+        self.assertEqual(command[:3], [str(self.wacli), "--account", "home"])
+        self.assertIn("--to", command)
+
+    def test_sync_is_one_unit_per_account(self) -> None:
+        self.assertEqual(self.backend.account("work").unit, "wacli-sync@work.service")
+        self.assertEqual(self.backend.account("home").unit, "wacli-sync@home.service")
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        self.backend.use_account("home")
+        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
+            self.backend.set_online(False)
+        self.assertEqual(run.call_args.args[0][-1], "wacli-sync@home.service")
+        self.assertFalse(self.backend.online())
+        self.backend.use_account("work")
+        self.assertTrue(self.backend.online())
+
+    def test_status_separates_what_is_aggregated_from_what_is_selected(self) -> None:
+        def unit_active(unit: str) -> bool:
+            return unit == "wacli-sync@work.service"
+
+        with mock.patch.object(self.backend, "_unit_active", side_effect=unit_active), \
+                mock.patch.object(self.backend, "_doctor",
+                                  return_value={"authenticated": True}):
+            self.backend.use_account("home")
+            status = self.backend.status()
+        # The rail is ready when any account can serve it...
+        self.assertTrue(status["authenticated"])
+        # ...but the header pill describes the account whose chat is open.
+        self.assertEqual(status["account"], "home")
+        self.assertFalse(status["sync_active"])
+        self.assertEqual({row["account"]: row["sync_active"] for row in status["accounts"]},
+                         {"work": True, "home": False})
+
+    def test_gateway_validates_the_target_inside_the_named_account(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true,"data":{}}', "")
+        request = {
+            "args": ["send", "text", "--to", "family@g.us", "--text", "hi"],
+            "authorization": "whatsapp-write",
+        }
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not an exact chat"):
+            self.backend.transport(dict(request, account="work"))
+        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
+            self.backend.transport(dict(request, account="home"))
+        command = run.call_args.args[0]
+        self.assertEqual(command.count("--account"), 1)
+        self.assertEqual(command[command.index("--account") + 1], "home")
+
+    def test_notify_sweeps_every_account_and_names_it(self) -> None:
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=True):
+            self.backend.set_notifications(True, True)
+        with closing(sqlite3.connect(self.home / "wacli.db")) as connection, connection:
+            connection.execute(
+                "UPDATE chats SET last_message_ts = 41, unread_count = 3 WHERE jid = ?",
+                ["family@g.us"])
+        with mock.patch.object(self.backend, "_notify_send_ready", return_value=True), \
+                mock.patch.object(self.backend, "_deliver_notification",
+                                  return_value=True) as deliver:
+            result = self.backend.notify()
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(deliver.call_args.args[0], "Family (home) · 2 new")
+        stored = json.loads(
+            (self.root / "state" / "preferences.json").read_text(encoding="utf-8"))
+        self.assertEqual(sorted(stored["stores"]), sorted([str(self.work), str(self.home)]))
+
+    def test_version_1_state_migrates_to_the_default_account(self) -> None:
+        state = self.root / "state"
+        state.mkdir(mode=0o700)
+        legacy = {
+            "version": 1,
+            "online": False,
+            "send_read_receipts": True,
+            "acknowledged_unread": {"team@g.us": {"unread": 3, "timestamp": 30}},
+            "notified": {"team@g.us": {"unread": 3, "timestamp": 30}},
+            "show_unread_count": False,
+            "dropdown_rows": 9,
+        }
+        target = state / "preferences.json"
+        target.write_text(json.dumps(legacy), encoding="utf-8")
+        target.chmod(0o600)
+
+        preferences = self.backend._preferences()
+        self.assertEqual(list(preferences["stores"]), [str(self.work)])
+        self.assertFalse(preferences["show_unread_count"])
+        self.assertEqual(preferences["dropdown_rows"], 9)
+        migrated = preferences["stores"][str(self.work)]
+        self.assertFalse(migrated["online"])
+        self.assertTrue(migrated["send_read_receipts"])
+        self.assertIn("team@g.us", migrated["acknowledged_unread"])
+        self.assertIn("team@g.us", migrated["notified"])
+
+        # The second account starts clean instead of inheriting that history.
+        self.backend.use_account("home")
+        self.assertTrue(self.backend.online())
+        self.assertEqual(self.backend._account_state()["acknowledged_unread"], {})
 
 
 if __name__ == "__main__":

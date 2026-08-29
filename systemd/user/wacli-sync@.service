@@ -1,14 +1,16 @@
 [Unit]
-Description=Keep the local OmaWhatsApp index and new media in sync
+Description=Keep the local OmaWhatsApp index and new media in sync for account %I
 Documentation=https://wacli.sh
-ConditionPathExists=%h/.local/state/wacli/session.db
 PartOf=graphical-session.target
 After=graphical-session.target network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/wacli --lock-wait 30s sync --follow --download-media --max-reconnect 10m --stale-threshold 2m --presence-mode quiet --max-db-size 1GB --refresh-groups
+# Only the helper knows where a named account's store lives, so it decides
+# whether this instance has a linked session to follow.
+ExecCondition=%h/.local/bin/omawhatsapp session-ready --account %i
+ExecStart=%h/.local/bin/wacli --account %i --lock-wait 30s sync --follow --download-media --max-reconnect 10m --stale-threshold 2m --presence-mode quiet --max-db-size 1GB --refresh-groups
 Restart=on-failure
 RestartSec=10
 NoNewPrivileges=true
@@ -16,6 +18,8 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=read-only
+# Account stores live under wacli's state directory; an account configured
+# with a store outside it needs a drop-in that adds that path.
 ReadWritePaths=%h/.local/state/wacli
 ProtectClock=true
 ProtectControlGroups=true

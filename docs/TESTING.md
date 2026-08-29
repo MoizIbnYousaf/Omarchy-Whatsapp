@@ -52,7 +52,19 @@ wacli help tree before the offscreen QML tests.
    middle-clicking the bar clears only the local notification badge. Verify the
    settings switch with a mocked write; test a real receipt only with explicit
    permission.
-9. Only with explicit permission, send a meaningful text/image/voice note to a
+9. Turn the header pill to `notify` and confirm the next incoming message
+   pops up once, that right-clicking the pill drops the preview to chat names,
+   and that muted and archived chats stay silent. Check that the popup still
+   arrives with the bar badge preference off, with every window closed, and for
+   a chat already read on the phone, while the chat visibly on screen does not
+   pop up. Without `notify-send` the pill reports `unavailable`.
+10. With more than one account configured, confirm the rail merges them, each
+   row names its account, the header follows the open chat's account, the bar
+   badge sums every account, and a middle-click clears all of them. Confirm a
+   send, a receipt, and the offline pill act only on the open chat's account,
+   and that `systemctl --user list-units 'wacli-sync@*'` shows one instance per
+   linked account.
+11. Only with explicit permission, send a meaningful text/image/voice note to a
    known chat. Never create a throwaway WhatsApp test message.
 
 ## Screenshot

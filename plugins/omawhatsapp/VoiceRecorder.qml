@@ -1,6 +1,7 @@
 import QtQuick
 import QtMultimedia
 import Quickshell.Io
+import "AccountModel.js" as AccountModel
 import "VoiceRecorderModel.js" as VoiceModel
 
 // One resident recorder is shared by the full client and compact dropdown.
@@ -14,6 +15,7 @@ Item {
 
   property string helper: ""
   property string state: "idle"
+  property string chatAccount: ""
   property string chatJid: ""
   property string chatName: ""
   property string replyId: ""
@@ -34,7 +36,9 @@ Item {
   readonly property int playbackPosition: Number(player.position || 0)
   readonly property bool formatSupported: recorder.mediaFormat.isSupported(MediaFormat.Encode)
 
-  signal sendRequested(string jid, string path, string replyId)
+  readonly property string chatKey: AccountModel.chatKey(chatAccount, chatJid)
+
+  signal sendRequested(string account, string jid, string path, string replyId)
   signal notice(string message)
 
   function parseJson(raw) {
@@ -52,7 +56,7 @@ Item {
     try { return decodeURIComponent(value.slice(7)) } catch (error) { return value.slice(7) }
   }
 
-  function start(jid, name, reply) {
+  function start(account, jid, name, reply) {
     var target = String(jid || "")
     if (target === "") {
       notice("Choose a chat before recording a voice note.")
@@ -70,6 +74,7 @@ Item {
       notice(errorText)
       return false
     }
+    chatAccount = String(account || "")
     chatJid = target
     chatName = String(name || "WhatsApp chat")
     replyId = String(reply || "")
@@ -86,9 +91,9 @@ Item {
     return true
   }
 
-  function toggle(jid, name, reply) {
+  function toggle(account, jid, name, reply) {
     if (state === "recording") return stopToReview()
-    if (state === "idle") return start(jid, name, reply)
+    if (state === "idle") return start(account, jid, name, reply)
     if (state === "preparing") {
       cancelAfterCreate = true
       state = "discarding"
@@ -118,8 +123,8 @@ Item {
     if (state === "recording" || state === "preparing") stopToReview()
   }
 
-  function stopForChatChange(nextJid) {
-    if (String(nextJid || "") !== chatJid
+  function stopForChatChange(nextAccount, nextJid) {
+    if (AccountModel.chatKey(nextAccount, nextJid) !== chatKey
         && (state === "recording" || state === "preparing")) stopToReview()
   }
 
@@ -159,24 +164,24 @@ Item {
   function requestSend() {
     if (state !== "review" || draftPath === "") return false
     player.stop()
-    sendRequested(chatJid, draftPath, replyId)
+    sendRequested(chatAccount, chatJid, draftPath, replyId)
     return true
   }
 
-  function markSending(jid) {
-    if (String(jid || "") !== chatJid || state !== "review") return
+  function markSending(account, jid) {
+    if (AccountModel.chatKey(account, jid) !== chatKey || state !== "review") return
     state = "sending"
     errorText = ""
   }
 
-  function markSendFailed(message, jid) {
-    if (String(jid || "") !== chatJid || state !== "sending") return
+  function markSendFailed(message, account, jid) {
+    if (AccountModel.chatKey(account, jid) !== chatKey || state !== "sending") return
     state = "review"
     errorText = String(message || "Voice note could not be sent.")
   }
 
-  function markSent(jid) {
-    if (String(jid || "") !== chatJid) return
+  function markSent(account, jid) {
+    if (AccountModel.chatKey(account, jid) !== chatKey) return
     reset()
   }
 
@@ -193,6 +198,7 @@ Item {
   function reset() {
     player.stop()
     state = "idle"
+    chatAccount = ""
     chatJid = ""
     chatName = ""
     replyId = ""

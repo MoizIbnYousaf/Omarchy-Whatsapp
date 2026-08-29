@@ -5,6 +5,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "DropdownModel.js" as DropdownModel
+import "AccountModel.js" as AccountModel
 
 // A complete, bar-anchored mini client. The resident service stays the single
 // source of truth; this surface only owns transient navigation and draft state.
@@ -53,10 +54,12 @@ Panel {
     accent.b * 0.18 + background.b * 0.82, 1)
   readonly property string fontFamily: Style.font.family
   readonly property var demoChats: [
-    { jid: "demo-team", name: "Design team", kind: "group", preview: "The compact client can send now", timestamp: 1787540400, unread: 3, notification_unread: 3, pinned: true },
-    { jid: "demo-alex", name: "Alex", kind: "dm", preview: "Looks perfect — ship it", timestamp: 1787539800, unread: 1, notification_unread: 1, pinned: false },
-    { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", preview: "Native, private, and instant", timestamp: 1787539200, unread: 0, notification_unread: 0, pinned: false }
+    { jid: "demo-team", name: "Design team", kind: "group", account: "work", account_label: "work", preview: "The compact client can send now", timestamp: 1787540400, unread: 3, notification_unread: 3, pinned: true },
+    { jid: "demo-alex", name: "Alex", kind: "dm", account: "personal", account_label: "personal", preview: "Looks perfect — ship it", timestamp: 1787539800, unread: 1, notification_unread: 1, pinned: false },
+    { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", account: "work", account_label: "work", preview: "Native, private, and instant", timestamp: 1787539200, unread: 0, notification_unread: 0, pinned: false }
   ]
+  readonly property bool multiAccount: demoMode
+    || (!!service && service.multiAccount === true)
   readonly property var sourceChats: demoMode
     ? demoChats : (service && Array.isArray(service.chats) ? service.chats : [])
   readonly property var filteredChats: {
@@ -81,8 +84,10 @@ Panel {
   readonly property bool offline: !demoMode && service && service.offlineMode
   readonly property bool sending: !demoMode && service && service.writing
     && String(service.activeWriteChatJid || "") === currentJid()
+    && String(service.activeWriteAccount || "") === currentAccount()
   readonly property bool voiceForCurrentChat: !demoMode && service
     && String(service.voiceDraftJid || "") === currentJid()
+    && String(service.voiceDraftAccount || "") === currentAccount()
     && String(service.voiceState || "idle") !== "idle"
 
   signal fullAppRequested(var payload)
@@ -92,6 +97,10 @@ Panel {
 
   function currentJid() {
     return currentChat ? String(currentChat.jid || "") : ""
+  }
+
+  function currentAccount() {
+    return currentChat ? String(currentChat.account || "") : ""
   }
 
   function clampSelection() {
@@ -149,7 +158,8 @@ Panel {
   function moveSelection(delta) {
     if (viewMode === "conversation") {
       if (sourceMessages.length === 0) return
-      messageIndex = DropdownModel.clampIndex(messageIndex + delta, sourceMessages.length)
+      messageIndex = DropdownModel.visualMessageIndex(
+        messageIndex, delta, sourceMessages.length)
       messageList.positionViewAtIndex(messageIndex, ListView.Contain)
       return
     }
@@ -273,7 +283,7 @@ Panel {
       return false
     }
     errorText = ""
-    return service.toggleVoice(currentJid(), String(currentChat.name || "WhatsApp chat"),
+    return service.toggleVoice(currentAccount(), currentJid(), String(currentChat.name || "WhatsApp chat"),
       replyTarget ? replyTarget.id : "")
   }
 
@@ -657,7 +667,8 @@ Panel {
                   Text {
                     textFormat: Text.PlainText
                     width: parent.width
-                    text: String(chatRow.modelData.preview || "No local messages yet")
+                    text: AccountModel.previewPrefix(chatRow.modelData, root.multiAccount)
+                      + String(chatRow.modelData.preview || "No local messages yet")
                     elide: Text.ElideRight
                     maximumLineCount: 1
                     color: root.muted
@@ -1137,6 +1148,7 @@ Panel {
                 width: parent.width
                 height: visible ? implicitHeight : 0
                 service: root.service
+                account: root.currentAccount()
                 jid: root.currentJid()
                 offline: root.offline
                 foreground: root.foreground

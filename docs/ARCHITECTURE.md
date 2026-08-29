@@ -28,12 +28,36 @@ capture into review and releases the microphone. It does not send. The review
 draft remains tied to the exact chat and optional reply ID captured at start;
 only its explicit send action crosses the helper boundary.
 
+Desktop popups are a third, opt-in surface with their own watermark. They
+read the same chat rail but never the badge's acknowledged delta, so the badge
+preference, a dismissal, and a closed window cannot silence them, and a chat
+read on another device still notifies once when its timestamp advances. Only
+the chat currently on screen is skipped, a burst is capped, and muted and
+archived chats stay silent.
+
 Unread state has two independent layers. wacli's `unread_count` remains the
 authoritative WhatsApp value. OmaWhatsApp stores a mode-`0600` local
 acknowledgement snapshot and derives only the bar's new-message delta from it.
 Opening or dismissing never mutates WhatsApp by default. Users can explicitly
 opt into automatic exact-chat receipts in the in-app settings card; the
 labelled chat-menu action remains the one-off receipt path.
+
+## Accounts
+
+wacli owns the account list. The helper reads it from `accounts list`, which
+already resolves each account's absolute store, and keys its own private state
+by that store rather than by account name, so renaming an account keeps its
+history and registering an existing session with `store: .` needs no file to
+move. A machine with no account config stays single account and keeps the
+original sync unit; named accounts each get a `wacli-sync@<name>.service`
+instance.
+
+The chat rail merges every account and tags each row with the account it came
+from. An account that has never synced is reported as unready beside the rail
+instead of emptying it. Everything downstream of a row stays inside that row's
+account: its mirror resolves the exact chat, its store scopes the badge
+acknowledgement and the popup watermark, its unit is the one paused when the
+store lock is contended, and its offline choice governs only its own writes.
 
 ## Data boundary
 

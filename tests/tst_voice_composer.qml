@@ -9,6 +9,7 @@ TestCase {
   QtObject {
     id: serviceMock
     property string voiceState: "review"
+    property string voiceDraftAccount: "work"
     property string voiceDraftJid: "demo-chat"
     property int voiceDurationMs: 42000
     property int voicePlaybackPosition: 13000
@@ -20,6 +21,7 @@ TestCase {
     Oma.VoiceComposer {
       width: 480
       service: serviceMock
+      account: "work"
       jid: "demo-chat"
       foreground: "#eeeeee"
       background: "#111111"
@@ -37,6 +39,9 @@ TestCase {
     verify(composer.implicitHeight > 0)
     composer.jid = "another-chat"
     compare(composer.forThisChat, false)
+    composer.jid = "demo-chat"
+    composer.account = "personal"
+    compare(composer.forThisChat, false)
   }
 
   function test_demo_review_needs_no_transport_or_recorder() {
@@ -45,7 +50,9 @@ TestCase {
     var composer = createTemporaryObject(component, testCase, {
       width: 320,
       service: null,
+      account: "work",
       jid: "demo-chat",
+      demoAccount: "work",
       demoJid: "demo-chat",
       demoState: "review",
       demoDurationMs: 42000,

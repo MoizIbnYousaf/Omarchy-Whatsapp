@@ -154,6 +154,7 @@ Requirements:
 - `wacli` 0.17.1 or newer at `~/.local/bin/wacli`
 - Qt Multimedia and Image Formats, `wl-clipboard`, `zenity`, `inotify-tools`,
   `jq`, Python 3, and systemd user services
+- Optional: `libnotify` (`notify-send`) for desktop popups
 
 ```bash
 git clone https://github.com/MoizIbnYousaf/Omarchy-Whatsapp.git && \
@@ -165,6 +166,23 @@ Link this machine once when needed:
 ```bash
 ~/.local/bin/omawhatsapp auth
 ```
+
+### More than one WhatsApp account
+
+wacli owns the account list, and OmaWhatsApp follows it. Name the session this
+machine already has before adding a second one, so its history stays where it
+is:
+
+```bash
+~/.local/bin/wacli accounts add personal --no-auth
+# then set `store: .` for that account in ~/.local/state/wacli/config.yaml
+~/.local/bin/wacli accounts add work
+```
+
+Re-run `./scripts/install` afterwards to start one sync instance per account.
+The chat rail then merges every account, each row named by the account it came
+from, and the bar badge sums them. Sending, receipts, offline mode, and the
+badge stay inside the account of the chat you are looking at.
 
 Run `./scripts/install --check` for a read-only installation preflight. A real
 install validates and stages the complete plugin tree before replacing it,
@@ -180,7 +198,7 @@ Add the `Super+Shift+W` binding from
 |---|---|
 | `Super+Shift+W` | Open or close OmaWhatsApp |
 | Bar item click | Open the anchored recent-chat dropdown |
-| Dropdown `J` / `K`, arrows | Move through recent chats |
+| Dropdown `J`/Down · `K`/Up | Move visibly down/up through chats or mini-conversation messages |
 | Dropdown `/` | Search recent chats |
 | Dropdown `Enter` | Open the selected mini conversation and focus its composer |
 | Dropdown `Enter` / `Shift+Enter` | Send / add a line |
@@ -200,13 +218,15 @@ Add the `Super+Shift+W` binding from
 | `Ctrl+O` | Add documents |
 | `Ctrl+Shift+O` | Add photos and videos |
 | `Ctrl+Shift+V` | Start/stop a voice note; preview, discard, or explicitly send |
-| `J` / `K`, arrows | Move through messages or the focused chat list |
+| `J`/Down · `K`/Up | Move visibly down/up through messages or the focused chat list |
 | `Enter` | Open the selected chat and focus its composer immediately |
 | `C` | Focus the message composer |
 | `Space` | Open selected media; play/pause inside the viewer |
 | `Left` / `Right` | Previous/next gallery item |
 | `+` / `-` / `0` | Zoom in/out/fit |
 | `Esc` | Step back: composer → messages → chat list → close |
+| Header `󰀄` account name | The account the open chat, composer, and header pills belong to |
+| Header `quiet` / `notify` pill | Left click toggles desktop popups; right click drops the message preview |
 | Header `online` / `offline` pill | Toggle background sync; local history stays available |
 | Header settings button | Private reading, badge, sync, and dropdown-size controls |
 | Chat menu `Mark read · send receipt` | Explicitly mark the chat read on WhatsApp |
@@ -214,6 +234,10 @@ Add the `Super+Shift+W` binding from
 Middle-click the bar item to dismiss the current local notification batch;
 right-click refreshes. Neither action sends a read receipt. The in-app settings
 card controls automatic receipts, the badge, background sync, and dropdown size.
+
+Desktop popups are a separate surface from the bar badge and are off until you
+turn them on. They need `notify-send` from libnotify, stay quiet for muted and
+archived chats, and never send a read receipt.
 
 ## Release quality
 

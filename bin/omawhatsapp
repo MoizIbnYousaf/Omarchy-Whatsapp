@@ -29,9 +29,13 @@ STATE_HOME = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state"))
 STATE_DIR = STATE_HOME / "omawhatsapp"
 STORE_DIR = Path(os.environ.get("WACLI_STORE_DIR", STATE_HOME / "wacli"))
 WACLI = Path(os.environ.get("WACLI_BIN", HOME / ".local/bin/wacli"))
+# wacli keeps the account config in the XDG state directory even when
+# --store or WACLI_STORE_DIR points somewhere else.
+ACCOUNT_CONFIG = STATE_HOME / "wacli" / "config.yaml"
 SYSTEMCTL = Path("/usr/bin/systemctl")
 WL_PASTE = Path("/usr/bin/wl-paste")
 XDG_OPEN = Path("/usr/bin/xdg-open")
+NOTIFY_SEND = Path("/usr/bin/notify-send")
 MAX_MESSAGE = 4096
 MAX_FILE = 100 * 1024 * 1024
 MAX_ATTACHMENTS = 10
@@ -42,9 +46,21 @@ MAX_CLIPBOARD_TYPES = 64 * 1024
 MAX_CLIPBOARD_TEXT = MAX_MESSAGE * 4
 MAX_PREFERENCES = 1024 * 1024
 MAX_SENT_MEDIA_STATE = 2 * 1024 * 1024
+PREFERENCES_VERSION = 2
+MAX_NOTIFY_BURST = 5
+MAX_NOTIFY_SUMMARY = 96
+MAX_NOTIFY_SENDER = 48
+MAX_NOTIFY_BODY = 180
+MAX_NOTIFY_WATERMARKS = 500
+NOTIFY_EXPIRE_MS = 8000
+SYNC_UNIT = "wacli-sync.service"
+SYNC_UNIT_TEMPLATE = "wacli-sync@{name}.service"
+MAX_ACCOUNTS = 16
+# Sentinel: run against whichever account this request selected.
+ACTIVE_ACCOUNT: Any = object()
+ACCOUNT_NAME = re.compile(r"[A-Za-z0-9._-]{1,64}")
 VOICE_DRAFT_DIRECTORY = "voice-drafts"
 VOICE_DRAFT_PATTERN = re.compile(r"voice-[0-9a-f]{32}\.ogg\Z")
-PREFERENCES_VERSION = 1
 SUPPORTED_CHAT_WHERE = """(chats.kind = 'dm' OR (
   chats.kind = 'group'
   AND COALESCE(groups.is_parent, 0) = 0
@@ -181,6 +197,39 @@ WACLI_OPERATION_POLICIES: dict[tuple[str, ...], str] = {
     ("sync",): "sync",
     ("version",): "local-read",
 }
+class Account:
+    """One wacli account: a name, the store it owns, and its sync unit.
+
+    An empty name is the implicit account of a machine that never ran
+    `wacli accounts add`. It addresses the root store and keeps the original
+    single-instance sync unit, so nothing changes until accounts are named.
+    """
+
+    __slots__ = ("name", "store_dir", "default")
+
+    def __init__(self, name: str, store_dir: Path, default: bool = False) -> None:
+        self.name = name
+        self.store_dir = store_dir
+        self.default = default
+
+    @property
+    def key(self) -> str:
+        # State is keyed by store, not by name: a rename keeps the mirror, and
+        # registering the legacy session with `store: .` keeps its history.
+        return str(self.store_dir)
+
+    @property
+    def label(self) -> str:
+        return self.name or "default"
+
+    @property
+    def unit(self) -> str:
+        return SYNC_UNIT_TEMPLATE.format(name=self.name) if self.name else SYNC_UNIT
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"Account({self.name!r}, {str(self.store_dir)!r})"
+
+
 class OmaWhatsAppError(RuntimeError):
     pass
 
@@ -314,10 +363,92 @@ class Backend:
         store_dir: Path = STORE_DIR,
         state_dir: Path = STATE_DIR,
         wacli: Path = WACLI,
+        account_config: Path | None = None,
     ) -> None:
         self.store_dir = store_dir
         self.state_dir = state_dir
         self.wacli = wacli
+        self.account_config = account_config or ACCOUNT_CONFIG
+        self._accounts: list[Account] | None = None
+        self._active: Account | None = None
+
+    def accounts(self) -> list[Account]:
+        if self._accounts is None:
+            self._accounts = self._discover_accounts()
+        return self._accounts
+
+    def _discover_accounts(self) -> list[Account]:
+        implicit = [Account("", self.store_dir, True)]
+        # No account config means no named accounts, and no reason to pay for a
+        # wacli invocation on every request.
+        if not self.account_config.is_file():
+            return implicit
+        if not self.wacli.is_file() or not os.access(self.wacli, os.X_OK):
+            return implicit
+        try:
+            # account=None: the account list itself must never be account scoped.
+            result = self._run(
+                ["--read-only", "--json", "accounts", "list"], timeout=15, account=None
+            )
+            envelope = json.loads(result.stdout or "{}")
+        except (OmaWhatsAppError, json.JSONDecodeError):
+            return implicit
+        data = envelope.get("data") if isinstance(envelope, dict) else None
+        rows = data.get("accounts") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            return implicit
+        accounts: list[Account] = []
+        for row in rows[:MAX_ACCOUNTS]:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("name") or "")
+            store = str(row.get("store_dir") or "")
+            if not ACCOUNT_NAME.fullmatch(name) or not store:
+                continue
+            resolved = Path(store).expanduser()
+            if not resolved.is_absolute():
+                continue
+            accounts.append(Account(name, resolved, row.get("default") is True))
+        if not accounts:
+            return implicit
+        if not any(account.default for account in accounts):
+            accounts[0].default = True
+        return accounts
+
+    def account(self, name: Any = "") -> Account:
+        """Resolve a requested account name, empty meaning the default one."""
+        requested = str(name or "").strip()
+        accounts = self.accounts()
+        if not requested:
+            for candidate in accounts:
+                if candidate.default:
+                    return candidate
+            return accounts[0]
+        if not ACCOUNT_NAME.fullmatch(requested):
+            raise OmaWhatsAppError("Choose a valid named wacli account.")
+        for candidate in accounts:
+            if candidate.name == requested:
+                return candidate
+        raise OmaWhatsAppError("That wacli account is not configured.")
+
+    def use_account(self, name: Any = "") -> Account:
+        self._active = self.account(name)
+        return self._active
+
+    @property
+    def active(self) -> Account:
+        if self._active is None:
+            self._active = self.account("")
+        return self._active
+
+    @contextmanager
+    def _using(self, account: Account) -> Iterator[Account]:
+        previous = self._active
+        self._active = account
+        try:
+            yield account
+        finally:
+            self._active = previous
 
     @contextmanager
     def _state_directory(self, *, create: bool) -> Iterator[int]:
@@ -568,40 +699,66 @@ class Backend:
             return {"ok": True, "kind": "voice-draft", "action": "discard"}
         raise OmaWhatsAppError("Choose create, finalize, or discard for the voice draft.")
 
-    def _preferences(self) -> dict[str, Any]:
-        default: dict[str, Any] = {
-            "version": PREFERENCES_VERSION,
-            "online": True,
-            "send_read_receipts": False,
-            "show_unread_count": True,
-            "dropdown_rows": 7,
-            "acknowledged_unread": {},
-        }
-        value = self._read_state_json("preferences.json", MAX_PREFERENCES, default)
+    @staticmethod
+    def _chat_snapshots(value: Any) -> dict[str, dict[str, int]]:
+        """Sanitize a persisted {jid: {unread, timestamp}} map from disk."""
+        snapshots: dict[str, dict[str, int]] = {}
         if not isinstance(value, dict):
-            return default
-        acknowledged = value.get("acknowledged_unread")
-        clean_acknowledged: dict[str, dict[str, int]] = {}
-        if isinstance(acknowledged, dict):
-            for jid, item in acknowledged.items():
-                if not isinstance(jid, str) or not isinstance(item, dict):
-                    continue
-                unread = bounded_int(item.get("unread"), 0, 0, 1_000_000_000)
-                timestamp = bounded_int(item.get("timestamp"), 0, 0, 9_999_999_999)
-                clean_acknowledged[jid[:160]] = {
-                    "unread": unread,
-                    "timestamp": timestamp,
-                }
+            return snapshots
+        for jid, item in list(value.items())[:MAX_NOTIFY_WATERMARKS]:
+            if not isinstance(jid, str) or not isinstance(item, dict):
+                continue
+            snapshots[jid[:160]] = {
+                "unread": bounded_int(item.get("unread"), 0, 0, 1_000_000_000),
+                "timestamp": bounded_int(item.get("timestamp"), 0, 0, 9_999_999_999),
+            }
+        return snapshots
+
+    @classmethod
+    def _store_state(cls, value: Any) -> dict[str, Any]:
+        """Normalize the per-account half of the preferences file."""
+        item = value if isinstance(value, dict) else {}
+        return {
+            "online": item.get("online") is not False,
+            "send_read_receipts": item.get("send_read_receipts") is True,
+            "acknowledged_unread": cls._chat_snapshots(item.get("acknowledged_unread")),
+            "notified": cls._chat_snapshots(item.get("notified")),
+        }
+
+    def _preferences(self) -> dict[str, Any]:
+        value = self._read_state_json("preferences.json", MAX_PREFERENCES, {})
+        if not isinstance(value, dict):
+            value = {}
+        stores: dict[str, dict[str, Any]] = {}
+        raw_stores = value.get("stores")
+        if isinstance(raw_stores, dict):
+            for key, item in list(raw_stores.items())[:MAX_ACCOUNTS]:
+                if isinstance(key, str) and key:
+                    stores[key[:4096]] = self._store_state(item)
+        elif any(key in value for key in
+                 ("online", "send_read_receipts", "acknowledged_unread", "notified")):
+            # Version 1 kept one account's state at the top level. It describes
+            # the store that was in use when it was written, which is the
+            # default account, not whichever account this request selected.
+            stores[self.account("").key] = self._store_state(value)
+        notifications = value.get("notifications")
+        if not isinstance(notifications, dict):
+            notifications = {}
         dropdown_rows = bounded_int(value.get("dropdown_rows"), 7, 5, 9)
         if dropdown_rows not in {5, 7, 9}:
             dropdown_rows = 7
         return {
             "version": PREFERENCES_VERSION,
-            "online": value.get("online") is not False,
-            "send_read_receipts": value.get("send_read_receipts") is True,
             "show_unread_count": value.get("show_unread_count") is not False,
             "dropdown_rows": dropdown_rows,
-            "acknowledged_unread": clean_acknowledged,
+            # The desktop popup is a separate surface from the bar badge, so it
+            # keeps its own settings. Its watermark is per account, next to the
+            # badge acknowledgements it must never read.
+            "notifications": {
+                "enabled": notifications.get("enabled") is True,
+                "preview": notifications.get("preview") is not False,
+            },
+            "stores": stores,
         }
 
     def _write_preferences(self, value: dict[str, Any]) -> None:
@@ -614,8 +771,24 @@ class Backend:
             self._write_preferences(value)
             return value
 
+    def _account_state(self, preferences: dict[str, Any] | None = None) -> dict[str, Any]:
+        value = preferences if preferences is not None else self._preferences()
+        return value["stores"].get(self.active.key) or self._store_state({})
+
+    def _update_account_state(self, update: Any) -> dict[str, Any]:
+        key = self.active.key
+
+        def apply(value: dict[str, Any]) -> None:
+            state = value["stores"].get(key)
+            if state is None:
+                state = self._store_state({})
+                value["stores"][key] = state
+            update(state)
+
+        return self._update_preferences(apply)
+
     def online(self) -> bool:
-        return self._preferences().get("online") is not False
+        return self._account_state().get("online") is not False
 
     def settings(self, update: Any = None) -> dict[str, Any]:
         if update is None:
@@ -633,34 +806,51 @@ class Backend:
             if "dropdown_rows" in update and update["dropdown_rows"] not in {5, 7, 9}:
                 raise OmaWhatsAppError("Dropdown size must be 5, 7, or 9 chats.")
 
+            key = self.active.key
+
             def apply(value: dict[str, Any]) -> None:
-                value.update(update)
+                for name, setting in update.items():
+                    if name == "send_read_receipts":
+                        state = value["stores"].get(key)
+                        if state is None:
+                            state = self._store_state({})
+                            value["stores"][key] = state
+                        state["send_read_receipts"] = bool(setting)
+                    else:
+                        value[name] = setting
 
             value = self._update_preferences(apply)
+        state = self._account_state(value)
         return {
             "ok": True,
             "kind": "settings",
-            "send_read_receipts": value.get("send_read_receipts") is True,
+            "account": self.active.name,
+            "send_read_receipts": state.get("send_read_receipts") is True,
             "show_unread_count": value.get("show_unread_count") is not False,
             "dropdown_rows": value.get("dropdown_rows", 7),
         }
 
-    @staticmethod
-    def _media_hint_key(jid: str, message_id: str) -> str:
-        # WhatsApp message IDs can collide across chats.
-        return f"{jid}\n{message_id}"
+    def _media_hint_key(self, jid: str, message_id: str) -> str:
+        # WhatsApp message IDs can collide across chats, and a chat can be
+        # reachable from more than one linked account.
+        return f"{self.active.key}\n{jid}\n{message_id}"
 
     def _sent_media_hints(self) -> dict[str, dict[str, Any]]:
         value = self._read_state_json("sent-media.json", MAX_SENT_MEDIA_STATE, {})
         if not isinstance(value, dict):
             return {}
         clean: dict[str, dict[str, Any]] = {}
+        default_key = self.account("").key
         for key, item in value.items():
             if not isinstance(key, str) or not isinstance(item, dict):
                 continue
             local_path = Path(str(item.get("local_path") or ""))
-            if local_path.is_absolute() and local_path.is_file():
-                clean[key] = item
+            if not local_path.is_absolute() or not local_path.is_file():
+                continue
+            if key.count("\n") == 1:
+                # A version 1 hint was written before hints were store scoped.
+                key = f"{default_key}\n{key}"
+            clean[key] = item
         return clean
 
     def _remember_sent_media(
@@ -702,12 +892,16 @@ class Backend:
         timeout: float = 30,
         stdout_limit: int = MAX_WACLI_OUTPUT,
         stderr_limit: int = MAX_PROCESS_ERROR,
+        account: Any = ACTIVE_ACCOUNT,
     ) -> subprocess.CompletedProcess[str]:
         if not self.wacli.is_file() or not os.access(self.wacli, os.X_OK):
             raise OmaWhatsAppError("wacli is not installed.")
+        if account is ACTIVE_ACCOUNT:
+            account = self.active
+        scope = ["--account", account.name] if account is not None and account.name else []
         try:
             return run_bounded(
-                [str(self.wacli), *args],
+                [str(self.wacli), *scope, *args],
                 timeout=timeout,
                 stdout_limit=stdout_limit,
                 stderr_limit=stderr_limit,
@@ -724,10 +918,13 @@ class Backend:
         text = f"{result.stdout}\n{result.stderr}".casefold()
         return "store is locked" in text or "another wacli is running" in text
 
+    def _sync_active(self, account: Account | None = None) -> bool:
+        return self._unit_active((account or self.active).unit)
+
     @staticmethod
-    def _sync_active() -> bool:
+    def _unit_active(unit: str) -> bool:
         result = subprocess.run(
-            [str(SYSTEMCTL), "--user", "is-active", "--quiet", "wacli-sync.service"],
+            [str(SYSTEMCTL), "--user", "is-active", "--quiet", unit],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
@@ -742,6 +939,7 @@ class Backend:
         require_online: bool,
         stdout_limit: int = MAX_WACLI_OUTPUT,
         stderr_limit: int = MAX_PROCESS_ERROR,
+        account: Any = ACTIVE_ACCOUNT,
     ) -> subprocess.CompletedProcess[str]:
         if require_online and not self.online():
             raise OmaWhatsAppError(
@@ -750,21 +948,21 @@ class Backend:
         # wacli delegates supported mutations to sync --follow's companion socket.
         result = self._run(
             args, timeout=timeout, stdout_limit=stdout_limit,
-            stderr_limit=stderr_limit,
+            stderr_limit=stderr_limit, account=account,
         )
         if not self._locked(result):
             return result
         with self._state_lock("write.lock"):
             result = self._run(
                 args, timeout=timeout, stdout_limit=stdout_limit,
-                stderr_limit=stderr_limit,
+                stderr_limit=stderr_limit, account=account,
             )
             if not self._locked(result):
                 return result
             active = self._sync_active()
             if active:
                 stopped = subprocess.run(
-                    [str(SYSTEMCTL), "--user", "stop", "wacli-sync.service"],
+                    [str(SYSTEMCTL), "--user", "stop", self.active.unit],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=15,
@@ -776,7 +974,7 @@ class Backend:
                 for attempt in range(5):
                     result = self._run(
                         args, timeout=timeout, stdout_limit=stdout_limit,
-                        stderr_limit=stderr_limit,
+                        stderr_limit=stderr_limit, account=account,
                     )
                     if not self._locked(result) or attempt == 4:
                         return result
@@ -784,7 +982,7 @@ class Backend:
             finally:
                 if active:
                     subprocess.run(
-                        [str(SYSTEMCTL), "--user", "start", "wacli-sync.service"],
+                        [str(SYSTEMCTL), "--user", "start", self.active.unit],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         timeout=15,
@@ -806,7 +1004,8 @@ class Backend:
 
     def _database(self, doctor: dict[str, Any] | None = None) -> Path:
         discovered = str((doctor or {}).get("store_dir") or "").strip()
-        return (Path(discovered).expanduser() if discovered else self.store_dir) / "wacli.db"
+        store = Path(discovered).expanduser() if discovered else self.active.store_dir
+        return store / "wacli.db"
 
     def _connect(self) -> sqlite3.Connection:
         database = self._database()
@@ -879,28 +1078,58 @@ class Backend:
         if not self.wacli.is_file() or not os.access(self.wacli, os.X_OK):
             return {"ok": False, "installed": False, "authenticated": False,
                     "sync_active": False, "error": "wacli is not installed."}
-        doctor = self._doctor()
-        authenticated = doctor.get("authenticated") is True
         preferences = self._preferences()
-        online = preferences.get("online") is not False
+        active = self.active
+        reports: list[dict[str, Any]] = []
+        for account in self.accounts():
+            with self._using(account):
+                doctor = self._doctor()
+                authenticated = doctor.get("authenticated") is True
+                state = self._account_state(preferences)
+                online = state.get("online") is not False
+                reports.append({
+                    "account": account.name,
+                    "label": account.label,
+                    "store": account.key,
+                    "default": account.default,
+                    "active": account.key == active.key,
+                    "authenticated": authenticated,
+                    "sync_active": self._sync_active(account),
+                    "online": online,
+                    "offline_mode": not online,
+                    "send_read_receipts": state.get("send_read_receipts") is True,
+                    "fts_enabled": doctor.get("fts_enabled") is True,
+                    "database_ready": self._database(doctor).is_file(),
+                    "error": clean_error(doctor.get("store_error"), "") if authenticated else "",
+                })
+        current = next(report for report in reports if report["active"])
         return {
             "ok": True,
             "installed": True,
-            "authenticated": authenticated,
-            "sync_active": self._sync_active(),
-            "online": online,
-            "offline_mode": not online,
-            "send_read_receipts": preferences.get("send_read_receipts") is True,
+            # The rail is unified, so readiness is true when any account can
+            # serve it. Everything a surface describes or a write depends on
+            # stays scoped to the account this request selected: the header
+            # pill must not read "online" because a different account syncs.
+            "authenticated": any(report["authenticated"] for report in reports),
+            "database_ready": any(report["database_ready"] for report in reports),
+            "sync_active": current["sync_active"],
+            "online": current["online"],
+            "offline_mode": current["offline_mode"],
+            "account": active.name,
+            "accounts": reports,
+            "notifications": preferences["notifications"],
+            "notify_available": self._notify_send_ready(),
+            "send_read_receipts": current["send_read_receipts"],
             "show_unread_count": preferences.get("show_unread_count") is not False,
             "dropdown_rows": preferences.get("dropdown_rows", 7),
-            "fts_enabled": doctor.get("fts_enabled") is True,
-            "database_ready": self._database(doctor).is_file(),
-            "error": clean_error(doctor.get("store_error"), "") if authenticated else "",
+            "fts_enabled": current["fts_enabled"],
+            "error": current["error"],
         }
 
-    def chats(self, query: str = "", limit: int = 500) -> dict[str, Any]:
-        cleaned = " ".join(query.split())[:256]
-        limit = max(1, min(int(limit), 500))
+    def _account_chats(
+        self, cleaned: str, limit: int, preferences: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Read one account's chat rail. The caller owns account selection."""
         name_sql = self._chat_name_sql()
         where = SUPPORTED_CHAT_WHERE
         parameters: list[Any] = []
@@ -920,7 +1149,8 @@ class Backend:
                           NULLIF(latest.filename, ''), '[' || latest.media_type || ']')
                       ELSE COALESCE(NULLIF(latest.text, ''),
                         NULLIF(latest.display_text, ''), '') END AS preview,
-                      COALESCE(latest.from_me, 0) AS last_from_me
+                      COALESCE(latest.from_me, 0) AS last_from_me,
+                      COALESCE(latest.sender_name, '') AS last_sender
                     FROM chats
                     LEFT JOIN groups ON groups.jid = chats.jid
                     LEFT JOIN contacts ON contacts.jid = chats.jid
@@ -936,7 +1166,8 @@ class Backend:
                 ).fetchall()
         except sqlite3.Error as exc:
             raise OmaWhatsAppError("The local WhatsApp index could not be read.") from exc
-        acknowledged = self._preferences().get("acknowledged_unread", {})
+        account = self.active
+        acknowledged = self._account_state(preferences)["acknowledged_unread"]
         chats: list[dict[str, Any]] = []
         for row in rows:
             jid = str(row["jid"])
@@ -958,47 +1189,257 @@ class Backend:
             chats.append({
                 "jid": jid, "name": str(row["name"]),
                 "kind": str(row["kind"] or "unknown"),
+                "account": account.name,
+                "account_label": account.label,
                 "timestamp": timestamp,
                 "preview": " ".join(str(row["preview"] or "").split())[:512],
                 "last_from_me": bool(row["last_from_me"]),
+                "last_sender": " ".join(str(row["last_sender"] or "").split())[:MAX_NOTIFY_SENDER],
                 "archived": archived, "pinned": bool(row["pinned"]),
                 "muted": muted,
                 "unread": unread,
                 "notification_unread": notification_unread,
             })
-        return {"ok": True, "query": cleaned, "chats": chats}
+        return chats
+
+    def chats(self, query: str = "", limit: int = 500) -> dict[str, Any]:
+        """Merge every configured account into one rail, newest chat first."""
+        cleaned = " ".join(query.split())[:256]
+        limit = max(1, min(int(limit), 500))
+        preferences = self._preferences()
+        merged: list[dict[str, Any]] = []
+        reports: list[dict[str, Any]] = []
+        for account in self.accounts():
+            with self._using(account):
+                try:
+                    rows = self._account_chats(cleaned, limit, preferences)
+                except OmaWhatsAppError as exc:
+                    # One account that has never synced must not empty the rail.
+                    reports.append({"account": account.name, "ready": False,
+                                    "error": clean_error(exc, "That account could not be read.")})
+                    continue
+            reports.append({"account": account.name, "ready": True, "error": ""})
+            merged.extend(rows)
+        merged.sort(key=lambda chat: (
+            not chat["pinned"], -chat["timestamp"], chat["name"].casefold()))
+        return {"ok": True, "query": cleaned, "chats": merged[:limit], "accounts": reports}
 
     def acknowledge_notifications(self, jid: str = "") -> dict[str, Any]:
         target = jid.strip()
-        if target:
-            self._chat(target)
-        chats = self.chats(limit=500)["chats"]
-        selected = [chat for chat in chats if not target or chat["jid"] == target]
-        if target and not selected:
-            raise OmaWhatsAppError("That chat is not available in the local WhatsApp index.")
+        preferences = self._preferences()
+        # An empty JID dismisses the aggregated bar badge, so it covers every
+        # account. A named chat belongs to the account this request selected.
+        accounts = [self.active] if target else self.accounts()
+        count = 0
+        for account in accounts:
+            with self._using(account):
+                if target:
+                    self._chat(target)
+                try:
+                    chats = self._account_chats("", 500, preferences)
+                except OmaWhatsAppError:
+                    continue
+                selected = [chat for chat in chats if not target or chat["jid"] == target]
+                if target and not selected:
+                    raise OmaWhatsAppError(
+                        "That chat is not available in the local WhatsApp index."
+                    )
+                count += len(selected)
+
+                def update(state: dict[str, Any], selected: Any = selected) -> None:
+                    acknowledged = state["acknowledged_unread"]
+                    for chat in selected:
+                        if int(chat.get("unread") or 0) <= 0:
+                            acknowledged.pop(str(chat["jid"]), None)
+                            continue
+                        acknowledged[str(chat["jid"])] = {
+                            "unread": int(chat.get("unread") or 0),
+                            "timestamp": int(chat.get("timestamp") or 0),
+                        }
+
+                self._update_account_state(update)
+        return {"ok": True, "kind": "acknowledge", "count": count}
+
+    @staticmethod
+    def _notify_send_ready() -> bool:
+        return NOTIFY_SEND.is_file() and os.access(NOTIFY_SEND, os.X_OK)
+
+    @staticmethod
+    def _notification_text(value: Any, limit: int, *, markup: bool = False) -> str:
+        """Collapse external chat text to one printable, markup-inert line."""
+        printable = "".join(character for character in str(value or "")
+                            if character.isprintable())
+        text = " ".join(printable.split())[:limit]
+        if not markup:
+            return text
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    @staticmethod
+    def _notification_watermark(chats: Sequence[dict[str, Any]]) -> dict[str, dict[str, int]]:
+        return {
+            str(chat["jid"])[:160]: {
+                "unread": int(chat.get("unread") or 0),
+                "timestamp": int(chat.get("timestamp") or 0),
+            }
+            for chat in list(chats)[:MAX_NOTIFY_WATERMARKS]
+        }
+
+    def _deliver_notification(self, summary: str, body: str) -> bool:
+        """Hand one popup to the desktop; a failing daemon must not raise."""
+        command = [str(NOTIFY_SEND), "--app-name=OmaWhatsApp", "--urgency=normal",
+                   "--category=im.received", f"--expire-time={NOTIFY_EXPIRE_MS}",
+                   "--", summary or "OmaWhatsApp"]
+        if body:
+            command.append(body)
+        try:
+            result = run_bounded(
+                command, timeout=8, stdout_limit=16 * 1024, stderr_limit=MAX_PROCESS_ERROR
+            )
+        except (ProcessOutputLimitExceeded, subprocess.TimeoutExpired, OSError):
+            return False
+        return result.returncode == 0
+
+    def _notify_chat(self, chat: dict[str, Any], count: int, preview: bool,
+                     label: str = "") -> bool:
+        # Summary and body both reach markup-capable daemons, so neither may
+        # carry live markup from a chat name, an account label, or a message.
+        name = self._notification_text(
+            chat.get("name"), MAX_NOTIFY_SUMMARY, markup=True) or "WhatsApp chat"
+        account = self._notification_text(label, MAX_NOTIFY_SENDER, markup=True)
+        if account:
+            name = f"{name} ({account})"
+        summary = f"{name} · {count} new" if count > 1 else name
+        if not preview:
+            body = "1 new message" if count == 1 else f"{count} new messages"
+            return self._deliver_notification(summary, body)
+        body = self._notification_text(chat.get("preview"), MAX_NOTIFY_BODY, markup=True)
+        sender = self._notification_text(chat.get("last_sender"), MAX_NOTIFY_SENDER, markup=True)
+        if str(chat.get("kind") or "") == "group" and sender and body:
+            body = f"{sender}: {body}"
+        return self._deliver_notification(summary, body)
+
+    def set_notifications(self, enabled: Any = None, preview: Any = None) -> dict[str, Any]:
+        if enabled is None and preview is None:
+            raise OmaWhatsAppError("Choose what to change about desktop notifications.")
+        if enabled is not None and not isinstance(enabled, bool):
+            raise OmaWhatsAppError("Desktop notifications must be on or off.")
+        if preview is not None and not isinstance(preview, bool):
+            raise OmaWhatsAppError("Message previews must be on or off.")
+        if enabled is True and not self._notify_send_ready():
+            raise OmaWhatsAppError(
+                "Desktop notifications need notify-send from libnotify."
+            )
+        watermarks: dict[str, dict[str, dict[str, int]]] = {}
+        if enabled is True:
+            # Adopt every archive on the way in so switching on never replays one.
+            preferences = self._preferences()
+            for account in self.accounts():
+                with self._using(account):
+                    try:
+                        chats = self._account_chats("", MAX_NOTIFY_WATERMARKS, preferences)
+                    except OmaWhatsAppError:
+                        chats = []
+                    watermarks[account.key] = self._notification_watermark(chats)
 
         def update(value: dict[str, Any]) -> None:
-            acknowledged = value.setdefault("acknowledged_unread", {})
-            if not isinstance(acknowledged, dict):
-                acknowledged = {}
-                value["acknowledged_unread"] = acknowledged
-            for chat in selected:
-                if int(chat.get("unread") or 0) <= 0:
-                    acknowledged.pop(str(chat["jid"]), None)
-                    continue
-                acknowledged[str(chat["jid"])] = {
-                    "unread": int(chat.get("unread") or 0),
-                    "timestamp": int(chat.get("timestamp") or 0),
-                }
+            settings = value["notifications"]
+            if enabled is not None:
+                settings["enabled"] = bool(enabled)
+            if preview is not None:
+                settings["preview"] = bool(preview)
+            for key, watermark in watermarks.items():
+                state = value["stores"].get(key)
+                if state is None:
+                    state = self._store_state({})
+                    value["stores"][key] = state
+                state["notified"] = watermark
 
-        self._update_preferences(update)
-        return {"ok": True, "kind": "acknowledge", "count": len(selected)}
+        value = self._update_preferences(update)
+        return {"ok": True, "kind": "notify-mode", "notifications": value["notifications"]}
+
+    def notify(self, skip_jid: str = "") -> dict[str, Any]:
+        """Pop one popup per chat that gained incoming messages since last run.
+
+        The popup is deliberately independent of the bar badge. It ignores
+        ``notification_unread``, so neither ``show_unread_count`` nor a
+        dismissal can silence it, and the caller only suppresses the chat the
+        user is currently looking at. Every configured account is swept in one
+        pass, under one shared burst cap.
+        """
+        preferences = self._preferences()
+        settings = preferences["notifications"]
+        if not settings["enabled"]:
+            return {"ok": True, "kind": "notify", "enabled": False, "sent": 0}
+        if not self._notify_send_ready():
+            return {"ok": True, "kind": "notify", "enabled": True, "sent": 0,
+                    "available": False,
+                    "error": "Desktop notifications need notify-send from libnotify."}
+        accounts = self.accounts()
+        named = len(accounts) > 1
+        # The visible chat belongs to the account that asked for this pass.
+        skip = skip_jid.strip()[:160]
+        skip_key = self.active.key
+        pending: list[tuple[dict[str, Any], int, str]] = []
+        seeded: list[str] = []
+        for account in accounts:
+            with self._using(account):
+                try:
+                    chats = self._account_chats("", MAX_NOTIFY_WATERMARKS, preferences)
+                except OmaWhatsAppError:
+                    continue
+                watermark = self._notification_watermark(chats)
+                seen = self._account_state(preferences)["notified"]
+                if not seen:
+                    # A missing watermark means a fresh account, not an unread
+                    # archive: adopt it instead of replaying it.
+                    self._update_account_state(
+                        lambda state, value=watermark: state.update({"notified": value}))
+                    seeded.append(account.name)
+                    continue
+                for chat in chats:
+                    jid = str(chat["jid"])
+                    previous = seen.get(jid) or {}
+                    timestamp = int(chat.get("timestamp") or 0)
+                    if timestamp <= int(previous.get("timestamp") or 0):
+                        continue
+                    if chat["last_from_me"] or chat["muted"] or chat["archived"]:
+                        continue
+                    if jid == skip and account.key == skip_key:
+                        continue
+                    # WhatsApp reports no unread when the chat was read
+                    # elsewhere or read privately here. An advanced timestamp is
+                    # still a new message, so it is worth exactly one popup.
+                    unread = int(chat.get("unread") or 0)
+                    arrived = unread - int(previous.get("unread") or 0)
+                    pending.append((chat, max(1, arrived) if unread > 0 else 1,
+                                    account.label if named else ""))
+                if watermark != seen:
+                    self._update_account_state(
+                        lambda state, value=watermark: state.update({"notified": value}))
+        pending.sort(key=lambda item: -int(item[0].get("timestamp") or 0))
+        sent = 0
+        failed = 0
+        for chat, count, label in pending[:MAX_NOTIFY_BURST]:
+            if self._notify_chat(chat, count, settings["preview"], label):
+                sent += 1
+            else:
+                failed += 1
+        overflow = len(pending) - MAX_NOTIFY_BURST
+        if overflow > 0 and self._deliver_notification(
+                "OmaWhatsApp", f"{overflow} more chats have new messages"):
+            sent += 1
+        result = {"ok": True, "kind": "notify", "enabled": True, "sent": sent,
+                  "failed": failed, "pending": len(pending)}
+        if seeded:
+            result["seeded"] = True
+            result["seeded_accounts"] = seeded
+        return result
 
     def set_online(self, online: bool) -> dict[str, Any]:
         command = "enable" if online else "disable"
         try:
             result = run_bounded(
-                [str(SYSTEMCTL), "--user", command, "--now", "wacli-sync.service"],
+                [str(SYSTEMCTL), "--user", command, "--now", self.active.unit],
                 timeout=20,
                 stdout_limit=16 * 1024,
                 stderr_limit=MAX_PROCESS_ERROR,
@@ -1012,11 +1453,12 @@ class Backend:
         if result.returncode != 0:
             raise OmaWhatsAppError(clean_error(result.stderr, "Background sync mode could not be changed."))
 
-        def update(value: dict[str, Any]) -> None:
-            value["online"] = bool(online)
+        def update(state: dict[str, Any]) -> None:
+            state["online"] = bool(online)
 
-        self._update_preferences(update)
-        return {"ok": True, "kind": "sync-mode", "online": bool(online)}
+        self._update_account_state(update)
+        return {"ok": True, "kind": "sync-mode", "account": self.active.name,
+                "online": bool(online)}
 
     def messages(self, jid: str, query: str = "", limit: int = 160) -> dict[str, Any]:
         chat = self._chat(jid)
@@ -1915,6 +2357,21 @@ class Backend:
             "operations": operations,
         }
 
+    @contextmanager
+    def _transport_scope(self, payload: dict[str, Any]) -> Iterator[None]:
+        account = self._transport_account(payload.get("account"))
+        store = self._transport_store(payload.get("store"))
+        if account and store:
+            raise OmaWhatsAppError("Choose either a named account or a one-off store, not both.")
+        if store:
+            scoped = Account("", Path(store))
+        elif account:
+            scoped = self.account(account)
+        else:
+            scoped = self.active
+        with self._using(scoped):
+            yield
+
     def transport(self, payload: dict[str, Any]) -> dict[str, Any]:
         args = self._transport_args(payload.get("args"))
         path = self._transport_path(args)
@@ -1929,31 +2386,35 @@ class Backend:
             raise OmaWhatsAppError(
                 f"This operation requires authorization={expected!r} from the current request."
             )
-        self._validate_transport_targets(args, path)
-        global_args, timeout, output_limit, include_events = self._transport_globals(
-            payload, read_only=policy == "local-read", json_output=True
-        )
-        command = [*global_args, *args]
-        if policy == "local-read":
-            result = self._run(
-                command, timeout=timeout + 5, stdout_limit=output_limit,
-                stderr_limit=output_limit if include_events else MAX_PROCESS_ERROR,
+        with self._transport_scope(payload):
+            self._validate_transport_targets(args, path)
+            global_args, timeout, output_limit, include_events = self._transport_globals(
+                payload, read_only=policy == "local-read", json_output=True
             )
-        else:
-            local_destructive = path in {
-                ("accounts", "remove"),
-                ("messages", "purge"),
-                ("store", "cleanup"),
-            }
-            result = self._mutate(
-                command,
-                timeout=timeout + 5,
-                require_online=policy in {
-                    "remote-read", "sync", "whatsapp-write", "destructive"
-                } and not local_destructive,
-                stdout_limit=output_limit,
-                stderr_limit=output_limit if include_events else MAX_PROCESS_ERROR,
-            )
+            command = [*global_args, *args]
+            if policy == "local-read":
+                result = self._run(
+                    command, timeout=timeout + 5, stdout_limit=output_limit,
+                    stderr_limit=output_limit if include_events else MAX_PROCESS_ERROR,
+                    # The scope is already spelled out in global_args.
+                    account=None,
+                )
+            else:
+                local_destructive = path in {
+                    ("accounts", "remove"),
+                    ("messages", "purge"),
+                    ("store", "cleanup"),
+                }
+                result = self._mutate(
+                    command,
+                    timeout=timeout + 5,
+                    require_online=policy in {
+                        "remote-read", "sync", "whatsapp-write", "destructive"
+                    } and not local_destructive,
+                    stdout_limit=output_limit,
+                    stderr_limit=output_limit if include_events else MAX_PROCESS_ERROR,
+                    account=None,
+                )
         return self._transport_result(result, path, policy, include_events)
 
     def transport_interactive(
@@ -1991,10 +2452,14 @@ class Backend:
             global_args.extend(["--store", clean_store])
         if not self.wacli.is_file() or not os.access(self.wacli, os.X_OK):
             raise OmaWhatsAppError("wacli is not installed.")
-        active = path in {("auth",), ("sync",)} and self._sync_active()
+        # `accounts add` names an account that does not exist yet, so the unit
+        # is derived from the request rather than from the resolved account.
+        unit = (SYNC_UNIT_TEMPLATE.format(name=clean_account) if clean_account
+                else self.active.unit)
+        active = path in {("auth",), ("sync",)} and self._unit_active(unit)
         if active:
             stopped = subprocess.run(
-                [str(SYSTEMCTL), "--user", "stop", "wacli-sync.service"],
+                [str(SYSTEMCTL), "--user", "stop", unit],
                 check=False,
             )
             if stopped.returncode != 0:
@@ -2005,16 +2470,20 @@ class Backend:
         finally:
             if active and self.online():
                 subprocess.run(
-                    [str(SYSTEMCTL), "--user", "start", "wacli-sync.service"],
+                    [str(SYSTEMCTL), "--user", "start", unit],
                     check=False,
                 )
+
+    def session_ready(self) -> bool:
+        """True when the active account has a linked-device session on disk."""
+        return (self.active.store_dir / "session.db").is_file()
 
     def auth(self) -> int:
         result = subprocess.run([str(self.wacli), "auth"], check=False)
         if result.returncode == 0:
             command = "enable" if self.online() else "disable"
             subprocess.run(
-                [str(SYSTEMCTL), "--user", command, "--now", "wacli-sync.service"],
+                [str(SYSTEMCTL), "--user", command, "--now", self.active.unit],
                 check=False,
             )
         return result.returncode
@@ -2023,7 +2492,10 @@ class Backend:
 def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(prog="omawhatsapp")
     commands = value.add_subparsers(dest="command", required=True)
-    commands.add_parser("status")
+    status = commands.add_parser("status")
+    status.add_argument("--account", default="")
+    session_ready = commands.add_parser("session-ready")
+    session_ready.add_argument("--account", default="")
     chats = commands.add_parser("chats")
     chats.add_argument("--limit", type=int, default=500)
     messages = commands.add_parser("messages")
@@ -2045,6 +2517,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("select")
     commands.add_parser("chat-action")
     commands.add_parser("acknowledge")
+    commands.add_parser("notify")
+    commands.add_parser("notify-mode")
     commands.add_parser("sync-mode")
     commands.add_parser("settings")
     commands.add_parser("capabilities")
@@ -2074,11 +2548,21 @@ def main() -> int:
         except OmaWhatsAppError as exc:
             return emit({"ok": False, "error": clean_error(exc, "OmaWhatsApp failed.")}, 1)
     try:
+        if args.command == "session-ready":
+            # ExecCondition contract: 0 runs the unit, 1 skips it quietly.
+            backend.use_account(str(getattr(args, "account", "") or ""))
+            ready = backend.session_ready()
+            return emit({"ok": True, "kind": "session-ready", "ready": ready},
+                        0 if ready else 1)
         if args.command == "status":
+            backend.use_account(str(getattr(args, "account", "") or ""))
             return emit(backend.status())
         if args.command == "capabilities":
             return emit(backend.capabilities())
         payload = request()
+        # Every request may name the account it belongs to; empty means the
+        # wacli default account.
+        backend.use_account(payload.get("account"))
         if args.command == "wacli":
             if args.transport_args:
                 raise OmaWhatsAppError(
@@ -2150,6 +2634,11 @@ def main() -> int:
                                             str(payload.get("action") or "")))
         if args.command == "acknowledge":
             return emit(backend.acknowledge_notifications(str(payload.get("jid") or "")))
+        if args.command == "notify":
+            return emit(backend.notify(str(payload.get("skip_jid") or "")))
+        if args.command == "notify-mode":
+            return emit(backend.set_notifications(payload.get("enabled"),
+                                                  payload.get("preview")))
         if args.command == "sync-mode":
             if not isinstance(payload.get("online"), bool):
                 raise OmaWhatsAppError("Online mode must be true or false.")

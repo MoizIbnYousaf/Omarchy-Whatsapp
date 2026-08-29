@@ -1,11 +1,13 @@
 import QtQuick
 import qs.Commons
+import "AccountModel.js" as AccountModel
 import "VoiceRecorderModel.js" as VoiceModel
 
 Item {
   id: root
 
   property var service: null
+  property string account: ""
   property string jid: ""
   property bool offline: false
   property color foreground: Color.foreground
@@ -16,6 +18,7 @@ Item {
   property string fontFamily: Style.font.family
   property bool compact: false
   property string demoState: "idle"
+  property string demoAccount: ""
   property string demoJid: ""
   property int demoDurationMs: 0
   property int demoPositionMs: 0
@@ -25,7 +28,10 @@ Item {
     ? String(service.voiceState || "idle") : String(demoState || "idle")
   readonly property string draftJid: service
     ? String(service.voiceDraftJid || "") : String(demoJid || "")
-  readonly property bool forThisChat: draftJid === String(jid || "")
+  readonly property string draftAccount: service
+    ? String(service.voiceDraftAccount || "") : String(demoAccount || "")
+  readonly property bool forThisChat:
+    AccountModel.chatKey(draftAccount, draftJid) === AccountModel.chatKey(account, jid)
     && VoiceModel.hasDraft(state)
   readonly property int elapsed: service
     ? Number(service.voiceDurationMs || 0) : Number(demoDurationMs || 0)

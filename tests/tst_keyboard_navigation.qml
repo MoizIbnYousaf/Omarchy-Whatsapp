@@ -38,10 +38,16 @@ TestCase {
     compare(navigation.moveChats(1, 3), 2)
     compare(navigation.moveChats(-1, 3), 1)
 
-    navigation.enterMessages(2)
-    compare(navigation.moveMessages(1, 2), 1)
-    compare(navigation.moveMessages(1, 2), 1)
-    compare(navigation.moveMessages(-1, 2), 0)
+    navigation.enterMessages(3)
+    compare(navigation.moveMessages(1, 3), 0)
+    compare(navigation.moveMessages(-1, 3), 1)
+    compare(navigation.moveMessages(-1, 3), 2)
+    compare(navigation.moveMessages(-1, 3), 2)
+    compare(navigation.moveMessages(1, 3), 1)
+    navigation.messageIndex = 0
+    compare(navigation.moveMessages(1, 1), 0)
+    compare(navigation.moveMessages(-1, 1), 0)
+    compare(navigation.moveMessages(1, 0), 0)
     compare(navigation.chatIndex, 1)
   }
 

@@ -20,7 +20,7 @@ qml_test_runner=/usr/lib/qt6/bin/qmltestrunner
 make validate
 ./scripts/install --check
 ./scripts/check-wacli-parity
-for qml_test in tests/tst_keyboard_navigation.qml tests/tst_media_viewer.qml tests/tst_dropdown_model.qml tests/tst_settings_policy.qml tests/tst_voice_recorder_model.qml tests/tst_voice_composer.qml tests/tst_message_bubble.qml; do
+for qml_test in tests/tst_keyboard_navigation.qml tests/tst_media_viewer.qml tests/tst_dropdown_model.qml tests/tst_settings_policy.qml tests/tst_account_model.qml tests/tst_voice_recorder_model.qml tests/tst_voice_recorder.qml tests/tst_voice_composer.qml tests/tst_message_bubble.qml; do
   QT_QPA_PLATFORM=offscreen "$qml_test_runner" \
     -input "$qml_test" \
     -import "$repo_root/tests/imports" \
@@ -38,10 +38,33 @@ jq -e '.id == "io.github.moizibnyousaf.omawhatsapp"' \
   exit 1
 }
 
-rg -q 'systemctl --user restart wacli-sync\.service' scripts/install || {
+rg -q 'systemctl --user restart "\$unit"' scripts/install || {
   echo "test: installer upgrades must activate the new sync unit" >&2
   exit 1
 }
+rg -q 'wacli-sync@\$\{account_name\}\.service' scripts/install || {
+  echo "test: installer must activate one sync instance per named account" >&2
+  exit 1
+}
+rg -q 'status_json=.*omawhatsapp.*status' scripts/install || {
+  echo "test: installer account discovery must reuse the canonical helper status" >&2
+  exit 1
+}
+! rg -q 'wacli.*accounts list' scripts/install || {
+  echo "test: installer must not duplicate helper account discovery" >&2
+  exit 1
+}
+rg -q 'ExecCondition=%h/\.local/bin/omawhatsapp session-ready --account %i' \
+  systemd/user/wacli-sync@.service || {
+  echo "test: the sync template must skip an account with no linked session" >&2
+  exit 1
+}
+for sync_unit in systemd/user/wacli-sync.service systemd/user/wacli-sync@.service; do
+  rg -q -- '--lock-wait 30s sync --follow' "$sync_unit" || {
+    echo "test: $sync_unit must wait for the store lock instead of restarting" >&2
+    exit 1
+  }
+done
 
 rg -q 'install_plugin_dir=\$plugin_id' scripts/install || {
   echo "test: installer must target Omarchy's canonical manifest-id directory" >&2

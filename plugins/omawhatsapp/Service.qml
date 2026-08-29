@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import "SettingsPolicy.js" as SettingsPolicy
+import "AccountModel.js" as AccountModel
 
 // Resident state keeps the chat rail warm while the window is closed.
 Item {
@@ -16,6 +17,9 @@ Item {
   property bool authenticated: false
   property bool syncActive: false
   property bool offlineMode: false
+  property bool notificationsEnabled: false
+  property bool notificationsPreview: true
+  property bool notifyAvailable: true
   property bool loadingChats: false
   property bool loadingMessages: false
   property bool loadingMembers: false
@@ -31,7 +35,9 @@ Item {
   property bool storeRefreshPending: false
   property string activeWriteKind: ""
   property string activeWriteChatJid: ""
+  property string activeWriteAccount: ""
   property string selectedChatJid: ""
+  property string selectedChatAccount: ""
   property string selectedChatName: ""
   property string selectedChatKind: "unknown"
   property string query: ""
@@ -39,10 +45,12 @@ Item {
   property string mediaDownloadId: ""
   property string errorText: ""
   property var chats: []
+  property var accounts: []
   property var messages: []
   property var members: []
 
   readonly property string voiceState: voiceRecorder.state
+  readonly property string voiceDraftAccount: voiceRecorder.chatAccount
   readonly property string voiceDraftJid: voiceRecorder.chatJid
   readonly property string voiceDraftChatName: voiceRecorder.chatName
   readonly property string voiceDraftPath: voiceRecorder.draftPath
@@ -53,6 +61,12 @@ Item {
   readonly property bool voiceCapturing: voiceRecorder.capturing
 
   readonly property bool windowOpen: appOpen || dropdownOpen
+  readonly property bool multiAccount: AccountModel.isMultiAccount(accounts)
+  readonly property var storeDirectories:
+    AccountModel.storeDirectories(accounts, storeDirectory)
+  function sameChat(chat, account, jid) {
+    return AccountModel.sameChat(chat, account, jid)
+  }
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
   property string pendingAppPayload: ""
@@ -129,8 +143,27 @@ Item {
     refreshMessages()
     refreshMembers()
   }
+  function runNotify() {
+    if (!ready || !notificationsEnabled || notifyProcess.running) return
+    notifyProcess.payload = JSON.stringify({
+      account: selectedChatAccount,
+      skip_jid: windowOpen ? selectedChatJid : ""
+    })
+    notifyProcess.stdinEnabled = true
+    notifyProcess.running = true
+  }
+  function knownAccount(name) {
+    var target = String(name || "")
+    if (target === "") return ""
+    for (var i = 0; i < accounts.length; i++)
+      if (String(accounts[i].account || "") === target) return target
+    return ""
+  }
   function refreshStatus() {
-    if (!statusProcess.running) statusProcess.running = true
+    if (statusProcess.running) return
+    statusProcess.command = [helper, "status", "--account",
+                             knownAccount(selectedChatAccount)]
+    statusProcess.running = true
   }
   function refreshFromStore() {
     storeRefreshPending = true
@@ -147,7 +180,9 @@ Item {
     if (selectedChatJid === "") return
     if (messagesProcess.running) { messagesPending = true; return }
     loadingMessages = true
-    messagesProcess.payload = JSON.stringify({ jid: selectedChatJid, query: query })
+    messagesProcess.payload = JSON.stringify({
+      account: selectedChatAccount, jid: selectedChatJid, query: query
+    })
     messagesProcess.stdinEnabled = true
     messagesProcess.running = true
   }
@@ -157,17 +192,21 @@ Item {
       return
     }
     loadingMembers = true
-    membersProcess.payload = JSON.stringify({ jid: selectedChatJid })
+    membersProcess.payload = JSON.stringify({
+      account: selectedChatAccount, jid: selectedChatJid
+    })
     membersProcess.stdinEnabled = true
     membersProcess.running = true
   }
   function selectChat(chat) {
     if (!chat || !chat.jid) return
     var next = String(chat.jid)
-    voiceRecorder.stopForChatChange(next)
-    dismissNotifications(next)
-    if (next !== selectedChatJid) {
+    var nextAccount = String(chat.account || "")
+    voiceRecorder.stopForChatChange(nextAccount, next)
+    dismissNotifications(next, nextAccount)
+    if (next !== selectedChatJid || nextAccount !== selectedChatAccount) {
       selectedChatJid = next
+      selectedChatAccount = nextAccount
       selectedChatName = String(chat.name || "WhatsApp chat")
       selectedChatKind = String(chat.kind || "unknown")
       selectedId = ""
@@ -190,8 +229,10 @@ Item {
     refreshMessages()
   }
   function selectItem(id) { selectedId = String(id || "") }
-  function runWriteForChat(kind, payload, jid) {
+  function runWriteForChat(kind, payload, jid, account) {
     var target = String(jid || "")
+    var scope = account === undefined
+      ? String(selectedChatAccount || "") : String(account || "")
     if (writing || writeProcess.running || target === "") return false
     if (offlineMode && kind !== "paste") {
       var message = "Offline mode is on. Go online before sending or changing WhatsApp state."
@@ -202,10 +243,12 @@ Item {
     writing = true
     activeWriteKind = kind
     activeWriteChatJid = target
+    activeWriteAccount = scope
     errorText = ""
     var request = Object.assign({}, payload || ({}))
     request.jid = target
     writeProcess.kind = kind
+    request.account = scope
     writeProcess.payload = JSON.stringify(request)
     writeProcess.command = [helper, kind]
     writeProcess.stdinEnabled = true
@@ -213,7 +256,7 @@ Item {
     return true
   }
   function runWrite(kind, payload) {
-    return runWriteForChat(kind, payload, selectedChatJid)
+    return runWriteForChat(kind, payload, selectedChatJid, selectedChatAccount)
   }
   function sendText(text, replyId, mentions) {
     var value = String(text || "").trim()
@@ -242,8 +285,8 @@ Item {
       reply_id: String(replyId || "")
     })
   }
-  function toggleVoice(jid, chatName, replyId) {
-    return voiceRecorder.toggle(String(jid || ""), String(chatName || ""),
+  function toggleVoice(account, jid, chatName, replyId) {
+    return voiceRecorder.toggle(String(account || ""), String(jid || ""), String(chatName || ""),
       String(replyId || ""))
   }
   function stopVoiceRecording() { return voiceRecorder.stopToReview() }
@@ -308,23 +351,38 @@ Item {
       jid: selectedChatJid, action: String(action || "")
     })
   }
-  function clearNotificationCount(jid) {
+  function clearNotificationCount(jid, account) {
     var target = String(jid || "")
     root.chats = root.chats.map(function(chat) {
-      if (target !== "" && String(chat.jid || "") !== target) return chat
+      if (target !== "" && !root.sameChat(chat, account, target)) return chat
       var next = Object.assign({}, chat)
       next.notification_unread = 0
       return next
     })
   }
-  function dismissNotifications(jid) {
+  function dismissNotifications(jid, account) {
     if (controlProcess.running) return false
     var target = String(jid || "")
-    clearNotificationCount(target)
+    // An empty JID clears the aggregated badge across every account.
+    var scope = target === "" ? "" : String(account || "")
+    clearNotificationCount(target, scope)
     controlWriting = true
     controlProcess.kind = "acknowledge"
-    controlProcess.payload = JSON.stringify({ jid: target })
+    controlProcess.payload = JSON.stringify({ account: scope, jid: target })
     controlProcess.command = [helper, "acknowledge"]
+    controlProcess.stdinEnabled = true
+    controlProcess.running = true
+    return true
+  }
+  function setNotifications(enabled, preview) {
+    if (controlProcess.running || writing) return false
+    var request = ({})
+    if (enabled !== undefined && enabled !== null) request.enabled = enabled === true
+    if (preview !== undefined && preview !== null) request.preview = preview === true
+    controlWriting = true
+    controlProcess.kind = "notify-mode"
+    controlProcess.payload = JSON.stringify(request)
+    controlProcess.command = [helper, "notify-mode"]
     controlProcess.stdinEnabled = true
     controlProcess.running = true
     return true
@@ -333,7 +391,9 @@ Item {
     if (controlProcess.running || writing) return false
     controlWriting = true
     controlProcess.kind = "sync-mode"
-    controlProcess.payload = JSON.stringify({ online: online === true })
+    controlProcess.payload = JSON.stringify({
+      account: root.selectedChatAccount, online: online === true
+    })
     controlProcess.command = [helper, "sync-mode"]
     controlProcess.stdinEnabled = true
     controlProcess.running = true
@@ -344,29 +404,28 @@ Item {
     var settings = ({})
     settings[String(key || "")] = value
     settingsWriting = true
-    settingsProcess.payload = JSON.stringify({ settings: settings })
+    settingsProcess.payload = JSON.stringify({
+      account: root.selectedChatAccount, settings: settings
+    })
     settingsProcess.stdinEnabled = true
     settingsProcess.running = true
     return true
   }
 
-  Component.onCompleted: storeWatchProcess.running = true
-
   VoiceRecorder {
     id: voiceRecorder
     helper: root.helper
     onNotice: function(message) { root.errorText = String(message || "") }
-    onSendRequested: function(jid, path, replyId) {
+    onSendRequested: function(account, jid, path, replyId) {
       var started = root.runWriteForChat("voice", {
         jid: String(jid || ""),
         path: String(path || ""),
         reply_id: String(replyId || "")
-      }, jid)
-      if (started) voiceRecorder.markSending(jid)
-      else voiceRecorder.markSendFailed(root.errorText, jid)
+      }, jid, account)
+      if (started) voiceRecorder.markSending(account, jid)
+      else voiceRecorder.markSendFailed(root.errorText, account, jid)
     }
   }
-
   // The full window belongs to the one resident service, while the bar owns
   // the anchored dropdown. This avoids duplicate per-monitor app windows and
   // keeps a bar click on the compact surface.
@@ -410,30 +469,41 @@ Item {
     }
   }
 
-  Process {
-    id: storeWatchProcess
-    command: [
-      "setpriv", "--pdeathsig", "TERM",
-      "inotifywait", "-m", "-q",
-      "-e", "close_write,create,delete,move,modify",
-      "--format", "%f", root.storeDirectory
-    ]
-    stdout: SplitParser {
-      splitMarker: "\n"
-      onRead: function(fileName) {
-        var name = String(fileName || "").trim()
-        if (name === "wacli.db" || name === "wacli.db-wal")
-          root.refreshFromStore()
+  // One watcher per account store; they share the debounce below.
+  Instantiator {
+    id: storeWatchers
+    model: root.storeDirectories
+    delegate: Process {
+      required property string modelData
+      running: true
+      command: [
+        "setpriv", "--pdeathsig", "TERM",
+        "inotifywait", "-m", "-q",
+        "-e", "close_write,create,delete,move,modify",
+        "--format", "%f", modelData
+      ]
+      stdout: SplitParser {
+        splitMarker: "\n"
+        onRead: function(fileName) {
+          var name = String(fileName || "").trim()
+          if (name === "wacli.db" || name === "wacli.db-wal")
+            root.refreshFromStore()
+        }
       }
+      onExited: storeWatchRestart.restart()
     }
-    onExited: storeWatchRestart.restart()
   }
 
   Timer {
     id: storeWatchRestart
     interval: 1500
     repeat: false
-    onTriggered: if (!storeWatchProcess.running) storeWatchProcess.running = true
+    onTriggered: {
+      for (var i = 0; i < storeWatchers.count; i++) {
+        var watcher = storeWatchers.objectAt(i)
+        if (watcher && !watcher.running) watcher.running = true
+      }
+    }
   }
 
   Timer {
@@ -458,6 +528,7 @@ Item {
     triggeredOnStart: true
     onTriggered: {
       root.refreshChats()
+      root.runNotify()
       if (root.windowOpen) root.refreshMessages()
     }
   }
@@ -469,9 +540,13 @@ Item {
     onTriggered: root.refreshStatus()
   }
 
+  // Switching to a chat in another account changes which account the header
+  // pills and the receipt preference describe.
+  onSelectedChatAccountChanged: refreshStatus()
+
   Process {
     id: statusProcess
-    command: [root.helper, "status"]
+    command: [root.helper, "status", "--account", ""]
     stdout: StdioCollector { id: statusOutput }
     stderr: StdioCollector { id: statusError }
     onExited: function(exitCode) {
@@ -484,6 +559,11 @@ Item {
       root.authenticated = payload.authenticated === true
       root.syncActive = payload.sync_active === true
       root.offlineMode = payload.offline_mode === true
+      var notifications = payload.notifications
+      root.notificationsEnabled = !!notifications && notifications.enabled === true
+      root.notificationsPreview = !notifications || notifications.preview !== false
+      root.notifyAvailable = payload.notify_available !== false
+      root.accounts = Array.isArray(payload.accounts) ? payload.accounts : []
       root.sendReadReceipts = payload.send_read_receipts === true
       root.showUnreadCount = payload.show_unread_count !== false
       root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
@@ -513,14 +593,17 @@ Item {
       if (root.chats.length === 0) return
       var selected = null
       for (var i = 0; i < root.chats.length; i++)
-        if (String(root.chats[i].jid) === root.selectedChatJid) selected = root.chats[i]
+        if (root.sameChat(root.chats[i], root.selectedChatAccount, root.selectedChatJid))
+          selected = root.chats[i]
       if (!selected) {
         selected = root.chats[0]
         root.selectedChatJid = String(selected.jid)
+        root.selectedChatAccount = String(selected.account || "")
         root.query = ""
         root.messages = []
         root.members = []
-        if (root.windowOpen) root.dismissNotifications(root.selectedChatJid)
+        if (root.windowOpen)
+          root.dismissNotifications(root.selectedChatJid, root.selectedChatAccount)
       }
       root.selectedChatName = String(selected.name || "WhatsApp chat")
       root.selectedChatKind = String(selected.kind || "unknown")
@@ -556,6 +639,10 @@ Item {
         root.offlineMode = payload.online !== true
         root.syncActive = payload.online === true
       }
+      if (finishedKind === "notify-mode" && payload.notifications) {
+        root.notificationsEnabled = payload.notifications.enabled === true
+        root.notificationsPreview = payload.notifications.preview !== false
+      }
       root.controlCompleted(finishedKind)
       root.refreshStatus()
       root.refreshChats()
@@ -587,6 +674,21 @@ Item {
         ? Number(payload.dropdown_rows) : 7
       root.errorText = ""
       root.settingsCompleted()
+    }
+  }
+
+  Process {
+    id: notifyProcess
+    property string payload: ""
+    command: [root.helper, "notify"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: notifyOutput }
+    stderr: StdioCollector { }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      var payload = root.parseJson(notifyOutput.text)
+      if (payload && payload.ok === true && payload.available === false)
+        root.notifyAvailable = false
     }
   }
 
@@ -645,14 +747,17 @@ Item {
       root.writing = false
       var finishedKind = kind
       var finishedJid = root.activeWriteChatJid
+      var finishedAccount = root.activeWriteAccount
       root.activeWriteKind = ""
       root.activeWriteChatJid = ""
+      root.activeWriteAccount = ""
       var payload = root.parseJson(writeOutput.text)
       if (exitCode !== 0 || !payload || payload.ok !== true) {
         var message = (payload && payload.error) || String(writeError.text || "WhatsApp could not complete that request.").trim()
         root.errorText = message
         if (finishedKind === "media") root.mediaDownloadId = ""
-        if (finishedKind === "voice") voiceRecorder.markSendFailed(message, finishedJid)
+        if (finishedKind === "voice")
+          voiceRecorder.markSendFailed(message, finishedAccount, finishedJid)
         root.writeFailed(message, finishedJid)
         return
       }
@@ -667,7 +772,7 @@ Item {
       }
       root.errorText = ""
       if (finishedKind === "media") root.mediaDownloadId = ""
-      if (finishedKind === "voice") voiceRecorder.markSent(finishedJid)
+      if (finishedKind === "voice") voiceRecorder.markSent(finishedAccount, finishedJid)
       root.writeCompleted(finishedKind, finishedJid)
       refreshDelay.restart()
     }
