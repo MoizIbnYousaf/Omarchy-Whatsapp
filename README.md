@@ -221,7 +221,7 @@ card controls automatic receipts, the badge, background sync, and dropdown size.
 ./scripts/test
 ```
 
-The release gate runs 65 backend boundary/write-path/parity tests, 20 offscreen
+The release gate runs 65 backend boundary/write-path/parity tests, 21 offscreen
 QML tests, an isolated installer preflight, manifest validation, QML lint,
 shell syntax checks, a diff check, and a heavyweight-runtime dependency guard.
 Installed verification and screenshot rules live in [testing](docs/TESTING.md);

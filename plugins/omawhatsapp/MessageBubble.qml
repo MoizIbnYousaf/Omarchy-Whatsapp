@@ -100,6 +100,7 @@ Item {
 
   Rectangle {
     id: bubble
+    objectName: "messageBubbleSurface"
     anchors.right: root.message.from_me ? parent.right : undefined
     anchors.left: root.message.from_me ? undefined : parent.left
     width: root.desiredWidth
@@ -115,6 +116,7 @@ Item {
 
     Column {
       id: bubbleColumn
+      objectName: "messageBubbleContent"
       anchors.top: parent.top
       anchors.left: parent.left
       anchors.right: parent.right

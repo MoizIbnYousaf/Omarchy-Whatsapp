@@ -20,7 +20,7 @@ qml_test_runner=/usr/lib/qt6/bin/qmltestrunner
 make validate
 ./scripts/install --check
 ./scripts/check-wacli-parity
-for qml_test in tests/tst_keyboard_navigation.qml tests/tst_media_viewer.qml tests/tst_dropdown_model.qml tests/tst_settings_policy.qml tests/tst_voice_recorder_model.qml tests/tst_voice_composer.qml; do
+for qml_test in tests/tst_keyboard_navigation.qml tests/tst_media_viewer.qml tests/tst_dropdown_model.qml tests/tst_settings_policy.qml tests/tst_voice_recorder_model.qml tests/tst_voice_composer.qml tests/tst_message_bubble.qml; do
   QT_QPA_PLATFORM=offscreen "$qml_test_runner" \
     -input "$qml_test" \
     -import "$repo_root/tests/imports" \

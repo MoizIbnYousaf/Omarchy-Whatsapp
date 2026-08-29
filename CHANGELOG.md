@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1 — 2026-08-29
+
+- Balance message-bubble spacing by applying the existing theme margin above
+  the content as well as below it, preserving compact natural-width bubbles
+  and clean wrapping at narrow sizes.
+- Add an offscreen layout regression that verifies the bubble keeps equal top
+  and bottom breathing room.
+
 ## 0.9.0 — 2026-08-28
 
 - Add native OGG/Opus voice-note recording to the full client and compact bar
