@@ -161,6 +161,15 @@ git clone https://github.com/MoizIbnYousaf/Omarchy-Whatsapp.git && \
   cd Omarchy-Whatsapp && ./scripts/install
 ```
 
+### Upgrading
+
+After pulling a newer release, always re-run `./scripts/install`. Do not copy
+only the plugin directory: the installer stages the QML, the
+`~/.local/bin/omawhatsapp` helper, the agent skill, and the user-service
+templates as one compatible set. This is especially important when upgrading
+to 0.10.0 for multi-account support, because the new UI requires the matching
+account-aware helper and per-account sync template.
+
 Link this machine once when needed:
 
 ```bash

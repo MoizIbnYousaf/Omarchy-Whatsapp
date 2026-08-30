@@ -2,6 +2,9 @@
 
 ## 0.10.0 — 2026-08-29
 
+- Document the required upgrade path: after pulling a release, re-run
+  `./scripts/install` so the QML, helper, skill, and user-service templates are
+  upgraded together instead of mixing new UI code with an older helper.
 - Merge desktop notifications and multi-account support contributed by
   [Leonardo Lucas de Castro Filho](https://github.com/LLawli) in
   [PR #1](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/pull/1).
