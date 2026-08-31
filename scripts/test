@@ -17,24 +17,42 @@ qml_test_runner=/usr/lib/qt6/bin/qmltestrunner
   exit 1
 }
 
+media_fixture_root="$repo_root/tests/.generated-media"
+[[ ! -e $media_fixture_root ]] || {
+  echo "test: generated media path already exists: $media_fixture_root" >&2
+  exit 1
+}
+mkdir -- "$media_fixture_root"
+cleanup_test_fixtures() {
+  find "$media_fixture_root" -maxdepth 1 -type f -delete
+  rmdir -- "$media_fixture_root"
+}
+trap cleanup_test_fixtures EXIT
+python3 tests/write_media_fixtures.py "$media_fixture_root"
+
 make validate
 ./scripts/install --check
 ./scripts/check-wacli-parity
-for qml_test in tests/tst_keyboard_navigation.qml tests/tst_media_viewer.qml tests/tst_dropdown_model.qml tests/tst_settings_policy.qml tests/tst_account_model.qml tests/tst_voice_recorder_model.qml tests/tst_voice_recorder.qml tests/tst_voice_composer.qml tests/tst_message_bubble.qml; do
+while IFS= read -r -d '' qml_test; do
   QT_QPA_PLATFORM=offscreen "$qml_test_runner" \
     -input "$qml_test" \
     -import "$repo_root/tests/imports" \
     -import "$repo_root/plugins/omawhatsapp" \
     -o -,txt
-done
+done < <(find tests -maxdepth 1 -type f -name 'tst_*.qml' -print0 | sort -z)
 
-bash -n scripts/install scripts/test scripts/uninstall
-python3 -m py_compile scripts/check-wacli-parity
+bash -n scripts/install scripts/install-common scripts/test scripts/uninstall
+python3 -m py_compile scripts/check-wacli-parity scripts/install-transaction.py
+python3 -m py_compile tests/test_install_transaction.py tests/write_media_fixtures.py
 git diff --check
 
 jq -e '.id == "io.github.moizibnyousaf.omawhatsapp"' \
   manifest.json plugins/omawhatsapp/manifest.json >/dev/null || {
   echo "test: public plugin ID must remain globally namespaced" >&2
+  exit 1
+}
+[[ $(jq -r '.version' manifest.json) == $(jq -r '.version' plugins/omawhatsapp/manifest.json) ]] || {
+  echo "test: root and plugin manifest versions must match" >&2
   exit 1
 }
 
@@ -46,7 +64,7 @@ rg -q 'wacli-sync@\$\{account_name\}\.service' scripts/install || {
   echo "test: installer must activate one sync instance per named account" >&2
   exit 1
 }
-rg -q 'status_json=.*omawhatsapp.*status' scripts/install || {
+rg -q 'status_json=.*staged_helper.*status' scripts/install || {
   echo "test: installer account discovery must reuse the canonical helper status" >&2
   exit 1
 }
@@ -70,10 +88,18 @@ rg -q 'install_plugin_dir=\$plugin_id' scripts/install || {
   echo "test: installer must target Omarchy's canonical manifest-id directory" >&2
   exit 1
 }
-rg -q 'plugin_root/\$install_plugin_dir.*plugin_root/\$source_plugin_dir' scripts/install || {
+rg -q '\{operation:"replace", staged:\$staged_plugin, target:\$plugin,' scripts/install \
+  && rg -q '\{operation:"remove", target:\$legacy_plugin,' scripts/install \
+  && rg -q '\{operation:"remove", target:\$legacy_bar,' scripts/install || {
   echo "test: installer must remove the exact legacy duplicate directory" >&2
   exit 1
 }
+for lifecycle_script in scripts/install scripts/uninstall; do
+  rg -q 'expected_sha256:\$shell_digest' "$lifecycle_script" || {
+    echo "test: $lifecycle_script must pin the shell merge source digest" >&2
+    exit 1
+  }
+done
 
 for branded_surface in BarWidget.qml Dropdown.qml App.qml; do
   rg -q '󰖣' "plugins/omawhatsapp/$branded_surface" || {

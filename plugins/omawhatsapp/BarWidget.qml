@@ -12,7 +12,7 @@ BarWidget {
   readonly property var oma: bar && bar.shell
     ? bar.shell.serviceFor(root.pluginId) : null
   readonly property int unreadCount: oma ? oma.notificationUnreadCount : 0
-  readonly property bool available: !!oma && oma.ready
+  readonly property bool available: !!oma && oma.railReady
   readonly property bool showUnreadCount:
     root.oma ? root.oma.showUnreadCount !== false : true
 

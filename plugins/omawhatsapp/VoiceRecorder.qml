@@ -14,6 +14,7 @@ Item {
   height: 0
 
   property string helper: ""
+  property var playback: null
   property string state: "idle"
   property string chatAccount: ""
   property string chatJid: ""
@@ -37,6 +38,9 @@ Item {
   readonly property bool formatSupported: recorder.mediaFormat.isSupported(MediaFormat.Encode)
 
   readonly property string chatKey: AccountModel.chatKey(chatAccount, chatJid)
+  readonly property var playbackRef: AccountModel.chatRef(chatAccount, chatJid)
+  readonly property bool playbackGranted: !playback || playback.owns(
+    "voice-draft", playbackRef, "draft")
 
   signal sendRequested(string account, string jid, string path, string replyId)
   signal notice(string message)
@@ -130,7 +134,7 @@ Item {
 
   function discard() {
     if (state === "idle" || state === "discarding") return false
-    player.stop()
+    stopPreview()
     errorText = ""
     if (state === "preparing") {
       cancelAfterCreate = true
@@ -163,7 +167,7 @@ Item {
 
   function requestSend() {
     if (state !== "review" || draftPath === "") return false
-    player.stop()
+    stopPreview()
     sendRequested(chatAccount, chatJid, draftPath, replyId)
     return true
   }
@@ -187,16 +191,28 @@ Item {
 
   function playPause() {
     if (state !== "review" || draftPath === "") return false
-    if (playing) player.pause()
+    if (playing) {
+      player.pause()
+      if (playback) playback.releaseSurface("voice-draft")
+    }
     else {
       if (player.source.toString() !== fileUrl(draftPath)) player.source = fileUrl(draftPath)
-      player.play()
+      if (playback && !playback.acquire("voice-draft", playbackRef, "draft"))
+        return false
+      Qt.callLater(function() {
+        if (root.state === "review" && root.playbackGranted) player.play()
+      })
     }
     return true
   }
 
-  function reset() {
+  function stopPreview() {
     player.stop()
+    if (playback) playback.releaseSurface("voice-draft")
+  }
+
+  function reset() {
+    stopPreview()
     state = "idle"
     chatAccount = ""
     chatJid = ""
@@ -261,11 +277,16 @@ Item {
   MediaPlayer {
     id: player
     audioOutput: previewOutput
+    onMediaStatusChanged: if (mediaStatus === MediaPlayer.EndOfMedia
+        && root.playback) root.playback.releaseSurface("voice-draft")
     onErrorOccurred: function(_error, message) {
+      if (root.playback) root.playback.releaseSurface("voice-draft")
       root.errorText = String(message || "The voice-note preview could not play.")
       root.notice(root.errorText)
     }
   }
+
+  onPlaybackGrantedChanged: if (!playbackGranted) player.stop()
 
   Process {
     id: createProcess

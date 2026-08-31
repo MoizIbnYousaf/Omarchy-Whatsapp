@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.10.1 — 2026-08-30
+
+- Bound every image, GIF, sticker, audio control, and video preview to its
+  bubble; keep a poster before first play and the decoded frame while paused.
+  One shared playback lease prevents the app, dropdown, and gallery from
+  playing media over one another.
+- Keep every deferred action attached to the exact account, chat, and message
+  that created it. Chat switches can no longer redirect file-picker results,
+  drafts, replies, forwarding, polls, receipts, or message actions—even when
+  two accounts contain the same JID.
+- Serialize and coalesce read acknowledgements independently of other helper
+  work, without allowing an older completion to clear newer unread state.
+- Make local state, clipboard previews, wacli parity, authorization flags,
+  systemd lifecycle changes, and partial-delivery reporting fail closed at
+  their boundaries. Interactive linking now restores only the exact account
+  service it changed.
+- Make install, upgrade, recovery, and uninstall durable transactions. A
+  terminated run is recovered before the next operation, so users never keep
+  a mixed helper/QML/service version.
+- Exercise the media pipeline with generated MP4, GIF, and WebP fixtures and
+  cover cross-account, deferred-intent, playback, lifecycle, and interrupted
+  installation behavior without reading or sending real WhatsApp data.
+- Preserve and build on the desktop-notification and multi-account work from
+  [Leonardo Lucas de Castro Filho](https://github.com/LLawli) in
+  [PR #1](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/pull/1).
+
 ## 0.10.0 — 2026-08-29
 
 - Document the required upgrade path: after pulling a release, re-run

@@ -2,11 +2,34 @@
 set -euo pipefail
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+transaction_helper="$repo_root/scripts/install-transaction.py"
 user_home=${HOME:?HOME is required}
+[[ $user_home == /* ]] || {
+  echo "HOME must be an absolute path." >&2
+  exit 1
+}
+[[ $user_home != / ]] || {
+  echo "HOME must not be the filesystem root." >&2
+  exit 1
+}
+xdg_config_home=${XDG_CONFIG_HOME:-$user_home/.config}
+xdg_state_home=${XDG_STATE_HOME:-$user_home/.local/state}
+# Relative XDG base directories are invalid and must be ignored. Falling back
+# here keeps locks, journals, services, and backups out of the source checkout.
+[[ $xdg_config_home == /* ]] || xdg_config_home="$user_home/.config"
+[[ $xdg_state_home == /* ]] || xdg_state_home="$user_home/.local/state"
+[[ $xdg_config_home != / && $xdg_state_home != / ]] || {
+  echo "XDG base directories must not be the filesystem root." >&2
+  exit 1
+}
 plugin_root="$user_home/.config/omarchy/plugins"
 skill_root="$user_home/.agents/skills"
 shell_config="$user_home/.config/omarchy/shell.json"
 shell_source="/usr/share/omarchy/shell"
+user_service_root="$xdg_config_home/systemd/user"
+helper_target="$user_home/.local/bin/omawhatsapp"
+transaction_parent="$xdg_state_home/omawhatsapp-installer"
+transaction_journal="$transaction_parent/transaction.json"
 check_only=false
 source_plugin_dir=omawhatsapp
 skill_dir=omawhatsapp
@@ -22,7 +45,26 @@ if (( $# > 0 )); then
   exit 2
 fi
 
-for command_name in jq python3 qmllint rg systemctl wl-paste zenity omarchy inotifywait setpriv; do
+. "$repo_root/scripts/install-common"
+
+for command_name in flock jq python3 systemctl; do
+  command -v "$command_name" >/dev/null || {
+    echo "Missing requirement: $command_name" >&2
+    exit 1
+  }
+done
+
+if ! $check_only; then
+  if command -v quickshell >/dev/null \
+      && ! command -v omarchy-restart-shell >/dev/null; then
+    echo "Cannot safely stop Quickshell without omarchy-restart-shell." >&2
+    exit 1
+  fi
+  omaw_lock_and_recover || exit 1
+fi
+
+for command_name in flock jq python3 qmllint realpath rg sha256sum systemctl timeout \
+    wl-copy wl-paste xdg-open zenity omarchy inotifywait setpriv; do
   command -v "$command_name" >/dev/null || {
     echo "Missing requirement: $command_name" >&2
     exit 1
@@ -34,14 +76,19 @@ if [[ ! -f /usr/lib/qt6/qml/QtMultimedia/qmldir ]]; then
   exit 1
 fi
 
+if [[ ! -f /usr/lib/qt6/plugins/imageformats/libqwebp.so ]]; then
+  echo "Missing requirement: Qt WebP image plugin (Arch package: qt6-imageformats)" >&2
+  exit 1
+fi
+
 if [[ ! -x "$user_home/.local/bin/wacli" ]]; then
   echo "Install wacli at ~/.local/bin/wacli before installing OmaWhatsApp." >&2
   exit 1
 fi
 
 wacli_version=$("$user_home/.local/bin/wacli" --version 2>&1 | sed -nE 's/^wacli[[:space:]]+v?([0-9]+([.][0-9]+)+).*/\1/p' | head -n 1)
-if [[ -z $wacli_version ]] || ! printf '0.17.1\n%s\n' "$wacli_version" | sort -V -C; then
-  echo "OmaWhatsApp requires wacli 0.17.1 or newer (found: ${wacli_version:-unknown})." >&2
+if [[ $wacli_version != 0.17.1 ]]; then
+  echo "OmaWhatsApp requires exactly wacli 0.17.1 (found: ${wacli_version:-unknown})." >&2
   exit 1
 fi
 
@@ -56,29 +103,67 @@ omarchy plugin validate "$repo_root"
 if $check_only; then
   staging_root=$(mktemp -d)
 else
-  install -d "$plugin_root"
-  staging_root=$(mktemp -d "$plugin_root/.omawhatsapp-install.XXXXXX")
+  install -d "$plugin_root" "$skill_root" "$(dirname -- "$helper_target")" \
+    "$user_service_root"
+  staging_root=$(mktemp -d "$transaction_parent/stage.XXXXXX")
 fi
-temporary=$(mktemp "${shell_config}.XXXXXX")
-cleanup() {
-  rm -rf -- "$staging_root"
-  rm -f -- "$temporary"
+temporary="$staging_root/shell.json"
+shell_stopped=false
+cleanup_staging() {
+  [[ -e $staging_root || -L $staging_root ]] || return 0
+  if ! rm -rf -- "$staging_root"; then
+    echo "Could not remove the OmaWhatsApp staging directory: $staging_root" >&2
+    return 1
+  fi
 }
-trap cleanup EXIT
+finish_install() {
+  local result=$? cleanup_failed=0
+  trap - EXIT INT TERM HUP
+  if ! $check_only && [[ -e $transaction_journal || -L $transaction_journal ]]; then
+    if omaw_recover_pending_transaction; then
+      shell_stopped=false
+    else
+      cleanup_failed=1
+    fi
+  else
+    if $shell_stopped && command -v omarchy-restart-shell >/dev/null; then
+      if omarchy-restart-shell 9>&-; then
+        shell_stopped=false
+      else
+        echo "Could not restart the shell after cancelling OmaWhatsApp installation." >&2
+        cleanup_failed=1
+      fi
+    fi
+    cleanup_staging || cleanup_failed=1
+  fi
+  if (( cleanup_failed != 0 && result == 0 )); then result=1; fi
+  exit "$result"
+}
+trap finish_install EXIT
+trap 'exit 130' INT TERM HUP
 
-install -d "$staging_root/$install_plugin_dir"
+staged_plugin="$staging_root/plugin"
+staged_skill="$staging_root/skill"
+staged_helper="$staging_root/helper"
+staged_service="$staging_root/wacli-sync.service"
+staged_template="$staging_root/wacli-sync@.service"
+install -d "$staged_plugin"
 while IFS= read -r -d '' source_file; do
   relative=${source_file#"$repo_root/plugins/$source_plugin_dir/"}
-  install -Dm644 "$source_file" "$staging_root/$install_plugin_dir/$relative"
+  install -Dm644 "$source_file" "$staged_plugin/$relative"
 done < <(find "$repo_root/plugins/$source_plugin_dir" -type f -print0)
-install -Dm644 "$repo_root/LICENSE" "$staging_root/$install_plugin_dir/LICENSE"
+install -Dm644 "$repo_root/LICENSE" "$staged_plugin/LICENSE"
 install -Dm644 "$repo_root/THIRD_PARTY_NOTICES.md" \
-  "$staging_root/$install_plugin_dir/THIRD_PARTY_NOTICES.md"
-install -d "$staging_root/skills/$skill_dir"
+  "$staged_plugin/THIRD_PARTY_NOTICES.md"
+install -d "$staged_skill"
 while IFS= read -r -d '' source_file; do
   relative=${source_file#"$repo_root/skills/$skill_dir/"}
-  install -Dm644 "$source_file" "$staging_root/skills/$skill_dir/$relative"
+  install -Dm644 "$source_file" "$staged_skill/$relative"
 done < <(find "$repo_root/skills/$skill_dir" -type f -print0)
+install -m755 "$repo_root/bin/omawhatsapp" "$staged_helper"
+install -m644 "$repo_root/systemd/user/wacli-sync.service" "$staged_service"
+install -m644 "$repo_root/systemd/user/wacli-sync@.service" "$staged_template"
+initial_shell_digest=$(sha256sum "$shell_config" | cut -d ' ' -f 1)
 jq --arg plugin_id "$plugin_id" '
   def migrate_id:
     if (.id == "omawhatsapp" or .id == "omawhatsapp-bar")
@@ -100,16 +185,16 @@ chmod --reference="$shell_config" "$temporary"
 
 if $check_only; then
   jq -e --arg plugin_id "$plugin_id" '.id == $plugin_id' \
-    "$staging_root/$install_plugin_dir/manifest.json" >/dev/null
-  [[ -f "$staging_root/$install_plugin_dir/SettingsPolicy.js" ]]
-  [[ -f "$staging_root/$install_plugin_dir/AccountModel.js" ]]
-  [[ -f "$staging_root/$install_plugin_dir/LICENSE" ]]
-  rg -q '^name: omawhatsapp$' "$staging_root/skills/$skill_dir/SKILL.md"
-  rg -q 'references/wacli-parity\.md' "$staging_root/skills/$skill_dir/SKILL.md"
+    "$staged_plugin/manifest.json" >/dev/null
+  [[ -f "$staged_plugin/SettingsPolicy.js" ]]
+  [[ -f "$staged_plugin/AccountModel.js" ]]
+  [[ -f "$staged_plugin/LICENSE" ]]
+  rg -q '^name: omawhatsapp$' "$staged_skill/SKILL.md"
+  rg -q 'references/wacli-parity\.md' "$staged_skill/SKILL.md"
   python3 "$repo_root/bin/omawhatsapp" capabilities \
     | jq -e '.ok == true and .wacli_parity_version == "0.17.1" and .operation_count == 103' \
       >/dev/null
-  ! rg -q 'TODO|\[TODO' "$staging_root/skills/$skill_dir"
+  ! rg -q 'TODO|\[TODO' "$staged_skill"
   jq -e --arg plugin_id "$plugin_id" '
     ([.plugins[]? | select(.id == $plugin_id)] | length) == 1 and
     (any((.bar.layout.left + .bar.layout.center + .bar.layout.right)[]?;
@@ -121,40 +206,9 @@ if $check_only; then
   exit 0
 fi
 
-# Stop the shell before replacing watched plugin directories. The restart
-# below launches one fully-consistent tree instead of hot-reloading partial
-# plugin states and racing IpcHandler registration.
-if command -v quickshell >/dev/null; then
-  while timeout 5 quickshell kill -p "$shell_source" --any-display >/dev/null 2>&1; do :; done
-fi
-
-install -Dm755 "$repo_root/bin/omawhatsapp" "$user_home/.local/bin/omawhatsapp"
-# The shell registry keys third-party plugins by manifest id. Older installers
-# used a short directory name; keeping both lets lexicographic scan order pick
-# an arbitrary duplicate manifest. Replace the canonical directory atomically
-# and remove that exact legacy directory during the migration.
-rm -rf -- "$plugin_root/$install_plugin_dir" "$plugin_root/$source_plugin_dir"
-mv -- "$staging_root/$install_plugin_dir" "$plugin_root/$install_plugin_dir"
-install -d "$skill_root"
-rm -rf -- "$skill_root/$skill_dir"
-mv -- "$staging_root/skills/$skill_dir" "$skill_root/$skill_dir"
-# Pre-0.3 used a second bar-only plugin. The combined manifest supersedes only
-# that exact legacy directory and shell id.
-rm -rf -- "$plugin_root/omawhatsapp-bar"
-
-install -Dm644 "$repo_root/systemd/user/wacli-sync.service" \
-  "$user_home/.config/systemd/user/wacli-sync.service"
-install -Dm644 "$repo_root/systemd/user/wacli-sync@.service" \
-  "$user_home/.config/systemd/user/wacli-sync@.service"
-mv -- "$temporary" "$shell_config"
-trap - EXIT
-rmdir -- "$staging_root/skills" "$staging_root"
-
-systemctl --user daemon-reload
-
-# One canonical status snapshot supplies both the helper-validated account
-# list and every account's persisted online state.
-status_json=$("$user_home/.local/bin/omawhatsapp" status)
+# One canonical, staged helper snapshot supplies the validated account list and
+# each account's persisted online choice before any live target is disturbed.
+status_json=$("$staged_helper" status)
 if jq -e '.accounts | length == 1 and .[0].account == ""' \
     <<<"$status_json" >/dev/null; then
   account_units=(wacli-sync.service)
@@ -167,9 +221,123 @@ else
     account_units+=("wacli-sync@${account_name}.service")
     account_flags+=("$account_name")
   done
-  # The legacy instance no longer owns any account's store.
-  systemctl --user disable --now wacli-sync.service >/dev/null 2>&1 || true
 fi
+
+# Discover service state before publishing so a failed upgrade can restore the
+# exact enabled/active choices it found.
+if ! listed_unit_files=$(LC_ALL=C systemctl --user list-unit-files \
+    'wacli-sync@*.service' --no-legend --no-pager --plain); then
+  echo "Could not inspect installed OmaWhatsApp sync instances." >&2
+  exit 1
+fi
+if ! listed_units=$(LC_ALL=C systemctl --user list-units --all \
+    'wacli-sync@*.service' --no-legend --no-pager --plain); then
+  echo "Could not inspect loaded OmaWhatsApp sync instances." >&2
+  exit 1
+fi
+declare -A desired_units=()
+for unit in "${account_units[@]}"; do
+  desired_units["$unit"]=1
+done
+declare -A discovered_units=()
+while read -r first second _; do
+  candidate=$first
+  [[ $candidate == '●' ]] && candidate=$second
+  if [[ $candidate =~ ^wacli-sync@([A-Za-z0-9._-]{1,64})\.service$ ]]; then
+    discovered_units["$candidate"]=1
+  fi
+done < <(printf '%s\n%s\n' "$listed_unit_files" "$listed_units")
+declare -A known_units=([wacli-sync.service]=1)
+for unit in "${!discovered_units[@]}" "${account_units[@]}"; do
+  known_units["$unit"]=1
+done
+declare -A was_enabled=()
+declare -A was_active=()
+for unit in "${!known_units[@]}"; do
+  if systemctl --user is-enabled --quiet "$unit" 2>/dev/null; then
+    was_enabled["$unit"]=1
+  fi
+  if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
+    was_active["$unit"]=1
+  fi
+done
+
+# Refuse to publish a shell registry derived from a concurrently changed file.
+[[ $(sha256sum "$shell_config" | cut -d ' ' -f 1) == "$initial_shell_digest" ]] || {
+  echo "Omarchy shell configuration changed during install; retry the upgrade." >&2
+  exit 1
+}
+
+unit_snapshot='[]'
+mapfile -t sorted_known_units < <(printf '%s\n' "${!known_units[@]}" | LC_ALL=C sort -u)
+for unit in "${sorted_known_units[@]}"; do
+  enabled=false
+  active=false
+  [[ -n ${was_enabled[$unit]+x} ]] && enabled=true
+  [[ -n ${was_active[$unit]+x} ]] && active=true
+  unit_snapshot=$(jq -c --arg name "$unit" --argjson enabled "$enabled" \
+    --argjson active "$active" '. + [{name:$name, enabled:$enabled, active:$active}]' \
+    <<<"$unit_snapshot")
+done
+transaction_plan="$staging_root/transaction-plan.json"
+jq -n --arg staging_root "$staging_root" --arg helper "$helper_target" \
+  --arg staged_helper "$staged_helper" \
+  --arg plugin "$plugin_root/$install_plugin_dir" --arg staged_plugin "$staged_plugin" \
+  --arg skill "$skill_root/$skill_dir" --arg staged_skill "$staged_skill" \
+  --arg service "$user_service_root/wacli-sync.service" --arg staged_service "$staged_service" \
+  --arg template "$user_service_root/wacli-sync@.service" --arg staged_template "$staged_template" \
+  --arg shell "$shell_config" --arg staged_shell "$temporary" \
+  --arg shell_digest "$initial_shell_digest" \
+  --arg plugin_artifacts "$(dirname -- "$plugin_root")" \
+  --arg legacy_plugin "$plugin_root/$source_plugin_dir" \
+  --arg legacy_bar "$plugin_root/omawhatsapp-bar" --argjson units "$unit_snapshot" '
+  {
+    mode:"install",
+    staging_root:$staging_root,
+    units:$units,
+    targets:[
+      {operation:"replace", staged:$staged_helper, target:$helper},
+      {operation:"replace", staged:$staged_plugin, target:$plugin,
+        artifact_parent:$plugin_artifacts},
+      {operation:"replace", staged:$staged_skill, target:$skill},
+      {operation:"replace", staged:$staged_service, target:$service},
+      {operation:"replace", staged:$staged_template, target:$template},
+      {operation:"replace", staged:$staged_shell, target:$shell,
+        expected_sha256:$shell_digest},
+      {operation:"remove", target:$legacy_plugin, artifact_parent:$plugin_artifacts},
+      {operation:"remove", target:$legacy_bar, artifact_parent:$plugin_artifacts}
+    ]
+  }
+' > "$transaction_plan"
+python3 "$transaction_helper" begin --journal "$transaction_journal" \
+  --plan "$transaction_plan"
+
+# Stop the shell before creating any same-filesystem publication artifacts;
+# the plugin tree must never be observed while it is being prepared.
+if command -v quickshell >/dev/null; then
+  python3 "$transaction_helper" mark-shell-stop --journal "$transaction_journal"
+  shell_stopped=true
+  omaw_stop_shell "$shell_source"
+fi
+if [[ ${OMAW_INSTALL_TEST_KILL_AFTER_SHELL_STOP:-0} == 1 ]]; then
+  kill -KILL "$BASHPID"
+fi
+python3 "$transaction_helper" prepare --journal "$transaction_journal"
+
+python3 "$transaction_helper" apply --journal "$transaction_journal"
+python3 "$transaction_helper" mark-units --journal "$transaction_journal"
+systemctl --user daemon-reload
+
+# Disable stale instances that no configured account owns anymore.
+if [[ ${account_units[0]} != wacli-sync.service ]] \
+    && [[ -n ${was_enabled[wacli-sync.service]+x}${was_active[wacli-sync.service]+x} ]]; then
+  systemctl --user disable --now wacli-sync.service
+fi
+for unit in "${!discovered_units[@]}"; do
+  if [[ -z ${desired_units[$unit]+x} ]]; then
+    systemctl --user disable --now "$unit"
+  fi
+done
 
 for index in "${!account_units[@]}"; do
   unit=${account_units[$index]}
@@ -187,10 +355,20 @@ for index in "${!account_units[@]}"; do
   fi
 done
 
+# Validate the exact live set before backups become disposable.
+"$helper_target" capabilities \
+  | jq -e '.ok == true and .wacli_parity_version == "0.17.1" and .operation_count == 103' \
+    >/dev/null
+jq -e --arg plugin_id "$plugin_id" '.id == $plugin_id' \
+  "$plugin_root/$install_plugin_dir/manifest.json" >/dev/null
 if command -v omarchy-restart-shell >/dev/null; then
-  omarchy-restart-shell
+  omarchy-restart-shell 9>&-
+  shell_stopped=false
 fi
+python3 "$transaction_helper" mark-validated --journal "$transaction_journal"
+python3 "$transaction_helper" commit --journal "$transaction_journal"
 
 echo "OmaWhatsApp installed as one resident service/bar plugin with a shared agent skill."
-echo "Run ~/.local/bin/omawhatsapp auth if WhatsApp is not linked."
+echo "To link WhatsApp, run:"
+echo "~/.local/bin/omawhatsapp wacli --interactive --authorize interactive -- auth"
 echo "Bind Super+Shift+W using omarchy/bindings.lua.example if desired."

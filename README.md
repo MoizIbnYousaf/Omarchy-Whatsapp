@@ -151,7 +151,7 @@ poller, and closing either surface does not throw away the warm chat rail. See
 Requirements:
 
 - Omarchy with the plugin-capable Quickshell shell
-- `wacli` 0.17.1 or newer at `~/.local/bin/wacli`
+- exactly `wacli` 0.17.1 at `~/.local/bin/wacli`
 - Qt Multimedia and Image Formats, `wl-clipboard`, `zenity`, `inotify-tools`,
   `jq`, Python 3, and systemd user services
 - Optional: `libnotify` (`notify-send`) for desktop popups
@@ -167,13 +167,14 @@ After pulling a newer release, always re-run `./scripts/install`. Do not copy
 only the plugin directory: the installer stages the QML, the
 `~/.local/bin/omawhatsapp` helper, the agent skill, and the user-service
 templates as one compatible set. This is especially important when upgrading
-to 0.10.0 for multi-account support, because the new UI requires the matching
-account-aware helper and per-account sync template.
+to 0.10.1: it replaces the media player, account-aware intent routing, helper,
+and service lifecycle as one compatible release. The installer resumes or
+rolls back an interrupted upgrade before applying the new version.
 
 Link this machine once when needed:
 
 ```bash
-~/.local/bin/omawhatsapp auth
+~/.local/bin/omawhatsapp wacli --interactive --authorize interactive -- auth
 ```
 
 ### More than one WhatsApp account

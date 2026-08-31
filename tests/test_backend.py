@@ -10,6 +10,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -839,10 +840,13 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(message["local_path"], str(self.preview))
         index_path = self.root / "state" / "sent-media.json"
         self.assertEqual(index_path.stat().st_mode & 0o777, 0o600)
+        hint_text = index_path.read_text(encoding="utf-8")
+        self.assertNotIn("caption", hint_text)
+        self.assertNotIn("mockup", hint_text)
 
     def test_sent_media_hints_are_scoped_by_chat(self) -> None:
         self.backend._remember_sent_media("alex@s.whatsapp.net", "t2", self.document,
-                                         "application/pdf", "document", "")
+                                         "application/pdf", "document")
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.execute(
                 "UPDATE messages SET local_path = '' WHERE chat_jid = ? AND msg_id = ?",
@@ -1026,6 +1030,34 @@ class BackendTests(unittest.TestCase):
                 result = self.backend.transport({"args": args})
             self.assertEqual(result["policy"], "local-read")
             self.assertIn("--read-only", run.call_args.args[0])
+
+    def test_false_boolean_flags_never_downgrade_authorization(self) -> None:
+        cases = [
+            (["accounts", "add", "secondary", "--no-auth=false"], "interactive"),
+            (["doctor", "--connect=false"], "local-read"),
+            (["history", "fill", "--chat", "team@g.us", "--dry-run=false"],
+             "sync"),
+            (["messages", "purge", "--chat", "team@g.us", "--id", "t1",
+              "--dry-run=false"], "destructive"),
+            (["store", "cleanup", "--dry-run=false"], "destructive"),
+        ]
+        for args, expected in cases:
+            with self.subTest(args=args):
+                self.assertEqual(self.backend._transport_policy(args), expected)
+
+        with mock.patch.object(self.backend, "_mutate") as mutate, \
+                self.assertRaisesRegex(
+                    backend_module.OmaWhatsAppError, "needs a terminal"
+                ):
+            self.backend.transport({
+                "args": ["accounts", "add", "secondary", "--no-auth=false"],
+                "authorization": "local-write",
+            })
+        mutate.assert_not_called()
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "true or false"):
+            self.backend._transport_policy([
+                "accounts", "add", "secondary", "--no-auth=sometimes"
+            ])
 
     def test_wacli_global_flags_cannot_bypass_request_contract(self) -> None:
         for args in (["--store", "/tmp/other", "version"],
@@ -1244,21 +1276,46 @@ sys.exit(0)
         self.assertTrue(self.backend.online())
 
     def test_status_separates_what_is_aggregated_from_what_is_selected(self) -> None:
+        probes = threading.Barrier(2)
+
         def unit_active(unit: str) -> bool:
             return unit == "wacli-sync@work.service"
 
+        def doctor(account: backend_module.Account) -> dict[str, bool]:
+            probes.wait(timeout=2)
+            return {"authenticated": account.name == "work"}
+
         with mock.patch.object(self.backend, "_unit_active", side_effect=unit_active), \
-                mock.patch.object(self.backend, "_doctor",
-                                  return_value={"authenticated": True}):
+                mock.patch.object(self.backend, "_doctor", side_effect=doctor):
             self.backend.use_account("home")
+            (self.home / "wacli.db").unlink()
             status = self.backend.status()
-        # The rail is ready when any account can serve it...
-        self.assertTrue(status["authenticated"])
-        # ...but the header pill describes the account whose chat is open.
+        # The rail is ready when one complete account can serve it, but the
+        # selected account cannot borrow that readiness for writes/receipts.
+        self.assertTrue(status["rail_ready"])
+        self.assertTrue(status["any_authenticated"])
+        self.assertTrue(status["any_database_ready"])
+        self.assertFalse(status["authenticated"])
+        self.assertFalse(status["database_ready"])
         self.assertEqual(status["account"], "home")
         self.assertFalse(status["sync_active"])
         self.assertEqual({row["account"]: row["sync_active"] for row in status["accounts"]},
                          {"work": True, "home": False})
+
+    def test_one_failed_account_probe_does_not_empty_the_ready_rail(self) -> None:
+        def doctor(account: backend_module.Account) -> dict[str, bool]:
+            if account.name == "home":
+                raise backend_module.OmaWhatsAppError("synthetic doctor timeout")
+            return {"authenticated": True}
+
+        with mock.patch.object(self.backend, "_unit_active", return_value=False), \
+                mock.patch.object(self.backend, "_doctor", side_effect=doctor):
+            status = self.backend.status()
+        reports = {row["account"]: row for row in status["accounts"]}
+        self.assertTrue(status["rail_ready"])
+        self.assertTrue(reports["work"]["authenticated"])
+        self.assertFalse(reports["home"]["authenticated"])
+        self.assertIn("synthetic doctor timeout", reports["home"]["error"])
 
     def test_gateway_validates_the_target_inside_the_named_account(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true,"data":{}}', "")

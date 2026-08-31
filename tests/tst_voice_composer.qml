@@ -14,6 +14,8 @@ TestCase {
     property int voiceDurationMs: 42000
     property int voicePlaybackPosition: 13000
     property bool voicePlaying: false
+    property string requestedOwner: ""
+    function sendVoiceDraft(owner) { requestedOwner = String(owner || ""); return true }
   }
 
   Component {
@@ -21,6 +23,7 @@ TestCase {
     Oma.VoiceComposer {
       width: 480
       service: serviceMock
+      owner: "app"
       account: "work"
       jid: "demo-chat"
       foreground: "#eeeeee"
@@ -68,5 +71,15 @@ TestCase {
     verify(composer !== null)
     compare(composer.forThisChat, true)
     compare(composer.offline, true)
+  }
+
+  function test_send_attributes_the_shared_draft_to_the_clicking_surface() {
+    serviceMock.requestedOwner = ""
+    var composer = createTemporaryObject(composerComponent, testCase)
+    verify(composer !== null)
+    var send = findChild(composer, "voiceSendAction")
+    verify(send !== null)
+    send.activated()
+    compare(serviceMock.requestedOwner, "app")
   }
 }

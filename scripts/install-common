@@ -1,0 +1,173 @@
+# Shared crash-recovery orchestration for scripts/install and scripts/uninstall.
+# The caller must define transaction_helper, transaction_parent, and
+# transaction_journal before sourcing this file.
+
+omaw_restore_unit_snapshot() {
+  local metadata=$1 unit enabled active action_failed recovery_failed=0
+  if ! systemctl --user daemon-reload; then
+    echo "Recovery failed while reloading the user service manager." >&2
+    return 1
+  fi
+  while IFS=$'\t' read -r unit enabled active; do
+    [[ -n $unit ]] || continue
+    action_failed=false
+    if [[ $enabled == true ]]; then
+      systemctl --user enable "$unit" || action_failed=true
+    else
+      systemctl --user disable "$unit" || action_failed=true
+    fi
+    if $action_failed; then
+      echo "Recovery note: systemctl returned nonzero while restoring the enabled state of $unit; verifying it explicitly." >&2
+    fi
+    if systemctl --user is-enabled --quiet "$unit" 2>/dev/null; then
+      [[ $enabled == true ]] || {
+        echo "Recovery could not disable $unit." >&2
+        recovery_failed=1
+      }
+    else
+      [[ $enabled == false ]] || {
+        echo "Recovery could not enable $unit." >&2
+        recovery_failed=1
+      }
+    fi
+
+    action_failed=false
+    if [[ $active == true ]]; then
+      systemctl --user start "$unit" || action_failed=true
+    else
+      systemctl --user stop "$unit" || action_failed=true
+    fi
+    if $action_failed; then
+      echo "Recovery note: systemctl returned nonzero while restoring the active state of $unit; verifying it explicitly." >&2
+    fi
+    if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
+      [[ $active == true ]] || {
+        echo "Recovery could not stop $unit." >&2
+        recovery_failed=1
+      }
+    else
+      [[ $active == false ]] || {
+        echo "Recovery could not start $unit." >&2
+        recovery_failed=1
+      }
+    fi
+  done < <(jq -r '.units[] | [.name, (.enabled | tostring), (.active | tostring)] | @tsv' \
+    <<<"$metadata")
+  (( recovery_failed == 0 ))
+}
+
+omaw_stop_shell() {
+  local shell_source=$1 status attempt listing shell_path instance matching=0
+  for ((attempt=0; attempt<32; attempt++)); do
+    if timeout 10 quickshell kill -p "$shell_source" --any-display \
+        >/dev/null 2>&1; then
+      continue
+    else
+      status=$?
+    fi
+    if (( status == 124 || status == 137 )); then
+      echo "Timed out while stopping the Omarchy shell." >&2
+      return 1
+    fi
+    break
+  done
+  if (( attempt == 32 )); then
+    echo "Refusing to continue after stopping 32 Omarchy shell instances." >&2
+    return 1
+  fi
+
+  if listing=$(timeout 10 quickshell list -j --all 2>&1); then
+    :
+  else
+    status=$?
+    if (( status == 124 || status == 137 )); then
+      echo "Timed out while verifying that the Omarchy shell stopped." >&2
+      return 1
+    fi
+    [[ ${listing//$'\n'/} == "No running instances." ]] || {
+      echo "Could not verify that the Omarchy shell stopped: ${listing:-no output}" >&2
+      return 1
+    }
+    return 0
+  fi
+  [[ ${listing//$'\n'/} == "No running instances." ]] && return 0
+  jq -e 'type == "array"' <<<"$listing" >/dev/null 2>&1 || {
+    echo "Quickshell returned an invalid instance list; refusing live mutation." >&2
+    return 1
+  }
+  shell_path=$(realpath -m -- "$shell_source/shell.qml")
+  while IFS= read -r instance; do
+    [[ -n $instance ]] || continue
+    if [[ $(realpath -m -- "$instance") == "$shell_path" ]]; then
+      matching=$((matching + 1))
+    fi
+  done < <(jq -r '.[] | .config_path // empty' <<<"$listing")
+  (( matching == 0 )) || {
+    echo "The Omarchy shell is still running after the stop request." >&2
+    return 1
+  }
+}
+
+omaw_recover_pending_transaction() {
+  [[ -e $transaction_journal || -L $transaction_journal ]] || return 0
+  local metadata phase
+  if ! metadata=$(python3 "$transaction_helper" metadata --journal "$transaction_journal"); then
+    echo "OmaWhatsApp found an unreadable transaction journal and stopped before changing live files." >&2
+    return 1
+  fi
+  phase=$(jq -r '.phase' <<<"$metadata")
+  if [[ $phase == committed ]]; then
+    if ! python3 "$transaction_helper" commit --journal "$transaction_journal"; then
+      echo "OmaWhatsApp could not finish cleaning a committed transaction." >&2
+      return 1
+    fi
+    echo "Finalized the previous committed OmaWhatsApp transaction." >&2
+    return 0
+  fi
+  if [[ $(jq -r '.shell_restart_required' <<<"$metadata") == true ]] \
+      && ! command -v omarchy-restart-shell >/dev/null; then
+    echo "OmaWhatsApp cannot recover while omarchy-restart-shell is unavailable; the journal was preserved." >&2
+    return 1
+  fi
+  if ! python3 "$transaction_helper" rollback-files --journal "$transaction_journal"; then
+    echo "OmaWhatsApp could not restore the previous filesystem state; the durable journal was preserved at $transaction_journal." >&2
+    return 1
+  fi
+  if [[ $(jq -r '.units_started' <<<"$metadata") == true ]] \
+      && ! omaw_restore_unit_snapshot "$metadata"; then
+    echo "OmaWhatsApp restored files but could not restore every service state; the journal was preserved for the next recovery." >&2
+    return 1
+  fi
+  if [[ $(jq -r '.shell_restart_required' <<<"$metadata") == true ]] \
+      && ! omarchy-restart-shell 9>&-; then
+    echo "OmaWhatsApp restored files but could not restart the shell; the journal was preserved for the next recovery." >&2
+    return 1
+  fi
+  if ! python3 "$transaction_helper" finish-rollback --journal "$transaction_journal"; then
+    echo "OmaWhatsApp recovered the live state but could not finish transaction cleanup." >&2
+    return 1
+  fi
+  echo "Recovered and rolled back an interrupted OmaWhatsApp transaction." >&2
+}
+
+omaw_lock_and_recover() {
+  [[ ! -L $transaction_parent ]] || {
+    echo "Refusing a symlinked OmaWhatsApp transaction directory: $transaction_parent" >&2
+    return 1
+  }
+  install -dm700 "$transaction_parent"
+  if [[ ! -d $transaction_parent \
+      || $(stat -c %u "$transaction_parent") != "$(id -u)" \
+      || $(stat -c %a "$transaction_parent") != 700 ]]; then
+    echo "OmaWhatsApp transaction directory ownership or permissions are unsafe: $transaction_parent" >&2
+    return 1
+  fi
+  # Lock the state directory itself so no attacker-controlled lock-file path is
+  # followed and install/uninstall share one lifetime-bound lock.
+  exec 9<"$transaction_parent"
+  flock -n 9 || {
+    echo "Another OmaWhatsApp install or uninstall is already running." >&2
+    return 1
+  }
+  omaw_recover_pending_transaction
+}

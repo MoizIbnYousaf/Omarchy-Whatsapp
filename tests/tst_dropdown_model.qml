@@ -25,8 +25,10 @@ TestCase {
 
   function test_expand_payload_is_exact() {
     compare(DropdownModel.fullAppPayload(null), {})
-    compare(DropdownModel.fullAppPayload({ jid: "demo@example" }), {
-      jid: "demo@example", conversation: true
+    compare(DropdownModel.fullAppPayload({
+      account: "work", jid: "demo@example"
+    }), {
+      account: "work", jid: "demo@example", conversation: true
     })
   }
 

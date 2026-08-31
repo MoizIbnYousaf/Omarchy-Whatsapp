@@ -14,6 +14,7 @@ Item {
   property var shell: null
   property var manifest: null
   property bool ready: false
+  property bool railReady: false
   property bool authenticated: false
   property bool syncActive: false
   property bool offlineMode: false
@@ -32,14 +33,21 @@ Item {
   property bool appOpen: false
   property bool dropdownOpen: false
   property bool messagesPending: false
+  property bool membersPending: false
+  property bool statusPending: false
+  property bool statusReady: false
   property bool storeRefreshPending: false
   property string activeWriteKind: ""
   property string activeWriteChatJid: ""
   property string activeWriteAccount: ""
+  property string activeWriteOwner: ""
+  property string voiceOwner: "service"
   property string selectedChatJid: ""
   property string selectedChatAccount: ""
   property string selectedChatName: ""
   property string selectedChatKind: "unknown"
+  property string statusAccount: ""
+  property var pendingReceiptRef: ({ account: "", jid: "", key: "" })
   property string query: ""
   property string selectedId: ""
   property string mediaDownloadId: ""
@@ -48,6 +56,7 @@ Item {
   property var accounts: []
   property var messages: []
   property var members: []
+  property var discardQueue: []
 
   readonly property string voiceState: voiceRecorder.state
   readonly property string voiceDraftAccount: voiceRecorder.chatAccount
@@ -59,6 +68,7 @@ Item {
   readonly property int voicePlaybackPosition: voiceRecorder.playbackPosition
   readonly property bool voicePlaying: voiceRecorder.playing
   readonly property bool voiceCapturing: voiceRecorder.capturing
+  readonly property alias playback: playbackCoordinator
 
   readonly property bool windowOpen: appOpen || dropdownOpen
   readonly property bool multiAccount: AccountModel.isMultiAccount(accounts)
@@ -67,33 +77,34 @@ Item {
   function sameChat(chat, account, jid) {
     return AccountModel.sameChat(chat, account, jid)
   }
+  function selectedChatRef() {
+    return AccountModel.chatRef(selectedChatAccount, selectedChatJid)
+  }
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
   property string pendingAppPayload: ""
 
+  PlaybackCoordinator { id: playbackCoordinator }
+
   readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
-  readonly property string storeDirectory: {
-    var configured = String(Quickshell.env("WACLI_STORE_DIR") || "").trim()
-    if (configured !== "") return configured
-    var stateHome = String(Quickshell.env("XDG_STATE_HOME") || "").trim()
-    if (stateHome === "") stateHome = Quickshell.env("HOME") + "/.local/state"
-    return stateHome + "/wacli"
-  }
+  readonly property string storeDirectory: AccountModel.defaultStoreDirectory(
+    Quickshell.env("WACLI_STORE_DIR"), Quickshell.env("XDG_STATE_HOME"),
+    Quickshell.env("HOME"))
   readonly property int unreadCount: chats.reduce(function(total, chat) {
     return total + Number(chat.unread || 0)
   }, 0)
   readonly property int notificationUnreadCount: chats.reduce(function(total, chat) {
     return total + Number(chat.notification_unread || 0)
   }, 0)
-  readonly property string barTooltip: ready
+  readonly property string barTooltip: railReady
     ? (offlineMode ? "OmaWhatsApp · offline archive"
       : "OmaWhatsApp · " + notificationUnreadCount + " new · middle-click to dismiss")
     : "OmaWhatsApp · reconnecting"
 
-  signal textPasted(string text, string jid)
-  signal attachmentPasted(string path, string jid)
-  signal writeCompleted(string kind, string jid)
-  signal writeFailed(string message, string jid)
+  signal textPasted(string text, var chatRef, string owner)
+  signal attachmentPasted(string path, var chatRef, string owner)
+  signal writeCompleted(string kind, var chatRef, var request, string owner)
+  signal writeFailed(string message, var chatRef, var details, string owner)
   signal controlCompleted(string kind)
   signal controlFailed(string message)
   signal settingsCompleted()
@@ -144,7 +155,7 @@ Item {
     refreshMembers()
   }
   function runNotify() {
-    if (!ready || !notificationsEnabled || notifyProcess.running) return
+    if (!railReady || !notificationsEnabled || notifyProcess.running) return
     notifyProcess.payload = JSON.stringify({
       account: selectedChatAccount,
       skip_jid: windowOpen ? selectedChatJid : ""
@@ -152,17 +163,17 @@ Item {
     notifyProcess.stdinEnabled = true
     notifyProcess.running = true
   }
-  function knownAccount(name) {
-    var target = String(name || "")
-    if (target === "") return ""
-    for (var i = 0; i < accounts.length; i++)
-      if (String(accounts[i].account || "") === target) return target
-    return ""
-  }
   function refreshStatus() {
-    if (statusProcess.running) return
-    statusProcess.command = [helper, "status", "--account",
-                             knownAccount(selectedChatAccount)]
+    // The selected account comes from the helper's merged rail. Passing it
+    // directly also lets startup load a non-default first chat before the
+    // initial status response has populated the account list.
+    var account = String(selectedChatAccount || "")
+    if (statusProcess.running) {
+      statusPending = true
+      return
+    }
+    statusProcess.requestedAccount = account
+    statusProcess.command = [helper, "status", "--account", account]
     statusProcess.running = true
   }
   function refreshFromStore() {
@@ -180,20 +191,26 @@ Item {
     if (selectedChatJid === "") return
     if (messagesProcess.running) { messagesPending = true; return }
     loadingMessages = true
+    messagesProcess.chatRef = selectedChatRef()
+    messagesProcess.requestedQuery = query
     messagesProcess.payload = JSON.stringify({
-      account: selectedChatAccount, jid: selectedChatJid, query: query
+      account: messagesProcess.chatRef.account,
+      jid: messagesProcess.chatRef.jid,
+      query: messagesProcess.requestedQuery
     })
     messagesProcess.stdinEnabled = true
     messagesProcess.running = true
   }
   function refreshMembers() {
-    if (selectedChatJid === "" || selectedChatKind !== "group" || membersProcess.running) {
+    if (selectedChatJid === "" || selectedChatKind !== "group") {
       if (selectedChatKind !== "group") members = []
       return
     }
+    if (membersProcess.running) { membersPending = true; return }
     loadingMembers = true
+    membersProcess.chatRef = selectedChatRef()
     membersProcess.payload = JSON.stringify({
-      account: selectedChatAccount, jid: selectedChatJid
+      account: membersProcess.chatRef.account, jid: membersProcess.chatRef.jid
     })
     membersProcess.stdinEnabled = true
     membersProcess.running = true
@@ -217,10 +234,56 @@ Item {
       refreshMessages()
       refreshMembers()
     }
-    // Reading stays private unless the user explicitly opts in. Local badge
-    // acknowledgement above never talks to WhatsApp; this action does.
-    if (SettingsPolicy.shouldSendAutomaticReceipt(sendReadReceipts, offlineMode, writing))
-      Qt.callLater(function() { root.chatAction("read") })
+    // Local badge acknowledgement above never talks to WhatsApp. The receipt
+    // decision waits for this exact account's status, then retains this exact
+    // target across the deferred callback.
+    pendingReceiptRef = AccountModel.chatRef(nextAccount, next)
+    maybeSendAutomaticReceipt()
+  }
+
+  function maybeSendAutomaticReceipt() {
+    var target = pendingReceiptRef
+    if (!AccountModel.sameRef(target, selectedChatRef())) {
+      pendingReceiptRef = AccountModel.chatRef("", "")
+      return
+    }
+    if (!statusReady || statusAccount !== String(target.account || "")) {
+      refreshStatus()
+      return
+    }
+    if (!ready) {
+      pendingReceiptRef = AccountModel.chatRef("", "")
+      return
+    }
+    // A concurrent write is temporary; retain this exact target and retry
+    // after the process settles. A disabled receipt policy or offline mode is
+    // an intentional boundary, so those clear the pending request.
+    if (writing) return
+    if (!SettingsPolicy.shouldSendAutomaticReceipt(
+          sendReadReceipts, offlineMode, false)) {
+      pendingReceiptRef = AccountModel.chatRef("", "")
+      return
+    }
+    Qt.callLater(function() {
+      if (!AccountModel.sameRef(target, root.selectedChatRef())) return
+      if (!root.statusReady || root.statusAccount !== String(target.account || "")) return
+      if (!root.ready) return
+      if (root.writing) return
+      if (!SettingsPolicy.shouldSendAutomaticReceipt(
+            root.sendReadReceipts, root.offlineMode, false)) {
+        root.pendingReceiptRef = AccountModel.chatRef("", "")
+        return
+      }
+      if (root.chatAction(target, "read"))
+        root.pendingReceiptRef = AccountModel.chatRef("", "")
+    })
+  }
+
+  onWritingChanged: {
+    if (!writing) {
+      if (String(pendingReceiptRef.jid || "") !== "") receiptRetry.restart()
+      runNextDiscard()
+    }
   }
   function search(value) {
     var next = String(value || "").trim()
@@ -229,25 +292,45 @@ Item {
     refreshMessages()
   }
   function selectItem(id) { selectedId = String(id || "") }
-  function runWriteForChat(kind, payload, jid, account) {
-    var target = String(jid || "")
-    var scope = account === undefined
-      ? String(selectedChatAccount || "") : String(account || "")
+  function runWriteForChat(kind, payload, chatRef, owner) {
+    var targetRef = AccountModel.chatRef(
+      chatRef ? chatRef.account : "", chatRef ? chatRef.jid : "")
+    var target = targetRef.jid
+    var scope = targetRef.account
+    var origin = ["app", "dropdown", "service"].indexOf(String(owner || "")) >= 0
+      ? String(owner) : "service"
     if (writing || writeProcess.running || target === "") return false
+    if (!statusReady || statusAccount !== scope) {
+      var waiting = "That account is still loading. Try again in a moment."
+      errorText = waiting
+      writeFailed(waiting, targetRef, ({}), origin)
+      refreshStatus()
+      return false
+    }
+    if (!ready) {
+      var unavailable = "That account is not linked or its local archive is not ready."
+      errorText = unavailable
+      writeFailed(unavailable, targetRef, ({}), origin)
+      return false
+    }
     if (offlineMode && kind !== "paste") {
       var message = "Offline mode is on. Go online before sending or changing WhatsApp state."
       errorText = message
-      writeFailed(message, target)
+      writeFailed(message, targetRef, ({}), origin)
       return false
     }
     writing = true
     activeWriteKind = kind
     activeWriteChatJid = target
     activeWriteAccount = scope
+    activeWriteOwner = origin
     errorText = ""
     var request = Object.assign({}, payload || ({}))
     request.jid = target
     writeProcess.kind = kind
+    writeProcess.chatRef = targetRef
+    writeProcess.request = request
+    writeProcess.owner = origin
     request.account = scope
     writeProcess.payload = JSON.stringify(request)
     writeProcess.command = [helper, kind]
@@ -255,101 +338,128 @@ Item {
     writeProcess.running = true
     return true
   }
-  function runWrite(kind, payload) {
-    return runWriteForChat(kind, payload, selectedChatJid, selectedChatAccount)
-  }
-  function sendText(text, replyId, mentions) {
+  function sendText(chatRef, text, replyId, mentions, owner) {
     var value = String(text || "").trim()
-    return value !== "" && runWrite("send", {
-      jid: selectedChatJid,
+    return value !== "" && runWriteForChat("send", {
       text: value,
       reply_id: String(replyId || ""),
       mentions: Array.isArray(mentions) ? mentions : []
-    })
+    }, chatRef, owner)
   }
-  function pasteClipboard() {
-    return runWrite("paste", { jid: selectedChatJid })
+  function pasteClipboard(chatRef, owner) {
+    return runWriteForChat("paste", {}, chatRef, owner)
   }
-  function sendFiles(paths, caption) {
-    return runWrite("files", {
-      jid: selectedChatJid,
+  function discardStages(paths) {
+    var values = Array.isArray(paths) ? paths : []
+    var next = discardQueue.slice()
+    for (var i = 0; i < values.length; i++) {
+      var value = String(values[i] || "")
+      if (value !== "" && next.indexOf(value) < 0) next.push(value)
+    }
+    discardQueue = next
+    runNextDiscard()
+  }
+  function discardStage(path) { discardStages([path]) }
+  function runNextDiscard() {
+    if (discardProcess.running || discardQueue.length === 0) return
+    // A file send prevalidates its paths before wacli opens them. Never race
+    // that process by unlinking a staged attachment from another surface.
+    if (writing && activeWriteKind === "files") return
+    var next = discardQueue.slice()
+    var path = next.shift()
+    discardQueue = next
+    discardProcess.payload = JSON.stringify({ path: path })
+    discardProcess.stdinEnabled = true
+    discardProcess.running = true
+  }
+  function sendFiles(chatRef, paths, caption, owner) {
+    return runWriteForChat("files", {
       paths: Array.isArray(paths) ? paths : [],
       caption: String(caption || "").trim()
-    })
+    }, chatRef, owner)
   }
-  function sendFilesReply(paths, caption, replyId) {
-    return runWrite("files", {
-      jid: selectedChatJid,
+  function sendFilesReply(chatRef, paths, caption, replyId, owner) {
+    return runWriteForChat("files", {
       paths: Array.isArray(paths) ? paths : [],
       caption: String(caption || "").trim(),
       reply_id: String(replyId || "")
-    })
+    }, chatRef, owner)
   }
-  function toggleVoice(account, jid, chatName, replyId) {
-    return voiceRecorder.toggle(String(account || ""), String(jid || ""), String(chatName || ""),
+  function toggleVoice(account, jid, chatName, replyId, owner) {
+    var origin = ["app", "dropdown"].indexOf(String(owner || "")) >= 0
+      ? String(owner) : "service"
+    var changed = voiceRecorder.toggle(
+      String(account || ""), String(jid || ""), String(chatName || ""),
       String(replyId || ""))
+    if (changed) voiceOwner = origin
+    return changed
   }
   function stopVoiceRecording() { return voiceRecorder.stopToReview() }
   function stopVoiceForSurfaceClose() { voiceRecorder.stopForSurfaceClose() }
   function discardVoice() { return voiceRecorder.discard() }
-  function sendVoiceDraft() { return voiceRecorder.requestSend() }
+  function sendVoiceDraft(owner) {
+    var previous = voiceOwner
+    voiceOwner = ["app", "dropdown"].indexOf(String(owner || "")) >= 0
+      ? String(owner) : "service"
+    var requested = voiceRecorder.requestSend()
+    if (!requested) voiceOwner = previous
+    return requested
+  }
   function toggleVoicePlayback() { return voiceRecorder.playPause() }
-  function sendSticker(path, replyId) {
-    return runWrite("sticker", {
-      jid: selectedChatJid,
+  function sendSticker(chatRef, path, replyId, owner) {
+    return runWriteForChat("sticker", {
       path: String(path || ""),
       reply_id: String(replyId || "")
-    })
+    }, chatRef, owner)
   }
-  function sendPoll(question, options, multi) {
-    return runWrite("poll", {
-      jid: selectedChatJid,
+  function sendPoll(chatRef, question, options, multi, owner) {
+    return runWriteForChat("poll", {
       question: String(question || ""),
       options: Array.isArray(options) ? options : [],
       multi: Number(multi || 1)
-    })
+    }, chatRef, owner)
   }
-  function downloadMedia(item) {
+  function downloadMedia(chatRef, item, owner) {
     if (!item || !item.id) return false
     var id = String(item.id)
-    var started = runWrite("media", { jid: selectedChatJid, id: id })
+    var started = runWriteForChat("media", { id: id }, chatRef, owner)
     if (started) mediaDownloadId = id
     return started
   }
-  function reactTo(item, emoji) {
+  function reactTo(chatRef, item, emoji, owner) {
     if (!item || !item.id) return false
-    return runWrite("react", {
-      jid: selectedChatJid, id: String(item.id), emoji: String(emoji || "")
-    })
+    return runWriteForChat("react", {
+      id: String(item.id), emoji: String(emoji || "")
+    }, chatRef, owner)
   }
-  function editMessage(item, text) {
+  function editMessage(chatRef, item, text, owner) {
     if (!item || !item.id) return false
-    return runWrite("edit", {
-      jid: selectedChatJid, id: String(item.id), text: String(text || "")
-    })
+    return runWriteForChat("edit", {
+      id: String(item.id), text: String(text || "")
+    }, chatRef, owner)
   }
-  function deleteMessage(item, forMe) {
+  function deleteMessage(chatRef, item, forMe, owner) {
     if (!item || !item.id) return false
-    return runWrite("delete", {
-      jid: selectedChatJid, id: String(item.id), for_me: forMe === true
-    })
+    return runWriteForChat("delete", {
+      id: String(item.id), for_me: forMe === true
+    }, chatRef, owner)
   }
-  function forwardMessage(item, targetJid) {
+  function forwardMessage(chatRef, item, targetJid, owner) {
     if (!item || !item.id || String(targetJid || "") === "") return false
-    return runWrite("forward", {
-      jid: selectedChatJid, id: String(item.id), to_jid: String(targetJid)
-    })
+    return runWriteForChat("forward", {
+      id: String(item.id), to_jid: String(targetJid)
+    }, chatRef, owner)
   }
-  function selectOption(item, index) {
+  function selectOption(chatRef, item, index, owner) {
     if (!item || !item.id) return false
-    return runWrite("select", {
-      jid: selectedChatJid, id: String(item.id), index: Number(index)
-    })
+    return runWriteForChat("select", {
+      id: String(item.id), index: Number(index)
+    }, chatRef, owner)
   }
-  function chatAction(action) {
-    return runWrite("chat-action", {
-      jid: selectedChatJid, action: String(action || "")
-    })
+  function chatAction(chatRef, action, owner) {
+    return runWriteForChat("chat-action", {
+      action: String(action || "")
+    }, chatRef, owner)
   }
   function clearNotificationCount(jid, account) {
     var target = String(jid || "")
@@ -361,18 +471,11 @@ Item {
     })
   }
   function dismissNotifications(jid, account) {
-    if (controlProcess.running) return false
     var target = String(jid || "")
     // An empty JID clears the aggregated badge across every account.
     var scope = target === "" ? "" : String(account || "")
     clearNotificationCount(target, scope)
-    controlWriting = true
-    controlProcess.kind = "acknowledge"
-    controlProcess.payload = JSON.stringify({ account: scope, jid: target })
-    controlProcess.command = [helper, "acknowledge"]
-    controlProcess.stdinEnabled = true
-    controlProcess.running = true
-    return true
+    return acknowledgementQueue.enqueue(scope, target)
   }
   function setNotifications(enabled, preview) {
     if (controlProcess.running || writing) return false
@@ -381,6 +484,7 @@ Item {
     if (preview !== undefined && preview !== null) request.preview = preview === true
     controlWriting = true
     controlProcess.kind = "notify-mode"
+    controlProcess.account = ""
     controlProcess.payload = JSON.stringify(request)
     controlProcess.command = [helper, "notify-mode"]
     controlProcess.stdinEnabled = true
@@ -391,8 +495,9 @@ Item {
     if (controlProcess.running || writing) return false
     controlWriting = true
     controlProcess.kind = "sync-mode"
+    controlProcess.account = root.selectedChatAccount
     controlProcess.payload = JSON.stringify({
-      account: root.selectedChatAccount, online: online === true
+      account: controlProcess.account, online: online === true
     })
     controlProcess.command = [helper, "sync-mode"]
     controlProcess.stdinEnabled = true
@@ -404,24 +509,37 @@ Item {
     var settings = ({})
     settings[String(key || "")] = value
     settingsWriting = true
+    settingsProcess.account = root.selectedChatAccount
     settingsProcess.payload = JSON.stringify({
-      account: root.selectedChatAccount, settings: settings
+      account: settingsProcess.account, settings: settings
     })
     settingsProcess.stdinEnabled = true
     settingsProcess.running = true
     return true
   }
 
+  AcknowledgementQueue {
+    id: acknowledgementQueue
+    helper: root.helper
+    onCompleted: function(chatRef) {
+      root.refreshChats()
+    }
+    onFailed: function(message, chatRef) {
+      root.errorText = String(message || "Notification acknowledgement failed.")
+      root.refreshChats()
+    }
+  }
+
   VoiceRecorder {
     id: voiceRecorder
     helper: root.helper
+    playback: playbackCoordinator
     onNotice: function(message) { root.errorText = String(message || "") }
     onSendRequested: function(account, jid, path, replyId) {
       var started = root.runWriteForChat("voice", {
-        jid: String(jid || ""),
         path: String(path || ""),
         reply_id: String(replyId || "")
-      }, jid, account)
+      }, AccountModel.chatRef(account, jid), root.voiceOwner)
       if (started) voiceRecorder.markSending(account, jid)
       else voiceRecorder.markSendFailed(root.errorText, account, jid)
     }
@@ -449,7 +567,7 @@ Item {
       return JSON.stringify({
         appOpen: root.appOpen,
         dropdownOpen: root.dropdownOpen,
-        ready: root.ready,
+        ready: root.railReady,
         privateReading: !root.sendReadReceipts
       })
     }
@@ -542,35 +660,73 @@ Item {
 
   // Switching to a chat in another account changes which account the header
   // pills and the receipt preference describe.
-  onSelectedChatAccountChanged: refreshStatus()
+  onSelectedChatAccountChanged: {
+    if (statusAccount !== String(selectedChatAccount || "")) statusReady = false
+    refreshStatus()
+  }
 
   Process {
     id: statusProcess
+    property string requestedAccount: ""
     command: [root.helper, "status", "--account", ""]
     stdout: StdioCollector { id: statusOutput }
     stderr: StdioCollector { id: statusError }
     onExited: function(exitCode) {
       var payload = root.parseJson(statusOutput.text)
+      var responseAccount = payload && payload.ok === true
+        ? String(payload.account || "") : requestedAccount
+      var selectedAccount = String(root.selectedChatAccount || "")
+      var applies = selectedAccount === "" || responseAccount === selectedAccount
       if (!payload || payload.ok !== true) {
-        root.ready = false
-        root.errorText = (payload && payload.error) || String(statusError.text || "OmaWhatsApp could not connect.").trim()
-        return
+        if (applies) {
+          root.statusReady = false
+          root.ready = false
+          root.railReady = false
+          root.errorText = (payload && payload.error)
+            || String(statusError.text || "OmaWhatsApp could not connect.").trim()
+        }
+      } else if (applies) {
+        var readiness = AccountModel.statusReadiness(payload)
+        root.statusAccount = responseAccount
+        root.statusReady = true
+        root.authenticated = readiness.authenticated
+        root.railReady = readiness.railReady
+        root.syncActive = payload.sync_active === true
+        root.offlineMode = payload.offline_mode === true
+        var notifications = payload.notifications
+        root.notificationsEnabled = !!notifications && notifications.enabled === true
+        root.notificationsPreview = !notifications || notifications.preview !== false
+        root.notifyAvailable = payload.notify_available !== false
+        root.accounts = Array.isArray(payload.accounts) ? payload.accounts : []
+        root.sendReadReceipts = payload.send_read_receipts === true
+        root.showUnreadCount = payload.show_unread_count !== false
+        root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
+          ? Number(payload.dropdown_rows) : 7
+        root.ready = readiness.accountReady
+        if (root.ready) root.errorText = ""
+        root.maybeSendAutomaticReceipt()
       }
-      root.authenticated = payload.authenticated === true
-      root.syncActive = payload.sync_active === true
-      root.offlineMode = payload.offline_mode === true
-      var notifications = payload.notifications
-      root.notificationsEnabled = !!notifications && notifications.enabled === true
-      root.notificationsPreview = !notifications || notifications.preview !== false
-      root.notifyAvailable = payload.notify_available !== false
-      root.accounts = Array.isArray(payload.accounts) ? payload.accounts : []
-      root.sendReadReceipts = payload.send_read_receipts === true
-      root.showUnreadCount = payload.show_unread_count !== false
-      root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
-        ? Number(payload.dropdown_rows) : 7
-      root.ready = root.authenticated && payload.database_ready === true
-      if (root.ready) root.errorText = ""
+      // Only an event that arrived while this request was running earns one
+      // follow-up. A failed response must never self-schedule forever merely
+      // because statusAccount has not been populated yet.
+      var shouldRefresh = root.statusPending
+      root.statusPending = false
+      if (shouldRefresh) statusRefreshDelay.restart()
     }
+  }
+
+  Timer {
+    id: statusRefreshDelay
+    interval: 250
+    repeat: false
+    onTriggered: root.refreshStatus()
+  }
+
+  Timer {
+    id: receiptRetry
+    interval: 100
+    repeat: false
+    onTriggered: root.maybeSendAutomaticReceipt()
   }
 
   Process {
@@ -615,6 +771,7 @@ Item {
   Process {
     id: controlProcess
     property string kind: ""
+    property string account: ""
     property string payload: ""
     command: []
     stdinEnabled: true
@@ -635,7 +792,8 @@ Item {
         return
       }
       root.errorText = ""
-      if (finishedKind === "sync-mode") {
+      var accountIsCurrent = account === String(root.selectedChatAccount || "")
+      if (finishedKind === "sync-mode" && accountIsCurrent) {
         root.offlineMode = payload.online !== true
         root.syncActive = payload.online === true
       }
@@ -643,7 +801,8 @@ Item {
         root.notificationsEnabled = payload.notifications.enabled === true
         root.notificationsPreview = payload.notifications.preview !== false
       }
-      root.controlCompleted(finishedKind)
+      if (finishedKind !== "sync-mode" || accountIsCurrent)
+        root.controlCompleted(finishedKind)
       root.refreshStatus()
       root.refreshChats()
     }
@@ -651,6 +810,7 @@ Item {
 
   Process {
     id: settingsProcess
+    property string account: ""
     property string payload: ""
     command: [root.helper, "settings"]
     stdinEnabled: true
@@ -668,12 +828,16 @@ Item {
         root.refreshStatus()
         return
       }
-      root.sendReadReceipts = payload.send_read_receipts === true
+      // Receipt preference is account-scoped; badge visibility and dropdown
+      // density are one global UI preference shared by every account.
+      if (account === String(root.selectedChatAccount || ""))
+        root.sendReadReceipts = payload.send_read_receipts === true
       root.showUnreadCount = payload.show_unread_count !== false
       root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
         ? Number(payload.dropdown_rows) : 7
       root.errorText = ""
       root.settingsCompleted()
+      root.refreshStatus()
     }
   }
 
@@ -693,8 +857,19 @@ Item {
   }
 
   Process {
+    id: discardProcess
+    property string payload: ""
+    command: [root.helper, "discard-stage"]
+    stdinEnabled: true
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) { Qt.callLater(root.runNextDiscard) }
+  }
+
+  Process {
     id: messagesProcess
     property string payload: ""
+    property var chatRef: ({ account: "", jid: "", key: "" })
+    property string requestedQuery: ""
     command: [root.helper, "messages", "--limit", "240"]
     stdinEnabled: true
     stdout: StdioCollector { id: messagesOutput }
@@ -703,9 +878,13 @@ Item {
     onExited: function(exitCode) {
       root.loadingMessages = false
       var payload = root.parseJson(messagesOutput.text)
-      if (!payload || payload.ok !== true) {
+      var requestIsCurrent = AccountModel.sameRef(chatRef, root.selectedChatRef())
+        && requestedQuery === root.query
+      var responseIsCurrent = requestIsCurrent && AccountModel.responseMatches(
+        payload ? payload.chat : null, chatRef, root.selectedChatRef())
+      if ((!payload || payload.ok !== true) && requestIsCurrent) {
         root.errorText = (payload && payload.error) || String(messagesError.text || "Messages could not be read.").trim()
-      } else if (payload.chat && String(payload.chat.jid || "") === root.selectedChatJid) {
+      } else if (payload && payload.ok === true && responseIsCurrent) {
         root.messages = Array.isArray(payload.messages) ? payload.messages : []
         root.selectedChatName = String(payload.chat.name || root.selectedChatName)
         root.selectedChatKind = String(payload.chat.kind || root.selectedChatKind)
@@ -717,6 +896,7 @@ Item {
   Process {
     id: membersProcess
     property string payload: ""
+    property var chatRef: ({ account: "", jid: "", key: "" })
     command: [root.helper, "members"]
     stdinEnabled: true
     stdout: StdioCollector { id: membersOutput }
@@ -725,11 +905,18 @@ Item {
     onExited: function(exitCode) {
       root.loadingMembers = false
       var payload = root.parseJson(membersOutput.text)
-      if (!payload || payload.ok !== true) {
+      var requestIsCurrent = AccountModel.sameRef(chatRef, root.selectedChatRef())
+      var responseIsCurrent = requestIsCurrent && AccountModel.responseMatches(
+        payload ? payload.chat : null, chatRef, root.selectedChatRef())
+      if ((!payload || payload.ok !== true) && requestIsCurrent) {
         root.errorText = (payload && payload.error)
           || String(membersError.text || "Group members could not be read.").trim()
-      } else if (payload.chat && String(payload.chat.jid || "") === root.selectedChatJid) {
+      } else if (payload && payload.ok === true && responseIsCurrent) {
         root.members = Array.isArray(payload.members) ? payload.members : []
+      }
+      if (root.membersPending) {
+        root.membersPending = false
+        Qt.callLater(root.refreshMembers)
       }
     }
   }
@@ -738,6 +925,9 @@ Item {
     id: writeProcess
     property string kind: ""
     property string payload: ""
+    property var chatRef: ({ account: "", jid: "", key: "" })
+    property var request: ({})
+    property string owner: "service"
     command: []
     stdinEnabled: true
     stdout: StdioCollector { id: writeOutput }
@@ -746,34 +936,53 @@ Item {
     onExited: function(exitCode) {
       root.writing = false
       var finishedKind = kind
-      var finishedJid = root.activeWriteChatJid
-      var finishedAccount = root.activeWriteAccount
+      var finishedChat = chatRef
+      var finishedRequest = request
+      var finishedOwner = owner
+      request = ({})
+      owner = "service"
+      var finishedJid = String(finishedChat.jid || "")
+      var finishedAccount = String(finishedChat.account || "")
       root.activeWriteKind = ""
       root.activeWriteChatJid = ""
       root.activeWriteAccount = ""
+      root.activeWriteOwner = ""
       var payload = root.parseJson(writeOutput.text)
       if (exitCode !== 0 || !payload || payload.ok !== true) {
         var message = (payload && payload.error) || String(writeError.text || "WhatsApp could not complete that request.").trim()
-        root.errorText = message
+        if (AccountModel.sameRef(finishedChat, root.selectedChatRef()))
+          root.errorText = message
         if (finishedKind === "media") root.mediaDownloadId = ""
         if (finishedKind === "voice")
           voiceRecorder.markSendFailed(message, finishedAccount, finishedJid)
-        root.writeFailed(message, finishedJid)
+        if (finishedKind === "voice") root.voiceOwner = "service"
+        var details = Object.assign({},
+          payload && payload.partial ? payload.partial : ({}))
+        details.kind = finishedKind
+        details.request = finishedRequest
+        root.writeFailed(message, finishedChat, details, finishedOwner)
         return
       }
       if (kind === "paste" && payload.kind === "text") {
-        root.textPasted(String(payload.text || ""), finishedJid)
+        if (AccountModel.sameRef(finishedChat, root.selectedChatRef()))
+          root.errorText = ""
+        root.textPasted(String(payload.text || ""), finishedChat, finishedOwner)
         return
       }
       if (kind === "paste" && (payload.kind === "file" || payload.kind === "image")) {
-        root.errorText = ""
-        root.attachmentPasted(String(payload.path || ""), finishedJid)
+        if (AccountModel.sameRef(finishedChat, root.selectedChatRef()))
+          root.errorText = ""
+        root.attachmentPasted(String(payload.path || ""), finishedChat, finishedOwner)
         return
       }
-      root.errorText = ""
+      if (AccountModel.sameRef(finishedChat, root.selectedChatRef()))
+        root.errorText = ""
       if (finishedKind === "media") root.mediaDownloadId = ""
-      if (finishedKind === "voice") voiceRecorder.markSent(finishedAccount, finishedJid)
-      root.writeCompleted(finishedKind, finishedJid)
+      if (finishedKind === "voice") {
+        voiceRecorder.markSent(finishedAccount, finishedJid)
+        root.voiceOwner = "service"
+      }
+      root.writeCompleted(finishedKind, finishedChat, finishedRequest, finishedOwner)
       refreshDelay.restart()
     }
   }

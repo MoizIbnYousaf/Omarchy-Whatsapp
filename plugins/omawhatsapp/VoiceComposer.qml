@@ -7,6 +7,7 @@ Item {
   id: root
 
   property var service: null
+  property string owner: "service"
   property string account: ""
   property string jid: ""
   property bool offline: false
@@ -154,13 +155,14 @@ Item {
     }
 
     RoundAction {
+      objectName: "voiceSendAction"
       anchors.verticalCenter: parent.verticalCenter
       visible: root.state === "review"
       glyph: root.offline ? "⌁" : "➤"
       tooltip: root.offline ? "Go online to send" : "Send voice note"
       filled: !root.offline
       enabled: !root.offline
-      onActivated: if (root.service) root.service.sendVoiceDraft()
+      onActivated: if (root.service) root.service.sendVoiceDraft(root.owner)
     }
 
     Text {

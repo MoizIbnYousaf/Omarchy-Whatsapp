@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 from importlib.machinery import SourceFileLoader
+from functools import lru_cache
 import os
 from pathlib import Path
 import re
@@ -28,7 +29,8 @@ def load_helper():
     return module
 
 
-def children(path: tuple[str, ...]) -> list[str]:
+@lru_cache(maxsize=None)
+def help_text(path: tuple[str, ...]) -> str:
     result = subprocess.run(
         [str(WACLI), *path, "--help"],
         text=True,
@@ -38,9 +40,14 @@ def children(path: tuple[str, ...]) -> list[str]:
     )
     if result.returncode != 0:
         raise RuntimeError(f"wacli help failed for {' '.join(path) or '<root>'}")
+    return result.stdout
+
+
+def children(path: tuple[str, ...]) -> list[str]:
+    output = help_text(path)
     match = re.search(
         r"^Available Commands:\n(.*?)(?=^Flags:|^Global Flags:|^Use \"|\Z)",
-        result.stdout,
+        output,
         re.MULTILINE | re.DOTALL,
     )
     if match is None:
@@ -67,6 +74,23 @@ def main() -> int:
         print(f"parity: wacli is not executable: {WACLI}", file=sys.stderr)
         return 1
     helper = load_helper()
+    version = subprocess.run(
+        [str(WACLI), "--version"],
+        text=True,
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
+    match = re.fullmatch(
+        rf"wacli\s+v?{re.escape(helper.WACLI_PARITY_VERSION)}\s*",
+        version.stdout or version.stderr,
+    )
+    if version.returncode != 0 or match is None:
+        print(
+            f"parity: requires exactly wacli {helper.WACLI_PARITY_VERSION}",
+            file=sys.stderr,
+        )
+        return 1
     discovered = leaves()
     # `auth` is both an executable QR flow and a parent for status/logout.
     discovered.add(("auth",))
@@ -79,6 +103,38 @@ def main() -> int:
         for path in stale:
             print(f"parity: registered leaf missing from wacli: {' '.join(path)}", file=sys.stderr)
         return 1
+    optional_chat_contract = {
+        ("calls", "list"): "--chat",
+        ("history", "coverage"): "--chat",
+        ("polls", "list"): "--chat",
+    }
+    contact_contract = {
+        ("profile", "business"): "--jid",
+        ("profile", "get-about"): "--jid",
+        ("profile", "picture-info"): "--jid",
+    }
+    for path, flag in {**optional_chat_contract, **contact_contract}.items():
+        advertised = set(re.findall(r"(?<!\S)(--[a-z0-9-]+)(?:[ =]|$)", help_text(path)))
+        if flag not in advertised:
+            print(
+                f"parity: pinned target flag missing from wacli help: {' '.join(path)} {flag}",
+                file=sys.stderr,
+            )
+            return 1
+    for path, flag in optional_chat_contract.items():
+        if flag not in helper.WACLI_OPTIONAL_CHAT_FLAGS.get(path, ()):
+            print(
+                f"parity: optional chat flag is not locally validated: {' '.join(path)} {flag}",
+                file=sys.stderr,
+            )
+            return 1
+    for path in contact_contract:
+        if path not in helper.WACLI_CONTACT_JID_OPERATIONS:
+            print(
+                f"parity: contact target is not locally validated: {' '.join(path)}",
+                file=sys.stderr,
+            )
+            return 1
     print(
         f"OmaWhatsApp covers all {len(registered)} wacli "
         f"{helper.WACLI_PARITY_VERSION} command leaves."

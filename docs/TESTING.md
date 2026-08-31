@@ -18,11 +18,15 @@ demo isolation, explicit receipt commands, persistent
 offline write blocking, muted/archive badge suppression, mute-deadline
 normalization, the lock-free live-delegate path, exact coverage of all 103
 wacli 0.17.1 command leaves, authorization-class enforcement, global-flag
-isolation, dry-run downgrades, interactive restrictions, and a fake-wacli
-end-to-end JSON invocation. The release script
+isolation, false-valued Boolean authorization flags, dry-run downgrades,
+interactive restrictions, bounded parallel account probes, compensating
+service rollback, and a fake-wacli end-to-end JSON invocation. The release script
 also runs an isolated, read-only install preflight—including the bundled agent
 skill safety contract—and compares the shipped registry with the installed
-wacli help tree before the offscreen QML tests.
+wacli help tree. Offscreen QML coverage uses generated MP4, GIF, and WebP
+fixtures and exercises cross-window playback leasing, account-identical JIDs,
+and file-picker/action interleavings. Installer tests kill transactions at
+durable boundaries and prove the next run restores one coherent version.
 
 ## Live local verification
 

@@ -8,13 +8,48 @@ permissions:
   contents: read
 
 jobs:
-  backend:
+  release-gate:
     runs-on: ubuntu-latest
+    container: archlinux:base
     steps:
-      - uses: actions/checkout@v7
-      - name: Validate helper, safety model, and manifests
-        run: make test
-      - name: Check shell scripts
+      - name: Install pinned test prerequisites
+        run: >-
+          pacman -Syu --noconfirm
+          bash coreutils curl findutils git inotify-tools jq python
+          qt6-declarative qt6-imageformats qt6-multimedia ripgrep systemd tar
+          util-linux wl-clipboard xdg-utils zenity
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Check out the audited Omarchy shell API
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: basecamp/omarchy
+          ref: b686ed892d9c3020c3336203f6d34cc75b544e2b
+          path: .omarchy
+
+      - name: Install audited wacli 0.17.1
         run: |
-          bash -n scripts/install scripts/test scripts/uninstall
-          git diff --check
+          archive="$RUNNER_TEMP/wacli_0.17.1_linux_amd64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "$archive" \
+            https://github.com/openclaw/wacli/releases/download/v0.17.1/wacli_0.17.1_linux_amd64.tar.gz
+          printf '%s  %s\n' \
+            cbd5e74d5b805550cc36c7479aca552970cc1b314c5c08e02367e08b785714fd \
+            "$archive" | sha256sum --check --strict
+          install -d "$RUNNER_TEMP/omawhatsapp-home/.local/bin"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/omawhatsapp-home/.local/bin" ./wacli
+
+      - name: Run the complete release gate
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: |
+          export HOME="$RUNNER_TEMP/omawhatsapp-home"
+          export PATH="/usr/lib/qt6/bin:$GITHUB_WORKSPACE/.omarchy/bin:$PATH"
+          export OMARCHY_SHELL_DIR="$GITHUB_WORKSPACE/.omarchy/shell"
+          install -d "$HOME/.config/omarchy"
+          printf '%s\n' \
+            '{"plugins":[],"bar":{"layout":{"left":[],"center":[],"right":[]}}}' \
+            > "$HOME/.config/omarchy/shell.json"
+          ./scripts/test

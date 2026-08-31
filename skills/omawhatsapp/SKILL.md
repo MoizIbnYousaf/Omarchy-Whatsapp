@@ -21,10 +21,12 @@ invoking `wacli` directly.
   an ambiguous name/pick, or infer a recipient. Invite codes, new group names,
   phone numbers, locations, profile values, and status audiences must come
   from the current request or an unambiguous read result.
-- External reads, local writes, sync/history work, WhatsApp writes,
-  destructive actions, and interactive linking are separate authorization
-  classes. Supply a class token only when the current request authorizes that
-  exact class and operation. Full parity never grants standing permission.
+- External reads, local writes, private filesystem exports, external event
+  streams, sync/history work, WhatsApp writes, destructive actions, and
+  interactive linking are separate authorization classes. Export/stream
+  tokens also name their exact destination. Supply a class token only when
+  the current request authorizes that exact class and operation. Full parity
+  never grants standing permission.
 - Never create a test write. Never retry a possibly delivered send, vote,
   reaction, edit, deletion, membership change, profile change, status,
   channel/group action, or account mutation automatically.

@@ -122,9 +122,11 @@ Installer upgrades preserve that choice.
   then debounces change bursts before refreshing the chat rail and the visible
   conversation. A 12-second timer remains only as a recovery fallback.
 - `ListView` virtualizes both rails; images decode asynchronously.
-- Static images use aspect-fit decoding, image GIFs and WebP stickers use
-  `AnimatedImage`, and WhatsApp's MP4/F4V GIF messages use a muted looping
-  `MediaPlayer`. Ordinary video and audio remain paused until requested.
+- Static images use bounded aspect-fit decoding, image GIFs and WebP stickers
+  use `AnimatedImage`, and WhatsApp's MP4/F4V GIF messages use a muted looping
+  `MediaPlayer`. A resident exact-message lease allows motion/audio on only one
+  app, dropdown, or gallery surface; ordinary video and audio remain paused
+  until requested.
 - A native full-window gallery keeps image/GIF/video viewing inside the panel;
   its navigation and zoom boundaries are covered by offscreen QML tests.
 - Search is debounced and scoped to the selected conversation.

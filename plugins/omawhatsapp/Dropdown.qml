@@ -6,6 +6,7 @@ import qs.Commons
 import qs.Ui
 import "DropdownModel.js" as DropdownModel
 import "AccountModel.js" as AccountModel
+import "ComposerModel.js" as ComposerModel
 
 // A complete, bar-anchored mini client. The resident service stays the single
 // source of truth; this surface only owns transient navigation and draft state.
@@ -26,9 +27,11 @@ Panel {
   property var currentChat: null
   property var replyTarget: null
   property var pendingAttachments: []
-  property string pendingWriteJid: ""
+  property var pendingWriteIntent: null
+  property bool resumePendingWrite: false
   property string errorText: ""
   property bool copiedVisible: false
+  property string demoPlaybackId: ""
   property var demoItems: [
     { id: "demo-message-1", text: "The bar dropdown can send now.", sender: "Alex", timestamp: 1787540400, from_me: false, media_type: "", mime_type: "", local_path: "", reactions: [] },
     { id: "demo-message-2", text: "Fast, local, and keyboard-first.", sender: "You", timestamp: 1787540100, from_me: true, media_type: "", mime_type: "", local_path: "", reactions: [{ emoji: "⚡", from_me: false }] },
@@ -71,17 +74,31 @@ Panel {
     })
     return values.slice(0, Math.max(1, Number(maxRows || 7)))
   }
+  readonly property bool serviceOnCurrentChat: !!service
+    && AccountModel.sameRef(
+      AccountModel.chatRef(service.selectedChatAccount, service.selectedChatJid),
+      currentChatRef())
   readonly property var sourceMessages: demoMode
-    ? demoItems : (service && Array.isArray(service.messages) ? service.messages : [])
+    ? demoItems : (serviceOnCurrentChat && Array.isArray(service.messages)
+      ? service.messages : [])
   readonly property int rowHeight: Style.space(62)
   readonly property int chatListHeight: Math.max(2,
     Math.min(Math.max(2, maxRows), Math.max(2, filteredChats.length))) * rowHeight
+  readonly property string accountReadinessSummary: AccountModel.unreadyAccountSummary(
+    demoMode || !service ? [] : service.accounts)
+  readonly property int accountReadinessHeight: accountReadinessSummary === ""
+    ? 0 : Style.space(36)
   readonly property int desiredHeight: viewMode === "conversation"
-    ? Style.space(620) : Style.space(48 + 8 + 40 + 8 + 8 + 42) + chatListHeight
+    ? Style.space(620) : Style.space(48 + 8 + 40 + 8 + 8 + 42)
+      + accountReadinessHeight + chatListHeight
   readonly property int notificationCount: demoMode ? 4
     : (service ? Number(service.notificationUnreadCount || 0) : 0)
-  readonly property bool ready: demoMode || (service && service.ready)
-  readonly property bool offline: !demoMode && service && service.offlineMode
+  readonly property bool ready: demoMode || (service && service.railReady)
+  readonly property bool accountStatusReady: demoMode || (!!service
+    && service.statusReady
+    && String(service.statusAccount || "") === currentAccount())
+  readonly property bool offline: !demoMode && accountStatusReady
+    && service.offlineMode
   readonly property bool sending: !demoMode && service && service.writing
     && String(service.activeWriteChatJid || "") === currentJid()
     && String(service.activeWriteAccount || "") === currentAccount()
@@ -89,6 +106,10 @@ Panel {
     && String(service.voiceDraftJid || "") === currentJid()
     && String(service.voiceDraftAccount || "") === currentAccount()
     && String(service.voiceState || "idle") !== "idle"
+  readonly property var playbackCoordinator: service ? service.playback : null
+  readonly property string activePlaybackId: demoMode ? demoPlaybackId
+    : (playbackCoordinator
+      ? playbackCoordinator.messageFor("dropdown", currentChatRef()) : "")
 
   signal fullAppRequested(var payload)
   signal refreshRequested()
@@ -103,11 +124,69 @@ Panel {
     return currentChat ? String(currentChat.account || "") : ""
   }
 
+  function currentChatRef() {
+    return AccountModel.refOf(currentChat)
+  }
+
+  function stopPlayback() {
+    demoPlaybackId = ""
+    if (playbackCoordinator) playbackCoordinator.releaseSurface("dropdown")
+  }
+
+  function requestPlayback(messageId) {
+    if (demoMode || !playbackCoordinator) {
+      demoPlaybackId = String(messageId || "")
+      return demoPlaybackId !== ""
+    }
+    return playbackCoordinator.acquire("dropdown", currentChatRef(), messageId)
+  }
+
+  function reconcileCurrentChat() {
+    if (!opened || demoMode || viewMode !== "conversation" || !service || !currentChat) return
+    var exact = AccountModel.findChat(service.chats, currentChatRef())
+    if (!exact) {
+      currentChat = null
+      backToChats()
+      return
+    }
+    currentChat = exact
+  }
+
+  function validateServiceSelection() {
+    if (!opened || demoMode || viewMode !== "conversation" || !service || !currentChat) return
+    if (sending) return
+    var serviceRef = AccountModel.chatRef(
+      service.selectedChatAccount, service.selectedChatJid)
+    if (AccountModel.sameRef(serviceRef, currentChatRef())) return
+    currentChat = null
+    backToChats()
+  }
+
   function clampSelection() {
     selectedIndex = DropdownModel.clampIndex(selectedIndex, filteredChats.length)
   }
 
   function openFor(realData) {
+    var resume = realData !== false && resumePendingWrite
+      && currentChat !== null && viewMode === "conversation"
+    if (resume) {
+      demoMode = false
+      resumePendingWrite = false
+      searchText = ""
+      if (service) {
+        service.dropdownOpen = true
+        service.selectChat(currentChat)
+        service.refreshChats()
+      }
+      controller.show()
+      Qt.callLater(function() {
+        if (root.opened) root.focusComposer()
+      })
+      return
+    }
+    if (ComposerModel.validWriteIntent(pendingWriteIntent)) return
+    resumePendingWrite = false
+    if (!demoMode && service) service.discardStages(pendingAttachments)
     demoMode = realData === false
     searchText = ""
     selectedIndex = 0
@@ -131,8 +210,11 @@ Panel {
   function openDemo() { openFor(false) }
 
   function close() {
+    if (ComposerModel.validWriteIntent(pendingWriteIntent))
+      resumePendingWrite = true
     searchField.focus = false
     composer.focus = false
+    stopPlayback()
     if (!demoMode && service) service.stopVoiceForSurfaceClose()
     if (!demoMode && service) service.dropdownOpen = false
     controller.hide()
@@ -178,7 +260,10 @@ Panel {
   }
 
   function openConversation(chat) {
+    if (sending) return
     if (!chat || !chat.jid) return
+    if (!demoMode && service) service.discardStages(pendingAttachments)
+    stopPlayback()
     currentChat = chat
     viewMode = "conversation"
     messageIndex = 0
@@ -190,7 +275,9 @@ Panel {
   }
 
   function backToChats() {
+    if (sending) return
     if (!demoMode && service) service.stopVoiceForSurfaceClose()
+    stopPlayback()
     replyTarget = null
     composer.focus = false
     viewMode = "chats"
@@ -198,7 +285,10 @@ Panel {
   }
 
   function openFullApp() {
+    if (sending) return
     var payload = DropdownModel.fullAppPayload(currentChat)
+    if (!demoMode && service) service.discardStages(pendingAttachments)
+    pendingAttachments = []
     close()
     fullAppRequested(payload)
   }
@@ -230,8 +320,7 @@ Panel {
       return
     }
     if (!service || sending) return
-    pendingWriteJid = currentJid()
-    service.pasteClipboard()
+    service.pasteClipboard(currentChatRef(), "dropdown")
   }
 
   function localFileUrl(path) {
@@ -240,7 +329,9 @@ Panel {
   }
 
   function openFilePicker() {
-    if (filePickerProcess.running || sending) return
+    var origin = currentChatRef()
+    if (filePickerProcess.running || sending || origin.jid === "") return
+    filePickerProcess.originRef = AccountModel.chatRef(origin.account, origin.jid)
     filePickerProcess.command = ["/usr/bin/zenity", "--file-selection",
       "--multiple", "--separator=\n", "--title=Add WhatsApp attachments"]
     filePickerProcess.running = true
@@ -258,12 +349,38 @@ Panel {
       return
     }
     if (!service || sending || offline) return
-    pendingWriteJid = currentJid()
     errorText = ""
+    var kind = pendingAttachments.length > 0 ? "files" : "send"
+    var request = pendingAttachments.length > 0 ? {
+      paths: pendingAttachments.slice(),
+      caption: text,
+      reply_id: replyTarget ? String(replyTarget.id || "") : ""
+    } : {
+      text: text,
+      reply_id: replyTarget ? String(replyTarget.id || "") : "",
+      mentions: []
+    }
+    var snapshot = {
+      text: String(composer.text || ""),
+      attachments: pendingAttachments.slice(),
+      reply: replyTarget,
+      mentions: []
+    }
+    var intent = ComposerModel.writeIntent(currentChatRef(), kind, request, snapshot)
+    pendingWriteIntent = intent
     var started = pendingAttachments.length > 0
-      ? service.sendFilesReply(pendingAttachments, text, replyTarget ? replyTarget.id : "")
-      : service.sendText(text, replyTarget ? replyTarget.id : "", [])
-    if (started && pendingAttachments.length === 0) composer.text = ""
+      ? service.sendFilesReply(currentChatRef(), request.paths, request.caption,
+          request.reply_id, "dropdown")
+      : service.sendText(currentChatRef(), text,
+          request.reply_id, request.mentions, "dropdown")
+    if (started) {
+      var consumed = ComposerModel.startedIntentState(intent)
+      composer.text = String(consumed.text || "")
+      pendingAttachments = consumed.attachments
+      replyTarget = consumed.reply
+    } else {
+      pendingWriteIntent = null
+    }
   }
 
   function toggleVoiceRecording() {
@@ -284,12 +401,14 @@ Panel {
     }
     errorText = ""
     return service.toggleVoice(currentAccount(), currentJid(), String(currentChat.name || "WhatsApp chat"),
-      replyTarget ? replyTarget.id : "")
+      replyTarget ? replyTarget.id : "", "dropdown")
   }
 
   function removeAttachment(index) {
+    if (sending) return
     var next = pendingAttachments.slice()
-    next.splice(index, 1)
+    var removed = next.splice(index, 1)
+    if (!demoMode && service) service.discardStages(removed)
     pendingAttachments = next
   }
 
@@ -327,36 +446,82 @@ Panel {
 
   Connections {
     target: root.service
-    function onTextPasted(text, jid) {
-      if (String(jid || "") !== root.currentJid()) return
+    function onChatsChanged() { root.reconcileCurrentChat() }
+    function onSelectedChatJidChanged() {
+      Qt.callLater(root.validateServiceSelection)
+    }
+    function onSelectedChatAccountChanged() {
+      Qt.callLater(root.validateServiceSelection)
+    }
+    function onTextPasted(text, chatRef, owner) {
+      if (!ComposerModel.ownsOperation(owner, "dropdown")) return
+      if (!AccountModel.sameRef(chatRef, root.currentChatRef())) return
       composer.insert(composer.cursorPosition, String(text || ""))
-      root.pendingWriteJid = ""
       root.focusComposer()
     }
-    function onAttachmentPasted(path, jid) {
-      if (String(jid || "") !== root.currentJid()) return
+    function onAttachmentPasted(path, chatRef, owner) {
+      if (!ComposerModel.ownsOperation(owner, "dropdown")) return
+      if (!AccountModel.sameRef(chatRef, root.currentChatRef())) return
       var next = root.pendingAttachments.slice()
       if (next.indexOf(path) < 0 && next.length < 10) next.push(path)
+      else if (next.indexOf(path) < 0 && root.service)
+        root.service.discardStage(path)
       root.pendingAttachments = next
-      root.pendingWriteJid = ""
       root.focusComposer()
     }
-    function onWriteCompleted(kind, jid) {
-      if (String(jid || "") !== root.currentJid()) return
-      root.pendingWriteJid = ""
+    function onWriteCompleted(kind, chatRef, request, owner) {
+      if (!ComposerModel.ownsOperation(owner, "dropdown")) return
+      var intent = root.pendingWriteIntent
+      if (ComposerModel.validWriteIntent(intent)) {
+        if (!ComposerModel.writeIntentMatches(intent, chatRef, kind)) return
+      } else if (!AccountModel.sameRef(chatRef, root.currentChatRef())) return
       if (kind === "send" || kind === "files") {
-        composer.text = ""
-        root.pendingAttachments = []
-        root.replyTarget = null
+        var current = {
+          text: String(composer.text || ""),
+          attachments: root.pendingAttachments,
+          reply: root.replyTarget
+        }
+        var completed = ComposerModel.validWriteIntent(intent)
+          ? ComposerModel.completedIntentState(current, intent)
+          : ComposerModel.completedState(current, kind, request)
+        composer.text = String(completed.text || "")
+        root.pendingAttachments = completed.attachments
+        root.replyTarget = completed.reply
       }
       if (kind === "voice") root.replyTarget = null
-      root.focusComposer()
+      root.pendingWriteIntent = null
+      if (!root.opened) root.resumePendingWrite = true
+      else root.focusComposer()
+      Qt.callLater(root.validateServiceSelection)
     }
-    function onWriteFailed(message, jid) {
-      if (String(jid || "") !== root.currentJid()) return
-      root.pendingWriteJid = ""
+    function onWriteFailed(message, chatRef, details, owner) {
+      if (!ComposerModel.ownsOperation(owner, "dropdown")) return
+      var intent = root.pendingWriteIntent
+      if (ComposerModel.validWriteIntent(intent)) {
+        if (!ComposerModel.writeIntentMatches(intent, chatRef,
+            details && details.kind)) return
+      } else if (!AccountModel.sameRef(chatRef, root.currentChatRef())) return
+      var kind = String(details && details.kind
+        || (intent ? intent.kind : ""))
+      if (ComposerModel.validWriteIntent(intent)) {
+        var failed = ComposerModel.failedIntentState({
+          text: String(composer.text || ""),
+          attachments: root.pendingAttachments,
+          reply: root.replyTarget,
+          mentions: []
+        }, intent, details)
+        composer.text = String(failed.text || "")
+        root.pendingAttachments = failed.attachments
+        root.replyTarget = failed.reply
+      } else if (kind === "files") {
+        root.pendingAttachments = ComposerModel.remainingAttachments(
+          root.pendingAttachments, details)
+      }
+      root.pendingWriteIntent = null
       root.errorText = String(message || "Message could not be sent")
-      root.focusComposer()
+      if (!root.opened) root.resumePendingWrite = true
+      else root.focusComposer()
+      Qt.callLater(root.validateServiceSelection)
     }
   }
 
@@ -380,19 +545,29 @@ Panel {
 
   Process {
     id: filePickerProcess
+    property var originRef: AccountModel.chatRef("", "")
     command: []
     stdout: StdioCollector { id: filePickerOutput }
     stderr: StdioCollector { id: filePickerError }
     onExited: function(exitCode) {
-      if (exitCode !== 0) return
+      var target = originRef
+      originRef = AccountModel.chatRef("", "")
+      if (exitCode !== 0 || !root.opened || root.viewMode !== "conversation"
+          || !AccountModel.sameRef(target, root.currentChatRef())) return
       var incoming = String(filePickerOutput.text || "").split(/\r?\n/)
         .map(function(path) { return path.trim() })
         .filter(function(path) { return path.startsWith("/") })
         .map(root.localFileUrl)
-      var next = root.pendingAttachments.slice()
-      for (var i = 0; i < incoming.length && next.length < 10; i++)
-        if (next.indexOf(incoming[i]) < 0) next.push(incoming[i])
-      root.pendingAttachments = next
+      var result = ComposerModel.pickedState({
+        text: String(composer.text || ""),
+        attachments: root.pendingAttachments,
+        reply: root.replyTarget,
+        error: root.errorText
+      }, incoming, "document", 10)
+      root.pendingAttachments = result.state.attachments
+      root.errorText = String(result.state.error || "")
+      if (!root.demoMode && root.service && result.rejected.length > 0)
+        root.service.discardStages(result.rejected)
       root.focusComposer()
     }
   }
@@ -599,10 +774,20 @@ Panel {
             }
           }
 
+          AccountReadiness {
+            width: parent.width
+            accounts: root.demoMode || !root.service ? [] : root.service.accounts
+            foreground: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
+            compact: true
+          }
+
           Item {
             width: parent.width
             height: Math.max(Style.space(120),
-              Math.min(root.chatListHeight, keyCatcher.height - Style.space(154)))
+              Math.min(root.chatListHeight, keyCatcher.height - Style.space(154)
+                - root.accountReadinessHeight))
 
             ListView {
               id: chatList
@@ -912,27 +1097,37 @@ Panel {
                 groupChat: root.currentChat && root.currentChat.kind === "group"
                 selected: index === root.messageIndex
                 narrow: true
-                busyMedia: root.service && root.service.writing
+                surfaceActive: root.opened && root.viewMode === "conversation"
+                activePlaybackId: root.activePlaybackId
+                busyMedia: root.sending
                   && root.service.mediaDownloadId === String(modelData.id || "")
                 onSelectedRequested: {
                   root.messageIndex = index
                   keyCatcher.forceActiveFocus()
                 }
                 onOpenMediaRequested: root.openFullApp()
-                onDownloadMediaRequested: if (!root.demoMode && root.service) root.service.downloadMedia(modelData)
+                onPlaybackRequested: function(messageId) {
+                  root.requestPlayback(messageId)
+                }
+                onDownloadMediaRequested: if (!root.demoMode && root.service)
+                  root.service.downloadMedia(root.currentChatRef(), modelData, "dropdown")
                 onReplyRequested: {
                   root.replyTarget = modelData
                   root.focusComposer()
                 }
                 onReactionRequested: function(emoji) {
-                  if (!root.demoMode && root.service) root.service.reactTo(modelData, emoji)
+                  if (!root.demoMode && root.service)
+                    root.service.reactTo(
+                      root.currentChatRef(), modelData, emoji, "dropdown")
                 }
                 onEditRequested: root.openFullApp()
                 onDeleteRequested: root.openFullApp()
                 onForwardRequested: root.openFullApp()
                 onCopyRequested: function(text) { root.copyText(text) }
                 onOptionRequested: function(optionIndex) {
-                  if (!root.demoMode && root.service) root.service.selectOption(modelData, optionIndex)
+                  if (!root.demoMode && root.service)
+                    root.service.selectOption(
+                      root.currentChatRef(), modelData, optionIndex, "dropdown")
                 }
               }
             }
@@ -1035,7 +1230,10 @@ Panel {
                       color: root.muted
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
-                      TapHandler { onTapped: root.removeAttachment(index) }
+                      TapHandler {
+                        enabled: !root.sending
+                        onTapped: root.removeAttachment(index)
+                      }
                     }
                   }
                 }
@@ -1148,6 +1346,7 @@ Panel {
                 width: parent.width
                 height: visible ? implicitHeight : 0
                 service: root.service
+                owner: "dropdown"
                 account: root.currentAccount()
                 jid: root.currentJid()
                 offline: root.offline

@@ -14,7 +14,7 @@ oma="$HOME/.local/bin/omawhatsapp"
 "$oma" capabilities
 ```
 
-It accounts for every command leaf in the supported wacli version. Before an
+It accounts for every command leaf in exactly wacli 0.17.1. Before an
 advanced operation, inspect its flags without changing state:
 
 ```bash
@@ -31,6 +31,9 @@ Send one JSON object to `omawhatsapp wacli`:
 {
   "args": ["messages", "starred", "--limit", "50"],
   "authorization": "",
+  "private_export_authorization": "",
+  "repository_export_authorization": "",
+  "external_stream_authorization": "",
   "account": "",
   "store": "",
   "timeout": 300,
@@ -61,18 +64,30 @@ does not echo the argument array, because arguments may contain private data.
 ## Authorization classes
 
 `local-read` needs an empty authorization string and runs with wacli's
-`--read-only` guard. Every other policy requires an exact token in the JSON
-`authorization` field:
+`--read-only` guard. Every other primary policy requires an exact token in the
+JSON `authorization` field; external streaming uses the additional field
+described below:
 
 | Policy | Token | Meaning |
 |---|---|---|
 | `local-read` | `""` | Inspect local metadata/history without writing |
 | `remote-read` | `"remote-read"` | Query WhatsApp live and possibly refresh local metadata |
 | `local-write` | `"local-write"` | Change only local aliases/config/store metadata |
+| `private-export` | `"private-export:<exact-absolute-output-path>"` | Write a private message export to that one local file |
+| `external-stream` | `"external-stream:<exact-destination>"` | Emit private lifecycle/events to `response` or one exact webhook URL |
 | `sync` | `"sync"` | Download/synchronize history or media |
 | `whatsapp-write` | `"whatsapp-write"` | Send or change visible WhatsApp state |
 | `destructive` | `"destructive"` | Delete, leave, revoke, remove, reject, or invalidate state |
 | `interactive` | CLI flag | Link an account in a terminal |
+
+`private-export` replaces `local-write` for `messages export --output`.
+`media download --output` keeps `authorization:"sync"` and additionally needs
+`private_export_authorization:"private-export:<exact-output-path>"`.
+`external-stream` is an additional gate: keep the operation's ordinary token
+in `authorization` and put the destination-bound token in
+`external_stream_authorization`. Use `external-stream:response` for
+`events:true`. If a request deliberately enables both response events and a
+webhook, supply both exact stream tokens as an array.
 
 Never supply a token merely to make a command pass. The current user request
 must clearly authorize the exact operation, target, content, and scope. A
@@ -96,8 +111,12 @@ jq -nc '{args:["poll","vote","--to","EXACT_CHAT_JID","--id","EXACT_ID",
 ```
 
 Dry runs for `history fill`, `messages purge`, and `store cleanup` are
-automatically downgraded to `local-read`. `messages export --output` is
-classified as `local-write`. `doctor --connect` is `remote-read`.
+automatically downgraded to `local-read`. `messages export --output` requires
+the destination-bearing `private-export` token. Export paths inside a Git
+repository are rejected unless the request also supplies
+`repository_export_authorization:"allow-repository-export:<exact-path>"`;
+prefer a private non-repository directory. `doctor --connect` is
+`remote-read`.
 
 ## Interactive linking and foreground sync
 
@@ -121,8 +140,9 @@ restores it afterward. It never overrides OmaWhatsApp's explicit offline mode.
 - Status broadcasts, profile changes, group/channel membership and admin
   changes, logout, account removal, revoke/delete/purge, and cleanup require
   exact current authorization and no automatic retry.
-- `sync --webhook` exports private live events to another system. Use it only
-  when the user explicitly supplies and authorizes that destination; never
-  expose webhook secrets in output or durable logs.
+- `sync --webhook` requires both `authorization:"sync"` and
+  `external_stream_authorization:"external-stream:<exact-webhook-url>"`.
+  Use it only when the user explicitly supplies and authorizes that
+  destination; never expose webhook secrets in output or durable logs.
 - Exports and downloaded media remain private local data. Do not place output
   under a repository or shared directory unless explicitly requested.

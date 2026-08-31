@@ -1,8 +1,8 @@
 import QtQuick
 import QtQuick.Controls
-import QtMultimedia
 import qs.Commons
 import "MediaViewerLogic.js" as MediaLogic
+import "MediaModel.js" as MediaModel
 
 // Native, full-window media viewing keeps photos, GIFs, and videos inside the
 // client. The chat timeline stays mounted underneath, so closing is instant.
@@ -18,23 +18,26 @@ FocusScope {
   property int currentIndex: -1
   property real zoom: 1
   property bool opened: false
+  property bool surfaceActive: true
+  property var playback: null
+  property var chatRef: ({ account: "", jid: "", key: "" })
+  property string playbackSurface: "app-viewer"
 
   signal openExternalRequested(string path)
 
   readonly property var currentItem: currentIndex >= 0 && currentIndex < items.length
     ? items[currentIndex] : null
-  readonly property string mediaType: currentItem
-    ? String(currentItem.media_type || "").toLowerCase() : ""
-  readonly property string mimeType: currentItem
-    ? String(currentItem.mime_type || "").toLowerCase() : ""
+  readonly property string mediaType: MediaModel.mediaType(currentItem)
+  readonly property string mimeType: MediaModel.mimeType(currentItem)
   readonly property string localPath: currentItem
     ? String(currentItem.local_path || "") : ""
-  readonly property bool gifVideo: mediaType === "gif"
-    && mimeType !== "image/gif" && mimeType !== "image/webp"
-  readonly property bool video: gifVideo || mediaType === "video"
-    || mimeType.indexOf("video/") === 0
-  readonly property bool animatedImage: !video && (mimeType === "image/gif"
-    || mimeType === "image/webp" || mediaType === "sticker")
+  readonly property bool gifVideo: MediaModel.isGifVideo(currentItem)
+  readonly property bool video: MediaModel.isVideo(currentItem)
+  readonly property bool animatedImage: MediaModel.isAnimatedImage(currentItem)
+  readonly property string playbackMessageId: currentItem
+    ? String(currentItem.id || "viewer-" + currentIndex) : ""
+  readonly property bool playbackGranted: !playback || playback.owns(
+    playbackSurface, chatRef, playbackMessageId)
 
   visible: opened
   focus: opened
@@ -44,7 +47,7 @@ FocusScope {
     var value = String(path || "")
     if (value === "__demo__") return Qt.resolvedUrl("assets/demo-capture.svg")
     if (value === "__demo_photo__") return Qt.resolvedUrl("assets/demo-photo.svg")
-    return value === "" ? "" : encodeURI("file://" + value)
+    return MediaModel.encodedFileUrl(value)
   }
 
   function openAt(index) {
@@ -53,18 +56,24 @@ FocusScope {
     currentIndex = bounded
     zoom = 1
     opened = true
+    if (animatedImage || video)
+      Qt.callLater(function() { root.requestPlayback() })
     Qt.callLater(function() { root.forceActiveFocus() })
   }
 
   function closeViewer() {
+    if (playback) playback.releaseSurface(playbackSurface)
     opened = false
     currentIndex = -1
     zoom = 1
   }
 
   function navigate(delta) {
+    if (playback) playback.releaseSurface(playbackSurface)
     currentIndex = MediaLogic.nextIndex(items, currentIndex, delta)
     zoom = 1
+    if (animatedImage || video)
+      Qt.callLater(function() { root.requestPlayback() })
     Qt.callLater(function() { root.forceActiveFocus() })
   }
 
@@ -76,6 +85,20 @@ FocusScope {
     if (viewerLoader.item && viewerLoader.item.togglePlayback)
       viewerLoader.item.togglePlayback()
   }
+
+  function requestPlayback() {
+    return !playback || playback.acquire(
+      playbackSurface, chatRef, playbackMessageId)
+  }
+
+  onOpenedChanged: {
+    if (!opened && playback) playback.releaseSurface(playbackSurface)
+  }
+  onCurrentIndexChanged: {
+    if (playback) playback.releaseSurface(playbackSurface)
+  }
+  onSurfaceActiveChanged: if (!surfaceActive && playback)
+    playback.releaseSurface(playbackSurface)
 
   Keys.onPressed: function(event) {
     if (!root.opened) return
@@ -287,9 +310,18 @@ FocusScope {
   Component {
     id: animatedImageComponent
     Item {
-      function togglePlayback() { animation.playing = !animation.playing }
+      property bool userPaused: false
+      property string mediaIdentity: root.localPath
+      function togglePlayback() {
+        if (!root.playbackGranted) {
+          userPaused = false
+          root.requestPlayback()
+        } else userPaused = !userPaused
+      }
+      onMediaIdentityChanged: userPaused = false
       AnimatedImage {
         id: animation
+        objectName: "viewerAnimatedMediaSurface"
         anchors.fill: parent
         anchors.margins: Style.space(18)
         source: root.localUrl(root.localPath)
@@ -297,7 +329,8 @@ FocusScope {
         asynchronous: true
         cache: true
         smooth: true
-        playing: root.opened
+        playing: root.surfaceActive && root.opened && root.playbackGranted
+          && !parent.userPaused
       }
       Rectangle {
         anchors.left: parent.left
@@ -317,89 +350,29 @@ FocusScope {
           font.pixelSize: Style.font.caption
         }
       }
-      TapHandler { onTapped: animation.playing = !animation.playing }
+      TapHandler { onTapped: parent.togglePlayback() }
     }
   }
 
   Component {
     id: videoComponent
-    Item {
-      function togglePlayback() { player.playing ? player.pause() : player.play() }
-      VideoOutput {
-        id: videoOutput
-        anchors.fill: parent
-        anchors.margins: Style.space(12)
-        fillMode: VideoOutput.PreserveAspectFit
-      }
-      AudioOutput {
-        id: audioOutput
-        muted: root.gifVideo
-        volume: 0.85
-      }
-      MediaPlayer {
-        id: player
-        source: root.localUrl(root.localPath)
-        videoOutput: videoOutput
-        audioOutput: audioOutput
-        loops: root.gifVideo ? MediaPlayer.Infinite : MediaPlayer.Once
-        Component.onCompleted: play()
-      }
-      TapHandler { onTapped: parent.togglePlayback() }
-      Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.margins: Style.space(18)
-        height: Style.space(34)
-        radius: Style.cornerRadius
-        color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.78)
-        Text {
-          textFormat: Text.PlainText
-          anchors.left: parent.left
-          anchors.leftMargin: Style.space(10)
-          anchors.verticalCenter: parent.verticalCenter
-          text: player.playing ? "Ⅱ" : "▶"
-          color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-        Rectangle {
-          anchors.left: parent.left
-          anchors.leftMargin: Style.space(36)
-          anchors.right: durationLabel.left
-          anchors.rightMargin: Style.space(10)
-          anchors.verticalCenter: parent.verticalCenter
-          height: Style.space(4)
-          radius: height / 2
-          color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
-          Rectangle {
-            width: player.duration > 0 ? parent.width * player.position / player.duration : 0
-            height: parent.height
-            radius: height / 2
-            color: root.accent
-          }
-          MouseArea {
-            anchors.fill: parent
-            onClicked: function(mouse) {
-              if (player.duration > 0) player.position = player.duration * mouse.x / width
-            }
-          }
-        }
-        Text {
-          textFormat: Text.PlainText
-          id: durationLabel
-          anchors.right: parent.right
-          anchors.rightMargin: Style.space(10)
-          anchors.verticalCenter: parent.verticalCenter
-          text: {
-            var value = Math.max(0, Math.floor(Number(player.position || 0) / 1000))
-            return Math.floor(value / 60) + ":" + String(value % 60).padStart(2, "0")
-          }
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-      }
+    VideoPlayer {
+      source: root.localUrl(root.localPath)
+      title: root.gifVideo ? "GIF paused" : "Video ready"
+      active: root.surfaceActive && root.opened
+      gifMode: root.gifVideo
+      autoPlay: root.gifVideo
+      playbackGranted: root.playbackGranted
+      compact: false
+      placeholderObjectName: "viewerVideoPlaceholder"
+      controlsObjectName: "viewerVideoControls"
+      foreground: root.foreground
+      background: root.background
+      accent: root.accent
+      dim: root.dim
+      dimmer: root.dim
+      fontFamily: root.fontFamily
+      onPlayRequested: root.requestPlayback()
     }
   }
 

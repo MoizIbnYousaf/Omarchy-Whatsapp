@@ -143,7 +143,7 @@ online, and leaves the other accounts alone.
 Account linking is interactive and must be explicitly requested:
 
 ```bash
-"$oma" auth
+"$oma" wacli --interactive --authorize interactive -- auth
 ```
 
 For calls, channels, contacts, group administration, history/backfill, media

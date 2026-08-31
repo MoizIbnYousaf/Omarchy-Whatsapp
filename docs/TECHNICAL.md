@@ -95,6 +95,11 @@ Omasnap is present on `PATH`. Videos, documents, and machines without Omasnap
 use the fixed `/usr/bin/xdg-open` fallback. The helper validates that the input
 is an existing local file before starting either process.
 
+One resident playback coordinator leases decoded motion/audio to one exact
+account, chat, message, and surface at a time. Opening the gallery, switching
+chats, or starting media in the other window revokes the previous lease; the
+old player stops immediately and paused video retains its decoded frame.
+
 ## Plugin reload safety
 
 Quickshell watches installed plugins recursively. Copying QML files one at a
@@ -103,9 +108,16 @@ installer therefore:
 
 1. validates and stages a complete plugin tree;
 2. prepares the new shell configuration;
-3. stops the shell;
-4. replaces only the exact OmaWhatsApp plugin directories and unit/helper;
-5. restarts the shell once.
+3. records a mode-`0600`, fsynced transaction journal and the exact prior
+   service states;
+4. stops the shell and atomically swaps each target beside its destination;
+5. verifies the installed helper, manifests, and service lifecycle;
+6. restarts the shell once and removes backups only after commit.
+
+If the process or machine stops mid-upgrade, the next install or uninstall
+finishes a committed cleanup or rolls every target and service back from the
+journal before doing new work. The journal contains only installation paths
+and public service names—never WhatsApp data.
 
 Build/test artifacts remain outside the installed plugin tree.
 
@@ -124,7 +136,8 @@ Build/test artifacts remain outside the installed plugin tree.
 ## Verification
 
 `scripts/test` runs backend unit tests, root manifest validation, QML lint,
-offscreen media-viewer state tests, shell syntax checks, diff hygiene, and a
-guard against browser/Electron runtime dependencies. Live verification also
-checks service health, picker cancellation, window breakpoints, shell logs,
-and coredump count without sending test messages.
+real synthetic MP4/GIF/WebP decode tests, cross-surface playback and deferred
+intent tests, interrupted-install recovery tests, shell syntax checks, diff
+hygiene, and a guard against browser/Electron runtime dependencies. Live
+verification also checks service health, picker cancellation, window
+breakpoints, shell logs, and coredump count without sending test messages.

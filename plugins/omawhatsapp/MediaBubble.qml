@@ -1,6 +1,7 @@
 import QtQuick
 import QtMultimedia
 import qs.Commons
+import "MediaModel.js" as MediaModel
 
 // Typed media renderer. WhatsApp GIFs are usually looping MP4 files, while
 // uploaded .gif documents and stickers are image formats, so MIME alone is not
@@ -16,12 +17,17 @@ Item {
   required property color dimmer
   required property string fontFamily
   property bool busy: false
+  property bool surfaceActive: true
+  property string activePlaybackId: ""
+  property real decodedMediaWidth: 0
+  property real decodedMediaHeight: 0
 
   signal openRequested(string path)
   signal downloadRequested()
+  signal playbackRequested(string messageId)
 
-  readonly property string mediaType: String(message.media_type || "").toLowerCase()
-  readonly property string mimeType: String(message.mime_type || "").toLowerCase()
+  readonly property string mediaType: MediaModel.mediaType(message)
+  readonly property string mimeType: MediaModel.mimeType(message)
   readonly property string filename: String(message.filename || "")
   readonly property string localPath: String(message.local_path || "")
   readonly property var albumItems: message && message.album_items
@@ -29,20 +35,36 @@ Item {
   readonly property bool album: mediaType === "album" && albumItems.length > 1
   readonly property bool hasLocal: localPath !== ""
   readonly property bool unavailable: message.media_unavailable === true
-  readonly property bool gifVideo: mediaType === "gif"
-    && mimeType !== "image/gif" && mimeType !== "image/webp"
-  readonly property bool video: !gifVideo && (mediaType === "video" || mimeType.indexOf("video/") === 0)
-  readonly property bool animatedImage: !gifVideo && (mimeType === "image/gif"
-    || mimeType === "image/webp" || mediaType === "sticker")
-  readonly property bool staticImage: !animatedImage
-    && (mediaType === "image" || mimeType.indexOf("image/") === 0)
-  readonly property bool audio: mediaType === "audio" || mimeType.indexOf("audio/") === 0
+  readonly property bool gifVideo: MediaModel.isGifVideo(message)
+  readonly property bool video: !gifVideo && MediaModel.isVideo(message)
+  readonly property bool animatedImage: MediaModel.isAnimatedImage(message)
+  readonly property bool staticImage: MediaModel.isImage(message)
+  readonly property bool audio: MediaModel.isAudio(message)
   readonly property bool location: mediaType === "location"
+  readonly property string mediaKind: MediaModel.kind(message)
+  readonly property string messageId: String(message && message.id || "")
+  // Media dimensions are visual content, not typography. Keep them responsive
+  // without multiplying large previews by the shell's accessibility font scale.
+  readonly property real previewHeight: MediaModel.previewHeight(width, message,
+    140, 315, decodedMediaWidth, decodedMediaHeight)
 
   width: parent ? parent.width : implicitWidth
-  implicitWidth: Style.space(320)
+  implicitWidth: 560
   implicitHeight: renderer.item ? renderer.item.implicitHeight : 0
   height: implicitHeight
+
+  onMessageChanged: {
+    decodedMediaWidth = 0
+    decodedMediaHeight = 0
+  }
+
+  function adoptDecodedSize(width, height) {
+    var nextWidth = Number(width || 0)
+    var nextHeight = Number(height || 0)
+    if (!(nextWidth > 0 && nextHeight > 0)) return
+    decodedMediaWidth = nextWidth
+    decodedMediaHeight = nextHeight
+  }
 
   function localUrl() {
     return localUrlFor(message)
@@ -52,23 +74,17 @@ Item {
     var path = String(item && item.local_path || "")
     if (path === "__demo__") return Qt.resolvedUrl("assets/demo-capture.svg")
     if (path === "__demo_photo__") return Qt.resolvedUrl("assets/demo-photo.svg")
+    if (path === "__demo_video__") return ""
     if (path === "") return ""
-    return "file://" + path.split("/").map(function(segment) {
-      return encodeURIComponent(segment)
-    }).join("/")
+    return MediaModel.encodedFileUrl(path)
   }
 
   function albumItemIsImage(item) {
-    var media = String(item && item.media_type || "").toLowerCase()
-    var mime = String(item && item.mime_type || "").toLowerCase()
-    return media === "image" || media === "gif" || media === "sticker"
-      || mime.indexOf("image/") === 0
+    return MediaModel.isImage(item) || MediaModel.isAnimatedImage(item)
   }
 
   function albumItemIsVideo(item) {
-    var media = String(item && item.media_type || "").toLowerCase()
-    var mime = String(item && item.mime_type || "").toLowerCase()
-    return media === "video" || mime.indexOf("video/") === 0
+    return MediaModel.isVideo(item)
   }
 
   function humanSize(bytes) {
@@ -114,7 +130,10 @@ Item {
       readonly property int tileCount: tiles.length
       readonly property int columns: tileCount === 1 ? 1 : 2
       readonly property real gap: Style.space(4)
-      readonly property real tileHeight: tileCount <= 2 ? Style.space(174) : Style.space(116)
+      readonly property real tileWidth: columns === 1 ? root.width
+        : Math.max(0, (root.width - gap) / 2)
+      readonly property real tileHeight: MediaModel.previewHeight(tileWidth,
+        tiles.length > 0 ? tiles[0] : null, 110, 190)
       implicitHeight: albumGrid.implicitHeight
 
       Grid {
@@ -146,7 +165,9 @@ Item {
               fillMode: Image.PreserveAspectCrop
               asynchronous: true
               cache: true
-              playing: visible
+              // Timeline albums are posters. Playing several animated tiles
+              // would violate the single resident playback lease.
+              playing: false
               smooth: true
             }
 
@@ -214,12 +235,13 @@ Item {
   Component {
     id: imageComponent
     Rectangle {
-      implicitHeight: Style.space(220)
+      implicitHeight: root.previewHeight
       radius: Style.cornerRadius
       color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.55)
       clip: true
       Image {
         id: imagePreview
+        objectName: "imageMediaSurface"
         anchors.fill: parent
         anchors.margins: Style.space(3)
         source: root.localUrl()
@@ -227,6 +249,7 @@ Item {
         asynchronous: true
         cache: true
         smooth: true
+        onSourceSizeChanged: root.adoptDecodedSize(sourceSize.width, sourceSize.height)
       }
       Text {
         textFormat: Text.PlainText
@@ -251,20 +274,24 @@ Item {
   Component {
     id: animatedImageComponent
     Rectangle {
-      implicitHeight: Style.space(220)
+      implicitHeight: root.previewHeight
       radius: Style.cornerRadius
       color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.55)
       clip: true
       AnimatedImage {
         id: animatedPreview
+        objectName: "animatedMediaSurface"
         anchors.fill: parent
         anchors.margins: Style.space(3)
         source: root.localUrl()
         fillMode: Image.PreserveAspectFit
         asynchronous: true
         cache: true
-        playing: visible
+        // Timeline animations stay on their first frame; opening the viewer
+        // acquires the shared playback lease before animation begins.
+        playing: false
         smooth: true
+        onSourceSizeChanged: root.adoptDecodedSize(sourceSize.width, sourceSize.height)
       }
       Text {
         textFormat: Text.PlainText
@@ -306,69 +333,27 @@ Item {
 
   Component {
     id: videoComponent
-    Rectangle {
-      id: videoSurface
-      implicitHeight: Style.space(220)
-      radius: Style.cornerRadius
-      color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.72)
-      clip: true
-
-      VideoOutput {
-        id: videoOutput
-        anchors.fill: parent
-        fillMode: VideoOutput.PreserveAspectFit
-      }
-      AudioOutput {
-        id: audioOutput
-        muted: root.gifVideo
-        volume: 0.8
-      }
-      MediaPlayer {
-        id: player
-        source: root.localUrl()
-        videoOutput: videoOutput
-        audioOutput: audioOutput
-        loops: root.gifVideo ? MediaPlayer.Infinite : MediaPlayer.Once
-        Component.onCompleted: if (root.gifVideo) play()
-      }
-
-      Text {
-        textFormat: Text.PlainText
-        visible: player.error !== MediaPlayer.NoError
-        anchors.centerIn: parent
-        width: parent.width - Style.space(24)
-        text: "Preview unavailable · click twice to open"
-        color: root.dimmer
-        horizontalAlignment: Text.AlignHCenter
-        wrapMode: Text.Wrap
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-      }
-
-      Rectangle {
-        anchors.left: parent.left
-        anchors.bottom: parent.bottom
-        anchors.margins: Style.space(8)
-        width: videoLabel.implicitWidth + Style.space(12)
-        height: Style.space(24)
-        radius: height / 2
-        color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.82)
-        Text {
-          textFormat: Text.PlainText
-          id: videoLabel
-          anchors.centerIn: parent
-          text: root.gifVideo ? "GIF" : (player.playing ? "Ⅱ" : "▶ video")
-          color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-      }
-
-      MouseArea {
-        anchors.fill: parent
-        cursorShape: Qt.PointingHandCursor
-        onClicked: root.openRequested(root.localPath)
-      }
+    VideoPlayer {
+      objectName: "videoMediaSurface"
+      implicitHeight: root.previewHeight
+      source: root.localUrl()
+      title: root.label()
+      active: root.surfaceActive
+      gifMode: root.gifVideo
+      autoPlay: false
+      playbackGranted: root.activePlaybackId === root.messageId
+      compact: true
+      allowOpen: true
+      foreground: root.foreground
+      background: root.background
+      accent: root.accent
+      dim: root.dim
+      dimmer: root.dimmer
+      fontFamily: root.fontFamily
+      onIntrinsicWidthChanged: root.adoptDecodedSize(intrinsicWidth, intrinsicHeight)
+      onIntrinsicHeightChanged: root.adoptDecodedSize(intrinsicWidth, intrinsicHeight)
+      onPlayRequested: root.playbackRequested(root.messageId)
+      onOpenRequested: root.openRequested(root.localPath)
     }
   }
 
@@ -381,8 +366,18 @@ Item {
       AudioOutput { id: audioSink; volume: 0.8 }
       MediaPlayer {
         id: audioPlayer
+        objectName: "audioMediaPlayer"
         source: root.localUrl()
         audioOutput: audioSink
+      }
+      Connections {
+        target: root
+        function onSurfaceActiveChanged() {
+          if (!root.surfaceActive) audioPlayer.stop()
+        }
+        function onActivePlaybackIdChanged() {
+          if (root.activePlaybackId !== root.messageId) audioPlayer.stop()
+        }
       }
       Rectangle {
         id: audioButton
@@ -403,8 +398,21 @@ Item {
         }
         MouseArea {
           anchors.fill: parent
+          enabled: root.surfaceActive
           cursorShape: Qt.PointingHandCursor
-          onClicked: audioPlayer.playing ? audioPlayer.pause() : audioPlayer.play()
+          onClicked: {
+            if (audioPlayer.playing) {
+              audioPlayer.pause()
+            } else if (root.activePlaybackId === root.messageId) {
+              audioPlayer.play()
+            } else {
+              root.playbackRequested(root.messageId)
+              Qt.callLater(function() {
+                if (root.surfaceActive
+                    && root.activePlaybackId === root.messageId) audioPlayer.play()
+              })
+            }
+          }
         }
       }
       Column {
@@ -491,6 +499,7 @@ Item {
   Component {
     id: missingComponent
     Rectangle {
+      objectName: "missingMediaSurface"
       implicitHeight: Style.space(68)
       radius: Style.cornerRadius
       color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.45)

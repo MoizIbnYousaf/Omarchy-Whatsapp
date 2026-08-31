@@ -1,10 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+transaction_helper="$repo_root/scripts/install-transaction.py"
 user_home=${HOME:?HOME is required}
+[[ $user_home == /* ]] || {
+  echo "HOME must be an absolute path." >&2
+  exit 1
+}
+[[ $user_home != / ]] || {
+  echo "HOME must not be the filesystem root." >&2
+  exit 1
+}
+xdg_config_home=${XDG_CONFIG_HOME:-$user_home/.config}
+xdg_state_home=${XDG_STATE_HOME:-$user_home/.local/state}
+# The XDG specification requires absolute base directories. An invalid
+# relative override is ignored instead of turning the working directory into
+# an install, backup, or purge target.
+[[ $xdg_config_home == /* ]] || xdg_config_home="$user_home/.config"
+[[ $xdg_state_home == /* ]] || xdg_state_home="$user_home/.local/state"
+[[ $xdg_config_home != / && $xdg_state_home != / ]] || {
+  echo "XDG base directories must not be the filesystem root." >&2
+  exit 1
+}
+
 plugin_root="$user_home/.config/omarchy/plugins"
 skill_root="$user_home/.agents/skills"
 shell_config="$user_home/.config/omarchy/shell.json"
+user_service_root="$xdg_config_home/systemd/user"
+helper_target="$user_home/.local/bin/omawhatsapp"
+runtime="$xdg_state_home/omawhatsapp"
+transaction_parent="$xdg_state_home/omawhatsapp-installer"
+transaction_journal="$transaction_parent/transaction.json"
+plugin_id=io.github.moizibnyousaf.omawhatsapp
 purge_runtime=false
 
 if [[ ${1:-} == "--purge-runtime" ]]; then
@@ -16,9 +44,75 @@ if (( $# > 0 )); then
   exit 2
 fi
 
-temporary=$(mktemp "${shell_config}.XXXXXX")
-trap 'rm -f -- "$temporary"' EXIT
-jq --arg plugin_id "io.github.moizibnyousaf.omawhatsapp" '
+for command_name in flock jq python3 realpath sha256sum systemctl timeout; do
+  command -v "$command_name" >/dev/null || {
+    echo "Missing requirement: $command_name" >&2
+    exit 1
+  }
+done
+
+. "$repo_root/scripts/install-common"
+if command -v quickshell >/dev/null \
+    && ! command -v omarchy-restart-shell >/dev/null; then
+  echo "Cannot safely stop Quickshell without omarchy-restart-shell." >&2
+  exit 1
+fi
+omaw_lock_and_recover || exit 1
+
+[[ -f $shell_config ]] || {
+  echo "Missing Omarchy shell config: $shell_config" >&2
+  exit 1
+}
+
+if $purge_runtime; then
+  canonical_state_home=$(realpath -m -- "$xdg_state_home")
+  canonical_runtime=$(realpath -m -- "$runtime")
+  if [[ $canonical_state_home == / \
+      || $(dirname -- "$canonical_runtime") != "$canonical_state_home" \
+      || $(basename -- "$canonical_runtime") != omawhatsapp ]]; then
+    echo "Refusing an unsafe OmaWhatsApp runtime purge target: $runtime" >&2
+    exit 3
+  fi
+fi
+
+staging_root=$(mktemp -d "$transaction_parent/stage.XXXXXX")
+temporary="$staging_root/shell.json"
+shell_stopped=false
+cleanup_staging() {
+  [[ -e $staging_root || -L $staging_root ]] || return 0
+  if ! rm -rf -- "$staging_root"; then
+    echo "Could not remove the OmaWhatsApp staging directory: $staging_root" >&2
+    return 1
+  fi
+}
+finish_uninstall() {
+  local result=$? cleanup_failed=0
+  trap - EXIT INT TERM HUP
+  if [[ -e $transaction_journal || -L $transaction_journal ]]; then
+    if omaw_recover_pending_transaction; then
+      shell_stopped=false
+    else
+      cleanup_failed=1
+    fi
+  else
+    if $shell_stopped && command -v omarchy-restart-shell >/dev/null; then
+      if omarchy-restart-shell 9>&-; then
+        shell_stopped=false
+      else
+        echo "Could not restart the shell after cancelling OmaWhatsApp removal." >&2
+        cleanup_failed=1
+      fi
+    fi
+    cleanup_staging || cleanup_failed=1
+  fi
+  if (( cleanup_failed != 0 && result == 0 )); then result=1; fi
+  exit "$result"
+}
+trap finish_uninstall EXIT
+trap 'exit 130' INT TERM HUP
+
+initial_shell_digest=$(sha256sum "$shell_config" | cut -d ' ' -f 1)
+jq --arg plugin_id "$plugin_id" '
   def keep: .id != $plugin_id and .id != "omawhatsapp" and .id != "omawhatsapp-bar";
   .plugins = [(.plugins // [])[] | select(keep)] |
   .bar.layout.left = [(.bar.layout.left // [])[] | select(keep)] |
@@ -27,32 +121,119 @@ jq --arg plugin_id "io.github.moizibnyousaf.omawhatsapp" '
 ' "$shell_config" > "$temporary"
 chmod --reference="$shell_config" "$temporary"
 
-systemctl --user disable --now wacli-sync.service >/dev/null 2>&1 || true
-while IFS= read -r unit; do
-  [[ -n $unit ]] || continue
-  systemctl --user disable --now "$unit" >/dev/null 2>&1 || true
-done < <(systemctl --user list-units --all --plain --no-legend 'wacli-sync@*.service' 2>/dev/null \
-  | awk '{print $1}')
-if command -v quickshell >/dev/null; then
-  while timeout 5 quickshell kill -p /usr/share/omarchy/shell --any-display >/dev/null 2>&1; do :; done
+if ! listed_unit_files=$(LC_ALL=C systemctl --user list-unit-files \
+    'wacli-sync@*.service' --no-legend --no-pager --plain); then
+  echo "Could not inspect installed OmaWhatsApp sync instances." >&2
+  exit 1
 fi
+if ! listed_units=$(LC_ALL=C systemctl --user list-units --all \
+    'wacli-sync@*.service' --no-legend --no-pager --plain); then
+  echo "Could not inspect loaded OmaWhatsApp sync instances." >&2
+  exit 1
+fi
+declare -A known_units=([wacli-sync.service]=1)
+while read -r first second _; do
+  candidate=$first
+  [[ $candidate == '●' ]] && candidate=$second
+  if [[ $candidate =~ ^wacli-sync@([A-Za-z0-9._-]{1,64})\.service$ ]]; then
+    known_units["$candidate"]=1
+  fi
+done < <(printf '%s\n%s\n' "$listed_unit_files" "$listed_units")
 
-rm -rf -- "$plugin_root/io.github.moizibnyousaf.omawhatsapp" \
-  "$plugin_root/omawhatsapp" "$plugin_root/omawhatsapp-bar"
-rm -rf -- "$skill_root/omawhatsapp"
-rm -f -- "$user_home/.local/bin/omawhatsapp"
-rm -f -- "$user_home/.config/systemd/user/wacli-sync.service" \
-  "$user_home/.config/systemd/user/wacli-sync@.service"
-mv -- "$temporary" "$shell_config"
-trap - EXIT
+declare -A was_enabled=()
+declare -A was_active=()
+unit_snapshot='[]'
+mapfile -t sorted_known_units < <(printf '%s\n' "${!known_units[@]}" | LC_ALL=C sort -u)
+for unit in "${sorted_known_units[@]}"; do
+  enabled=false
+  active=false
+  if systemctl --user is-enabled --quiet "$unit" 2>/dev/null; then
+    was_enabled["$unit"]=1
+    enabled=true
+  fi
+  if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
+    was_active["$unit"]=1
+    active=true
+  fi
+  unit_snapshot=$(jq -c --arg name "$unit" --argjson enabled "$enabled" \
+    --argjson active "$active" '. + [{name:$name, enabled:$enabled, active:$active}]' \
+    <<<"$unit_snapshot")
+done
+
+[[ $(sha256sum "$shell_config" | cut -d ' ' -f 1) == "$initial_shell_digest" ]] || {
+  echo "Omarchy shell configuration changed during uninstall; retry." >&2
+  exit 1
+}
+
+targets=$(jq -cn --arg plugin "$plugin_root/$plugin_id" \
+  --arg legacy_plugin "$plugin_root/omawhatsapp" \
+  --arg legacy_bar "$plugin_root/omawhatsapp-bar" \
+  --arg skill "$skill_root/omawhatsapp" --arg helper "$helper_target" \
+  --arg service "$user_service_root/wacli-sync.service" \
+  --arg template "$user_service_root/wacli-sync@.service" \
+  --arg shell "$shell_config" --arg staged_shell "$temporary" \
+  --arg shell_digest "$initial_shell_digest" \
+  --arg plugin_artifacts "$(dirname -- "$plugin_root")" '[
+    {operation:"remove", target:$plugin, artifact_parent:$plugin_artifacts},
+    {operation:"remove", target:$legacy_plugin, artifact_parent:$plugin_artifacts},
+    {operation:"remove", target:$legacy_bar, artifact_parent:$plugin_artifacts},
+    {operation:"remove", target:$skill},
+    {operation:"remove", target:$helper},
+    {operation:"remove", target:$service},
+    {operation:"remove", target:$template},
+    {operation:"replace", staged:$staged_shell, target:$shell,
+      expected_sha256:$shell_digest}
+  ]')
+if $purge_runtime; then
+  targets=$(jq -c --arg runtime "$runtime" '. + [{operation:"remove", target:$runtime}]' \
+    <<<"$targets")
+fi
+transaction_plan="$staging_root/transaction-plan.json"
+jq -n --arg staging_root "$staging_root" --argjson units "$unit_snapshot" \
+  --argjson targets "$targets" \
+  '{mode:"uninstall", staging_root:$staging_root, units:$units, targets:$targets}' \
+  > "$transaction_plan"
+python3 "$transaction_helper" begin --journal "$transaction_journal" \
+  --plan "$transaction_plan"
+
+if command -v quickshell >/dev/null; then
+  python3 "$transaction_helper" mark-shell-stop --journal "$transaction_journal"
+  shell_stopped=true
+  omaw_stop_shell /usr/share/omarchy/shell
+fi
+if [[ ${OMAW_INSTALL_TEST_KILL_AFTER_SHELL_STOP:-0} == 1 ]]; then
+  kill -KILL "$BASHPID"
+fi
+python3 "$transaction_helper" prepare --journal "$transaction_journal"
+
+python3 "$transaction_helper" apply --journal "$transaction_journal"
+python3 "$transaction_helper" mark-units --journal "$transaction_journal"
 systemctl --user daemon-reload
+for unit in "${sorted_known_units[@]}"; do
+  disable_failed=false
+  systemctl --user disable --now "$unit" || disable_failed=true
+  if $disable_failed; then
+    echo "Uninstall note: systemctl returned nonzero while disabling $unit; verifying it explicitly." >&2
+  fi
+  if systemctl --user is-enabled --quiet "$unit" 2>/dev/null \
+      || systemctl --user is-active --quiet "$unit" 2>/dev/null; then
+    echo "Could not disable OmaWhatsApp sync unit: $unit" >&2
+    exit 1
+  fi
+done
+
+jq -e --arg plugin_id "$plugin_id" '
+  all((.plugins + .bar.layout.left + .bar.layout.center + .bar.layout.right)[]?;
+    .id != $plugin_id and .id != "omawhatsapp" and .id != "omawhatsapp-bar")
+' "$shell_config" >/dev/null
+if command -v omarchy-restart-shell >/dev/null; then
+  omarchy-restart-shell 9>&-
+  shell_stopped=false
+fi
+python3 "$transaction_helper" mark-validated --journal "$transaction_journal"
+python3 "$transaction_helper" commit --journal "$transaction_journal"
 
 if $purge_runtime; then
-  runtime="$user_home/.local/state/omawhatsapp"
-  [[ $runtime == "$user_home/.local/state/omawhatsapp" ]] || exit 3
-  rm -rf -- "$runtime"
   echo "Removed OmaWhatsApp runtime state. Your wacli session and messages were preserved."
 fi
-
-if command -v omarchy-restart-shell >/dev/null; then omarchy-restart-shell; fi
 echo "OmaWhatsApp removed. Your linked WhatsApp device and wacli store were preserved."

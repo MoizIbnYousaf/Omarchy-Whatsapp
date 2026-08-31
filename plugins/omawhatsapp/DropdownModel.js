@@ -14,7 +14,11 @@ function visualMessageIndex(index, visualDelta, length) {
 
 function fullAppPayload(chat) {
   if (!chat || !chat.jid) return {}
-  return { jid: String(chat.jid), conversation: true }
+  return {
+    account: String(chat.account || ""),
+    jid: String(chat.jid),
+    conversation: true
+  }
 }
 
 function demoMessage(text, hasAttachment, nowMilliseconds) {

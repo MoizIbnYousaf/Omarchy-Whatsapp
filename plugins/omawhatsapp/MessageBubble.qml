@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import "MediaModel.js" as MediaModel
 
 // One WhatsApp-style timeline item: quote, content, interactive options,
 // reactions, delivery metadata, and the hover action surface stay together so
@@ -19,6 +20,8 @@ Item {
   property bool selected: false
   property bool narrow: false
   property bool busyMedia: false
+  property bool surfaceActive: true
+  property string activePlaybackId: ""
 
   signal selectedRequested()
   signal openMediaRequested(string path)
@@ -30,6 +33,7 @@ Item {
   signal forwardRequested()
   signal copyRequested(string text)
   signal optionRequested(int index)
+  signal playbackRequested(string messageId)
 
   readonly property string bodyText: {
     if (!message || message["text"] === undefined || message["text"] === null) return ""
@@ -46,10 +50,13 @@ Item {
     messageMetrics.advanceWidth,
     senderMetrics.advanceWidth,
     metadataWidth)
+  readonly property bool hasMedia: String(message.media_type || "") !== ""
+  readonly property real mediaWidth: Math.min(maximumWidth,
+    MediaModel.isVisual(message) ? 560 : 520)
   readonly property real desiredWidth: message.media_type
       || String(message.quoted_id || "") !== ""
       || (Array.isArray(message.buttons) && message.buttons.length > 0)
-    ? maximumWidth
+    ? (hasMedia ? mediaWidth : maximumWidth)
     : Math.max(Style.space(88), Math.min(maximumWidth,
         naturalTextWidth + Style.space(22)))
   readonly property var reactionPills: {
@@ -199,6 +206,11 @@ Item {
         dimmer: root.dimmer
         fontFamily: root.fontFamily
         busy: root.busyMedia
+        surfaceActive: root.surfaceActive
+        activePlaybackId: root.activePlaybackId
+        onPlaybackRequested: function(messageId) {
+          root.playbackRequested(messageId)
+        }
         onOpenRequested: function(path) { root.openMediaRequested(path) }
         onDownloadRequested: root.downloadMediaRequested()
       }
