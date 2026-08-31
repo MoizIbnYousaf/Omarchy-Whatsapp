@@ -28,7 +28,7 @@ TestCase {
     tryVerify(function() { return avatar.avatarReady }, 5000)
     compare(findChild(avatar, "chatAvatarFallback").visible, false)
     compare(findChild(avatar, "chatAvatarImage").source,
-      Qt.resolvedUrl("../plugins/omawhatsapp/assets/demo-photo.svg"))
+      Qt.resolvedUrl("../plugins/omawhatsapp/assets/demo-photo.png"))
   }
 
   function test_remote_urls_never_cross_the_qml_boundary() {

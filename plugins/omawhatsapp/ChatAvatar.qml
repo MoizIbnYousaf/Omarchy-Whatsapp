@@ -15,7 +15,7 @@ Item {
   readonly property bool localAvatar: localPath.charAt(0) === "/"
     || localPath === "__demo_avatar__"
   readonly property url avatarSource: localPath === "__demo_avatar__"
-    ? Qt.resolvedUrl("assets/demo-photo.svg")
+    ? Qt.resolvedUrl("assets/demo-photo.png")
     : (localAvatar ? encodedFileUrl(localPath) : "")
   readonly property bool avatarReady: localAvatar
     && avatarImage.status === Image.Ready
