@@ -29,6 +29,7 @@ skill_root="$user_home/.agents/skills"
 shell_config="$user_home/.config/omarchy/shell.json"
 user_service_root="$xdg_config_home/systemd/user"
 helper_target="$user_home/.local/bin/omawhatsapp"
+assets_helper_target="$user_home/.local/bin/omawhatsapp_assets.py"
 runtime="$xdg_state_home/omawhatsapp"
 transaction_parent="$xdg_state_home/omawhatsapp-installer"
 transaction_journal="$transaction_parent/transaction.json"
@@ -169,6 +170,7 @@ targets=$(jq -cn --arg plugin "$plugin_root/$plugin_id" \
   --arg legacy_plugin "$plugin_root/omawhatsapp" \
   --arg legacy_bar "$plugin_root/omawhatsapp-bar" \
   --arg skill "$skill_root/omawhatsapp" --arg helper "$helper_target" \
+  --arg assets_helper "$assets_helper_target" \
   --arg service "$user_service_root/wacli-sync.service" \
   --arg template "$user_service_root/wacli-sync@.service" \
   --arg shell "$shell_config" --arg staged_shell "$temporary" \
@@ -179,6 +181,7 @@ targets=$(jq -cn --arg plugin "$plugin_root/$plugin_id" \
     {operation:"remove", target:$legacy_bar, artifact_parent:$plugin_artifacts},
     {operation:"remove", target:$skill},
     {operation:"remove", target:$helper},
+    {operation:"remove", target:$assets_helper},
     {operation:"remove", target:$service},
     {operation:"remove", target:$template},
     {operation:"replace", staged:$staged_shell, target:$shell,

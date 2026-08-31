@@ -28,6 +28,7 @@ shell_config="$user_home/.config/omarchy/shell.json"
 shell_source="/usr/share/omarchy/shell"
 user_service_root="$xdg_config_home/systemd/user"
 helper_target="$user_home/.local/bin/omawhatsapp"
+assets_helper_target="$user_home/.local/bin/omawhatsapp_assets.py"
 transaction_parent="$xdg_state_home/omawhatsapp-installer"
 transaction_journal="$transaction_parent/transaction.json"
 check_only=false
@@ -145,6 +146,7 @@ trap 'exit 130' INT TERM HUP
 staged_plugin="$staging_root/plugin"
 staged_skill="$staging_root/skill"
 staged_helper="$staging_root/helper"
+staged_assets_helper="$staging_root/omawhatsapp_assets.py"
 staged_service="$staging_root/wacli-sync.service"
 staged_template="$staging_root/wacli-sync@.service"
 install -d "$staged_plugin"
@@ -161,6 +163,7 @@ while IFS= read -r -d '' source_file; do
   install -Dm644 "$source_file" "$staged_skill/$relative"
 done < <(find "$repo_root/skills/$skill_dir" -type f -print0)
 install -m755 "$repo_root/bin/omawhatsapp" "$staged_helper"
+install -m644 "$repo_root/bin/omawhatsapp_assets.py" "$staged_assets_helper"
 install -m644 "$repo_root/systemd/user/wacli-sync.service" "$staged_service"
 install -m644 "$repo_root/systemd/user/wacli-sync@.service" "$staged_template"
 initial_shell_digest=$(sha256sum "$shell_config" | cut -d ' ' -f 1)
@@ -188,7 +191,10 @@ if $check_only; then
     "$staged_plugin/manifest.json" >/dev/null
   [[ -f "$staged_plugin/SettingsPolicy.js" ]]
   [[ -f "$staged_plugin/AccountModel.js" ]]
+  [[ -f "$staged_plugin/AccountSwitcher.qml" ]]
+  [[ -f "$staged_plugin/ChatAvatar.qml" ]]
   [[ -f "$staged_plugin/LICENSE" ]]
+  [[ -f "$staged_assets_helper" ]]
   rg -q '^name: omawhatsapp$' "$staged_skill/SKILL.md"
   rg -q 'references/wacli-parity\.md' "$staged_skill/SKILL.md"
   python3 "$repo_root/bin/omawhatsapp" capabilities \
@@ -209,19 +215,18 @@ fi
 # One canonical, staged helper snapshot supplies the validated account list and
 # each account's persisted online choice before any live target is disturbed.
 status_json=$("$staged_helper" status)
-if jq -e '.accounts | length == 1 and .[0].account == ""' \
-    <<<"$status_json" >/dev/null; then
-  account_units=(wacli-sync.service)
-  account_flags=("")
-else
-  mapfile -t account_names < <(jq -r '.accounts[].account' <<<"$status_json")
-  account_units=()
-  account_flags=()
-  for account_name in "${account_names[@]}"; do
-    account_units+=("wacli-sync@${account_name}.service")
-    account_flags+=("$account_name")
-  done
-fi
+jq -e '
+  .ok == true and (.accounts | type == "array" and length > 0) and
+  (all(.accounts[]; (.account | type == "string") and
+    (.unit | type == "string") and
+    (.unit | test("^wacli-sync(?:@[A-Za-z0-9][A-Za-z0-9._-]{0,63})?\\.service$")))) and
+  (([.accounts[].unit] | unique | length) == (.accounts | length))
+' <<<"$status_json" >/dev/null || {
+  echo "OmaWhatsApp could not resolve a safe sync unit for every account." >&2
+  exit 1
+}
+mapfile -t account_units < <(jq -r '.accounts[].unit' <<<"$status_json")
+mapfile -t account_flags < <(jq -r '.accounts[].account' <<<"$status_json")
 
 # Discover service state before publishing so a failed upgrade can restore the
 # exact enabled/active choices it found.
@@ -282,6 +287,8 @@ done
 transaction_plan="$staging_root/transaction-plan.json"
 jq -n --arg staging_root "$staging_root" --arg helper "$helper_target" \
   --arg staged_helper "$staged_helper" \
+  --arg assets_helper "$assets_helper_target" \
+  --arg staged_assets_helper "$staged_assets_helper" \
   --arg plugin "$plugin_root/$install_plugin_dir" --arg staged_plugin "$staged_plugin" \
   --arg skill "$skill_root/$skill_dir" --arg staged_skill "$staged_skill" \
   --arg service "$user_service_root/wacli-sync.service" --arg staged_service "$staged_service" \
@@ -296,6 +303,7 @@ jq -n --arg staging_root "$staging_root" --arg helper "$helper_target" \
     staging_root:$staging_root,
     units:$units,
     targets:[
+      {operation:"replace", staged:$staged_assets_helper, target:$assets_helper},
       {operation:"replace", staged:$staged_helper, target:$helper},
       {operation:"replace", staged:$staged_plugin, target:$plugin,
         artifact_parent:$plugin_artifacts},
@@ -329,7 +337,7 @@ python3 "$transaction_helper" mark-units --journal "$transaction_journal"
 systemctl --user daemon-reload
 
 # Disable stale instances that no configured account owns anymore.
-if [[ ${account_units[0]} != wacli-sync.service ]] \
+if [[ -z ${desired_units[wacli-sync.service]+x} ]] \
     && [[ -n ${was_enabled[wacli-sync.service]+x}${was_active[wacli-sync.service]+x} ]]; then
   systemctl --user disable --now wacli-sync.service
 fi

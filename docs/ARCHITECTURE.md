@@ -47,10 +47,11 @@ labelled chat-menu action remains the one-off receipt path.
 wacli owns the account list. The helper reads it from `accounts list`, which
 already resolves each account's absolute store, and keys its own private state
 by that store rather than by account name, so renaming an account keeps its
-history and registering an existing session with `store: .` needs no file to
-move. A machine with no account config stays single account and keeps the
-original sync unit; named accounts each get a `wacli-sync@<name>.service`
-instance.
+history. A machine with no account config stays single account and keeps the
+original sync unit. When named accounts are added, an existing root session is
+exposed as `primary` through wacli's `--store` selector without rewriting its
+config or moving data; configured accounts each get a
+`wacli-sync@<name>.service` instance.
 
 The chat rail merges every account and tags each row with the account it came
 from. An account that has never synced is reported as unready beside the rail
@@ -58,6 +59,10 @@ instead of emptying it. Everything downstream of a row stays inside that row's
 account: its mirror resolves the exact chat, its store scopes the badge
 acknowledgement and the popup watermark, its unit is the one paused when the
 store lock is contended, and its offline choice governs only its own writes.
+Rail account filters are a pure view over those already-scoped rows; selecting
+a filter never rewrites or infers a chat target. The explicit `+` flow delegates
+linking to a terminal and keeps an existing root session addressable as
+`primary` without moving its store or authoring wacli configuration.
 
 ## Data boundary
 
@@ -85,6 +90,12 @@ Media metadata is read with the message, but bytes stay in wacli's private
 store. Existing files render locally. Missing files are fetched only after an
 explicit click, and the helper verifies both chat JID and message ID against
 the mirror before asking wacli to download anything.
+
+Profile photos have a separate explicit remote-read boundary. One click asks
+for metadata for a bounded recent-chat batch, downloads supported small HTTPS
+images behind the helper, and stores them in an owner-private account-and-chat
+keyed cache. CDN URLs and tokens never enter QML or persistent index data;
+normal rail refreshes consult only the local cache.
 
 wacli intentionally does not persist the original local path on outgoing
 media rows. After a successful upload, OmaWhatsApp keeps a private, bounded,

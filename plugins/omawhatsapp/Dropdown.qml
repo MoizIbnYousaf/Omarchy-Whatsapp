@@ -23,6 +23,7 @@ Panel {
   property int selectedIndex: 0
   property int messageIndex: 0
   property string searchText: ""
+  property string accountScope: ""
   property string viewMode: "chats"
   property var currentChat: null
   property var replyTarget: null
@@ -57,22 +58,23 @@ Panel {
     accent.b * 0.18 + background.b * 0.82, 1)
   readonly property string fontFamily: Style.font.family
   readonly property var demoChats: [
-    { jid: "demo-team", name: "Design team", kind: "group", account: "work", account_label: "work", preview: "The compact client can send now", timestamp: 1787540400, unread: 3, notification_unread: 3, pinned: true },
-    { jid: "demo-alex", name: "Alex", kind: "dm", account: "personal", account_label: "personal", preview: "Looks perfect — ship it", timestamp: 1787539800, unread: 1, notification_unread: 1, pinned: false },
-    { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", account: "work", account_label: "work", preview: "Native, private, and instant", timestamp: 1787539200, unread: 0, notification_unread: 0, pinned: false }
+    { jid: "demo-team", name: "Design team", kind: "group", account: "work", account_label: "work", avatar_path: "__demo_avatar__", preview: "The compact client can send now", timestamp: 1787540400, unread: 3, notification_unread: 3, pinned: true },
+    { jid: "demo-alex", name: "Alex", kind: "dm", account: "personal", account_label: "personal", avatar_path: "__demo_avatar__", preview: "Looks perfect — ship it", timestamp: 1787539800, unread: 1, notification_unread: 1, pinned: false },
+    { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", account: "work", account_label: "work", avatar_path: "", preview: "Native, private, and instant", timestamp: 1787539200, unread: 0, notification_unread: 0, pinned: false }
   ]
   readonly property bool multiAccount: demoMode
     || (!!service && service.multiAccount === true)
   readonly property var sourceChats: demoMode
     ? demoChats : (service && Array.isArray(service.chats) ? service.chats : [])
+  readonly property var accountEntries: demoMode
+    ? [{ account: "work", label: "work" },
+       { account: "personal", label: "personal" }]
+    : (service && Array.isArray(service.accounts) ? service.accounts : [])
   readonly property var filteredChats: {
     var needle = String(searchText || "").trim().toLowerCase()
-    var values = sourceChats.filter(function(chat) {
-      return needle === ""
-        || String(chat.name || "").toLowerCase().indexOf(needle) >= 0
-        || String(chat.preview || "").toLowerCase().indexOf(needle) >= 0
-    })
-    return values.slice(0, Math.max(1, Number(maxRows || 7)))
+    var scope = AccountModel.normalizeScope(root.accountScope, root.accountEntries)
+    return AccountModel.filterChats(root.sourceChats, scope, needle,
+      Math.max(1, Number(maxRows || 7)))
   }
   readonly property bool serviceOnCurrentChat: !!service
     && AccountModel.sameRef(
@@ -88,8 +90,11 @@ Panel {
     demoMode || !service ? [] : service.accounts)
   readonly property int accountReadinessHeight: accountReadinessSummary === ""
     ? 0 : Style.space(36)
+  readonly property int chatChromeHeight:
+    Style.space(48 + 8 + 40 + 8 + 8 + 8 + 42)
+      + accountSwitcher.height
   readonly property int desiredHeight: viewMode === "conversation"
-    ? Style.space(620) : Style.space(48 + 8 + 40 + 8 + 8 + 42)
+    ? Style.space(620) : chatChromeHeight
       + accountReadinessHeight + chatListHeight
   readonly property int notificationCount: demoMode ? 4
     : (service ? Number(service.notificationUnreadCount || 0) : 0)
@@ -424,13 +429,6 @@ Panel {
     clipboardProcess.payload = text
     clipboardProcess.stdinEnabled = true
     clipboardProcess.running = true
-  }
-
-  function initials(value) {
-    var parts = String(value || "?").trim().split(/\s+/).filter(function(part) { return part !== "" })
-    if (parts.length === 0) return "?"
-    if (parts.length === 1) return parts[0].slice(0, 1).toUpperCase()
-    return (parts[0].slice(0, 1) + parts[parts.length - 1].slice(0, 1)).toUpperCase()
   }
 
   function timeLabel(value) {
@@ -774,6 +772,35 @@ Panel {
             }
           }
 
+          AccountSwitcher {
+            id: accountSwitcher
+            width: parent.width
+            accounts: root.accountEntries
+            selectedScope: root.accountScope
+            foreground: root.foreground
+            background: root.background
+            accent: root.accent
+            muted: root.muted
+            urgent: root.urgent
+            fontFamily: root.fontFamily
+            linkBusy: !!root.service && root.service.accountOperations.linkBusy
+            avatarBusy: !!root.service && root.service.accountOperations.avatarBusy
+            statusMessage: root.service
+              ? root.service.accountOperations.statusMessage : ""
+            allowAccountLink: !root.demoMode && !!root.service
+            allowAvatarRefresh: !root.demoMode && !!root.service
+            onScopeSelected: function(scope) {
+              root.accountScope = scope
+              root.selectedIndex = 0
+            }
+            onLinkRequested: function(name) {
+              if (root.service) root.service.accountOperations.linkAccount(name)
+            }
+            onAvatarRefreshRequested: {
+              if (root.service) root.service.accountOperations.refreshAvatars()
+            }
+          }
+
           AccountReadiness {
             width: parent.width
             accounts: root.demoMode || !root.service ? [] : root.service.accounts
@@ -786,7 +813,7 @@ Panel {
           Item {
             width: parent.width
             height: Math.max(Style.space(120),
-              Math.min(root.chatListHeight, keyCatcher.height - Style.space(154)
+              Math.min(root.chatListHeight, keyCatcher.height - root.chatChromeHeight
                 - root.accountReadinessHeight))
 
             ListView {
@@ -811,24 +838,19 @@ Panel {
                   color: chatRow.index === root.selectedIndex || rowHover.hovered
                     ? root.selected : "transparent"
                 }
-                Rectangle {
+                ChatAvatar {
                   id: avatar
                   anchors.left: parent.left
                   anchors.leftMargin: Style.space(9)
                   anchors.verticalCenter: parent.verticalCenter
                   width: Style.space(38)
                   height: width
-                  radius: width / 2
-                  color: root.subtle
-                  Text {
-                    textFormat: Text.PlainText
-                    anchors.centerIn: parent
-                    text: root.initials(chatRow.modelData.name)
-                    color: root.accent
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.weight: Font.DemiBold
-                  }
+                  chat: chatRow.modelData
+                  selected: chatRow.index === root.selectedIndex
+                  foreground: root.foreground
+                  background: root.background
+                  accent: root.accent
+                  fontFamily: root.fontFamily
                 }
                 Column {
                   anchors.left: avatar.right
@@ -991,24 +1013,19 @@ Panel {
               HoverHandler { id: backHover }
               TapHandler { onTapped: root.backToChats() }
             }
-            Rectangle {
+            ChatAvatar {
               id: conversationAvatar
               anchors.left: backButton.right
               anchors.leftMargin: Style.space(7)
               anchors.verticalCenter: parent.verticalCenter
               width: Style.space(34)
               height: width
-              radius: width / 2
-              color: root.subtle
-              Text {
-                textFormat: Text.PlainText
-                anchors.centerIn: parent
-                text: root.initials(root.currentChat ? root.currentChat.name : "")
-                color: root.accent
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.weight: Font.DemiBold
-              }
+              chat: root.currentChat || ({})
+              selected: true
+              foreground: root.foreground
+              background: root.background
+              accent: root.accent
+              fontFamily: root.fontFamily
             }
             Column {
               anchors.left: conversationAvatar.right

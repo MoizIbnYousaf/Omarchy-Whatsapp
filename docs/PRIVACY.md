@@ -33,6 +33,19 @@ only after an explicit UI action, stops before review, and crosses WhatsApp
 only after the user explicitly submits the reviewed draft. Failed sends remain
 local for retry or discard; confirmed sends remove their draft.
 
+Profile-photo refresh is an explicit remote read, never part of ordinary chat
+browsing. The helper accepts only public, hostname-verified HTTPS targets,
+pins each connection to the address it validated, and repeats that boundary at
+every redirect. It keeps at most 128 one-megabyte JPEG, PNG, or WebP files in
+an owner-private cache with opaque names. CDN URLs, query tokens, account store
+paths, and chat identifiers are not stored in that index or exposed to QML;
+the UI receives only a validated absolute local path.
+
+If a foreground wacli operation briefly yields background sync, the helper
+stores a crash-recovery intent containing only the public systemd unit name and
+an opaque lock filename. It contains no account store path, chat identifier,
+message, media, URL, or credential and is removed after sync is restored.
+
 Child-process and clipboard pipes are drained incrementally under hard byte
 caps. Chat names, senders, message bodies, filenames, button labels, and error
 strings are always rendered as plain text in QML.

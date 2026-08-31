@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest import mock
 
@@ -156,6 +157,169 @@ class BackendTests(unittest.TestCase):
     def test_chat_search_is_literal(self) -> None:
         self.assertEqual(self.backend.chats("Design%team")["chats"], [])
         self.assertEqual(self.backend.chats("design")["chats"][0]["jid"], "team@g.us")
+
+    def test_profile_photos_are_explicit_private_cached_remote_reads(self) -> None:
+        with self.assertRaisesRegex(
+                backend_module.OmaWhatsAppError, "authorization='remote-read'"):
+            self.backend.refresh_avatars("")
+
+        def metadata(account, candidates):
+            return ([{
+                "key": candidate["key"], "picture_id": "synthetic-picture",
+                "url": "https://cdn.example.test/avatar.jpg", "unchanged": False,
+            } for candidate in candidates], [])
+
+        jpeg = b"\xff\xd8\xff" + b"synthetic-avatar"
+        with mock.patch.object(
+                self.backend, "_profile_picture_metadata", side_effect=metadata), \
+                mock.patch.object(
+                    backend_module, "fetch_https_image", return_value=jpeg) as fetch:
+            result = self.backend.refresh_avatars("remote-read")
+        self.assertEqual(result["refreshed"], 3)
+        self.assertEqual(fetch.call_count, 3)
+        chats = self.backend.chats()["chats"]
+        self.assertTrue(all(Path(chat["avatar_path"]).is_file() for chat in chats))
+        self.assertTrue(all("http" not in chat["avatar_path"] for chat in chats))
+        self.assertTrue(all(
+            Path(chat["avatar_path"]).is_relative_to(self.root / "state" / "avatars")
+            for chat in chats
+        ))
+
+        # The rail is strictly local: a fresh cache is not fetched again until
+        # its TTL expires, and merely reading chats never invokes WhatsApp.
+        with mock.patch.object(self.backend, "_profile_picture_metadata") as remote:
+            current = self.backend.refresh_avatars("remote-read")
+            self.backend.chats()
+        self.assertEqual(current["checked"], 0)
+        remote.assert_not_called()
+
+    def test_profile_metadata_yields_sync_once_for_the_whole_account_batch(self) -> None:
+        account = self.backend.account("")
+        candidates = [
+            {"key": "one", "jid": "alex@s.whatsapp.net", "picture_id": ""},
+            {"key": "two", "jid": "team@g.us", "picture_id": "old"},
+        ]
+        results = [subprocess.CompletedProcess(
+            [], 0, json.dumps({"success": True, "data": {
+                "id": key, "url": "", "unchanged": True,
+            }}), ""
+        ) for key in ("new-one", "new-two")]
+        systemctl_result = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(
+                self.backend, "_sync_active", return_value=True), \
+                mock.patch.object(
+                    self.backend, "_systemctl_user",
+                    return_value=systemctl_result,
+                ) as systemctl, mock.patch.object(
+                    self.backend, "_run_after_sync_yield", side_effect=results,
+                ) as run:
+            records, failed = self.backend._profile_picture_metadata(
+                account, candidates
+            )
+        self.assertEqual([record["picture_id"] for record in records],
+                         ["new-one", "new-two"])
+        self.assertEqual(failed, [])
+        self.assertEqual([call.args[0] for call in systemctl.call_args_list], [
+            ["stop", account.unit], ["start", account.unit],
+        ])
+        self.assertEqual(run.call_count, 2)
+        run.assert_any_call(
+            ["--json", "profile", "picture-info", "--jid",
+             "alex@s.whatsapp.net", "--preview"],
+            timeout=20, account=account,
+        )
+
+    def test_avatar_refresh_advances_past_fresh_rows_and_repairs_missing_files(self) -> None:
+        account = self.backend.account("")
+        rows = [{"account": account.name, "jid": f"synthetic-{index}@example"}
+                for index in range(15)]
+        keys = [self.backend._avatar_key(account, row["jid"]) for row in rows]
+        now = int(time.time())
+        entries = {
+            key: {"picture_id": f"picture-{index}", "checked_at": now,
+                  "missing": False, "filename": f"file-{index}.jpg"}
+            for index, key in enumerate(keys[:12])
+        }
+        paths = {key: f"/synthetic/{index}.jpg"
+                 for index, key in enumerate(keys[:11])}
+        captured = []
+
+        def metadata(selected, candidates):
+            captured.extend(candidates)
+            return ([{"key": item["key"], "picture_id": "", "url": "",
+                      "unchanged": False} for item in candidates], [])
+
+        with mock.patch.object(self.backend, "chats", return_value={"chats": rows}), \
+                mock.patch.object(self.backend.avatar_cache, "entries", return_value=entries), \
+                mock.patch.object(self.backend.avatar_cache, "paths", return_value=paths), \
+                mock.patch.object(
+                    self.backend, "_profile_picture_metadata", side_effect=metadata), \
+                mock.patch.object(self.backend.avatar_cache, "update"):
+            result = self.backend.refresh_avatars("remote-read")
+        self.assertEqual(result["checked"], 4)
+        self.assertEqual([item["jid"] for item in captured],
+                         [rows[11]["jid"], rows[12]["jid"], rows[13]["jid"],
+                          rows[14]["jid"]])
+        self.assertEqual(captured[0]["picture_id"], "")
+
+    def test_failed_avatar_batch_backs_off_so_later_chats_are_not_starved(self) -> None:
+        account = self.backend.account("")
+        rows = [{"account": account.name, "jid": f"synthetic-{index}@example"}
+                for index in range(15)]
+        batches = []
+
+        def fail(selected, candidates):
+            batches.append([item["jid"] for item in candidates])
+            return [], [item["key"] for item in candidates]
+
+        with mock.patch.object(self.backend, "chats", return_value={"chats": rows}), \
+                mock.patch.object(
+                    self.backend, "_profile_picture_metadata", side_effect=fail):
+            first = self.backend.refresh_avatars("remote-read")
+            second = self.backend.refresh_avatars("remote-read")
+        self.assertEqual((first["checked"], first["failed"]), (12, 12))
+        self.assertEqual((second["checked"], second["failed"]), (3, 3))
+        self.assertEqual(batches[1], [row["jid"] for row in rows[12:]])
+
+    def test_failed_avatar_download_retries_from_the_cached_generation(self) -> None:
+        account = self.backend.account("")
+        jid = "synthetic@example"
+        key = self.backend._avatar_key(account, jid)
+        self.backend.avatar_cache.update([{
+            "key": key, "picture_id": "generation-a", "checked_at": 0,
+            "missing": False, "data": b"\xff\xd8\xffold-avatar",
+        }])
+        observed_ids = []
+
+        def metadata(selected, candidates):
+            observed_ids.append(candidates[0]["picture_id"])
+            return ([{
+                "key": key, "picture_id": "generation-b",
+                "url": "https://cdn.example.test/avatar.jpg",
+                "unchanged": False,
+            }], [])
+
+        with mock.patch.object(
+                self.backend, "chats",
+                return_value={"chats": [{"account": account.name, "jid": jid}]},
+        ), mock.patch.object(
+                self.backend, "_profile_picture_metadata", side_effect=metadata,
+        ), mock.patch.object(
+                backend_module.time, "time", side_effect=[10_000, 13_601],
+        ), mock.patch.object(
+                backend_module, "fetch_https_image", side_effect=[
+                    backend_module.AvatarCacheError("synthetic download failure"),
+                    b"\xff\xd8\xffnew-avatar",
+                ],
+        ):
+            first = self.backend.refresh_avatars("remote-read")
+            second = self.backend.refresh_avatars("remote-read")
+        self.assertEqual((first["failed"], second["refreshed"]), (1, 1))
+        self.assertEqual(observed_ids, ["generation-a", "generation-a"])
+        self.assertEqual(
+            self.backend.avatar_cache.entries([key])[key]["picture_id"],
+            "generation-b",
+        )
 
     def test_notification_dismissal_is_local_and_new_messages_reappear(self) -> None:
         original = next(chat for chat in self.backend.chats()["chats"]
@@ -1076,17 +1240,25 @@ class BackendTests(unittest.TestCase):
 
     def test_wacli_interactive_mode_is_limited_and_exact(self) -> None:
         completed = subprocess.CompletedProcess([], 0, "", "")
+
+        def authenticate(*args, **kwargs):
+            (self.store / "session.db").write_bytes(b"synthetic-session")
+            return completed
+
         with mock.patch.object(self.backend, "_unit_active", return_value=False), \
              mock.patch.object(
                  self.backend, "_systemctl_user", return_value=completed
              ) as systemctl, \
-             mock.patch.object(backend_module.subprocess, "run", return_value=completed) as run:
+             mock.patch.object(
+                 backend_module.subprocess, "run", side_effect=authenticate
+             ) as run:
             code = self.backend.transport_interactive(
                 ["auth", "--qr-format", "terminal"], authorization="interactive"
             )
         self.assertEqual(code, 0)
         self.assertEqual(run.call_args.args[0], [
-            str(self.wacli), "auth", "--qr-format", "terminal"
+            str(self.wacli), "--store", str(self.store.resolve()),
+            "auth", "--qr-format", "terminal"
         ])
         systemctl.assert_called_once_with([
             "enable", "--now", "wacli-sync.service"
@@ -1096,6 +1268,30 @@ class BackendTests(unittest.TestCase):
             self.backend.transport_interactive(
                 ["send", "text"], authorization="whatsapp-write"
             )
+
+    def test_one_off_store_auth_validates_session_without_managing_a_unit(self) -> None:
+        one_off = self.root / "one-off"
+        one_off.mkdir()
+        completed = subprocess.CompletedProcess([], 0, "", "")
+
+        def authenticate(*args, **kwargs):
+            (one_off / "session.db").write_bytes(b"synthetic-session")
+            return completed
+
+        with mock.patch.object(backend_module, "HOME", self.root), \
+                mock.patch.object(
+                backend_module.subprocess, "run", side_effect=authenticate
+        ) as run, mock.patch.object(
+                self.backend, "_systemctl_user"
+        ) as systemctl:
+            result = self.backend.transport_interactive(
+                ["auth"], authorization="interactive", store=str(one_off)
+            )
+        self.assertEqual(result, 0)
+        self.assertEqual(run.call_args.args[0][:3], [
+            str(self.wacli), "--store", str(one_off.resolve()),
+        ])
+        systemctl.assert_not_called()
 
     def test_wacli_interactive_cli_parser_preserves_command(self) -> None:
         args = backend_module.parser().parse_args([
@@ -1134,6 +1330,18 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(value["ok"])
         self.assertEqual(value["operation"], "version")
         self.assertEqual(value["data"], {"version": "fixture"})
+
+    def test_entrypoint_stays_usable_during_companion_module_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            helper = Path(temporary) / "omawhatsapp"
+            helper.write_bytes(SCRIPT.read_bytes())
+            helper.chmod(0o755)
+            result = subprocess.run(
+                [str(helper), "capabilities"], text=True, capture_output=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["ok"])
 
 
 class MultiAccountTests(unittest.TestCase):
@@ -1220,9 +1428,75 @@ sys.exit(0)
             account_config=self.root / "absent.yaml",
         )
         accounts = backend.accounts()
-        self.assertEqual([account.name for account in accounts], [""])
+        self.assertEqual([account.name for account in accounts], ["primary"])
         self.assertEqual(accounts[0].store_dir, self.work)
         self.assertEqual(accounts[0].unit, "wacli-sync.service")
+        self.assertEqual(accounts[0].cli_args, ["--store", str(self.work.resolve())])
+
+    def test_existing_root_session_stays_primary_without_rewriting_wacli_config(self) -> None:
+        legacy = self.root / "legacy-root"
+        legacy.mkdir()
+        (legacy / "session.db").write_bytes(b"synthetic-session")
+        original_config = self.config.read_bytes()
+        backend = backend_module.Backend(
+            store_dir=legacy,
+            state_dir=self.root / "legacy-state",
+            wacli=self.wacli,
+            account_config=self.config,
+        )
+        accounts = backend.accounts()
+        self.assertEqual([account.name for account in accounts],
+                         ["primary", "work", "home"])
+        primary = backend.account("primary")
+        self.assertEqual(primary.unit, "wacli-sync.service")
+        self.assertEqual(primary.cli_args, ["--store", str(legacy.resolve())])
+        self.assertEqual(self.config.read_bytes(), original_config)
+
+        completed = subprocess.CompletedProcess([], 0, "{}", "")
+        with mock.patch.object(
+                backend_module, "run_bounded", return_value=completed) as run:
+            backend._run(["--json", "doctor"], account=primary)
+        self.assertEqual(run.call_args.args[0][:3],
+                         [str(self.wacli), "--store", str(legacy.resolve())])
+
+        completed = subprocess.CompletedProcess(
+            [], 0, '{"success":true,"data":{"version":"synthetic"}}', ""
+        )
+        with mock.patch.object(backend, "_run", return_value=completed) as run:
+            result = backend.transport({"account": "primary", "args": ["version"]})
+        self.assertTrue(result["ok"])
+        command = run.call_args.args[0]
+        self.assertEqual(command[:2], ["--store", str(legacy.resolve())])
+        self.assertNotIn("--account", command)
+
+    def test_root_account_reference_stays_stable_across_the_first_link(self) -> None:
+        legacy = self.root / "transition-root"
+        legacy.mkdir()
+        self._build(legacy, [self.WORK_CHATS[1]])
+        (legacy / "session.db").write_bytes(b"synthetic-session")
+        transition_config = self.root / "transition.yaml"
+        backend = backend_module.Backend(
+            store_dir=legacy, state_dir=self.root / "transition-state",
+            wacli=self.wacli, account_config=transition_config,
+        )
+        captured = backend.account("").name
+        self.assertEqual(captured, "primary")
+
+        transition_config.write_text("accounts: {}\n", encoding="utf-8")
+        backend._refresh_account_registry()
+        self.assertEqual(backend.account("").name, captured)
+        backend.use_account(captured)
+        completed = subprocess.CompletedProcess(
+            [], 0, '{"success":true,"data":{}}', ""
+        )
+        with mock.patch.object(
+                backend_module, "run_bounded", return_value=completed) as run:
+            backend.send("shared@s.whatsapp.net", "synthetic")
+            backend.chat_action("shared@s.whatsapp.net", "read")
+        for invocation in run.call_args_list:
+            self.assertEqual(invocation.args[0][:3], [
+                str(self.wacli), "--store", str(legacy.resolve())
+            ])
 
     def test_rail_merges_every_account_and_tags_each_row(self) -> None:
         result = self.backend.chats()
@@ -1254,6 +1528,23 @@ sys.exit(0)
             (self.root / "state" / "preferences.json").read_text(encoding="utf-8"))
         self.assertEqual(list(stored["stores"]), [str(self.work)])
 
+    def test_avatar_cache_is_isolated_for_identical_jids_across_accounts(self) -> None:
+        work = self.backend.account("work")
+        home = self.backend.account("home")
+        work_key = self.backend._avatar_key(work, "shared@s.whatsapp.net")
+        home_key = self.backend._avatar_key(home, "shared@s.whatsapp.net")
+        self.assertNotEqual(work_key, home_key)
+        self.backend.avatar_cache.update([{
+            "key": work_key, "picture_id": "work-picture", "checked_at": 1,
+            "missing": False, "data": b"\xff\xd8\xffwork",
+        }])
+        rail = {(chat["account"], chat["jid"]): chat
+                for chat in self.backend.chats()["chats"]}
+        self.assertTrue(rail[("work", "shared@s.whatsapp.net")]["avatar_path"])
+        self.assertEqual(
+            rail[("home", "shared@s.whatsapp.net")]["avatar_path"], ""
+        )
+
     def test_dismissing_the_bar_badge_covers_every_account(self) -> None:
         self.backend.acknowledge_notifications("")
         rail = self.backend.chats()["chats"]
@@ -1280,6 +1571,102 @@ sys.exit(0)
         self.assertFalse(self.backend.online())
         self.backend.use_account("work")
         self.assertTrue(self.backend.online())
+
+    def test_account_link_resumes_unfinished_names_and_starts_new_sync(self) -> None:
+        def finish_home(*args, **kwargs):
+            (self.home / "session.db").write_bytes(b"synthetic-session")
+            return 0, self.backend.account("home"), ("auth",)
+
+        with mock.patch.object(
+                self.backend, "_transport_interactive", side_effect=finish_home) as interactive, \
+                mock.patch.object(self.backend, "_systemctl_user") as systemctl:
+            self.assertEqual(self.backend.link_account("home", "interactive"), 0)
+        interactive.assert_called_once_with(
+            ["auth"], authorization="interactive", account="home"
+        )
+        systemctl.assert_called_once_with(
+            ["enable", "--now", "wacli-sync@home.service"]
+        )
+
+        travel_store = self.root / "stores" / "travel"
+        travel_store.mkdir(parents=True)
+        (travel_store / "session.db").write_bytes(b"synthetic-session")
+        new = backend_module.Account(
+            "travel", travel_store, default=False
+        )
+        current = [self.backend.account("work"), self.backend.account("home")]
+        known = [*current, new]
+        with mock.patch.object(
+                self.backend, "accounts", side_effect=[current, known]), \
+                mock.patch.object(
+                    self.backend, "_transport_interactive",
+                    return_value=(0, current[0], ("accounts", "add")),
+                ) as interactive, \
+                mock.patch.object(self.backend, "_systemctl_user") as systemctl:
+            self.assertEqual(self.backend.link_account("travel", "interactive"), 0)
+        interactive.assert_called_once_with(
+            ["accounts", "add", "travel"], authorization="interactive"
+        )
+        systemctl.assert_called_once_with(
+            ["enable", "--now", "wacli-sync@travel.service"]
+        )
+
+    def test_account_link_reconciles_a_committed_nonzero_terminal_exit(self) -> None:
+        travel_store = self.root / "stores" / "travel"
+        travel_store.mkdir(parents=True)
+        new = backend_module.Account("travel", travel_store)
+        current = [self.backend.account("work"), self.backend.account("home")]
+
+        def committed(*args, **kwargs):
+            (travel_store / "session.db").write_bytes(b"synthetic-session")
+            return 1, current[0], ("accounts", "add")
+
+        with mock.patch.object(self.backend, "accounts", side_effect=[current, [*current, new]]), \
+                mock.patch.object(
+                    self.backend, "_transport_interactive", side_effect=committed), \
+                mock.patch.object(self.backend, "_systemctl_user") as systemctl:
+            with self.assertRaisesRegex(
+                    backend_module.OmaWhatsAppPartialError, "terminal exited") as raised:
+                self.backend.link_account("travel", "interactive")
+        self.assertTrue(raised.exception.partial["committed"])
+        systemctl.assert_called_once_with(
+            ["enable", "--now", "wacli-sync@travel.service"]
+        )
+
+    def test_account_link_rejects_success_without_a_linked_session(self) -> None:
+        travel_store = self.root / "stores" / "travel"
+        travel_store.mkdir(parents=True)
+        new = backend_module.Account("travel", travel_store)
+        current = [self.backend.account("work"), self.backend.account("home")]
+        with mock.patch.object(
+                self.backend, "accounts", side_effect=[current, [*current, new]]), \
+                mock.patch.object(
+                    self.backend, "_transport_interactive",
+                    return_value=(0, current[0], ("accounts", "add")),
+                ), mock.patch.object(
+                    self.backend, "_systemctl_user"
+                ) as systemctl, self.assertRaisesRegex(
+                    backend_module.OmaWhatsAppError, "no linked session"
+                ):
+            self.backend.link_account("travel", "interactive")
+        systemctl.assert_not_called()
+
+    def test_account_link_rejects_invalid_or_already_linked_names(self) -> None:
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "1-64"):
+            self.backend.link_account(".hidden", "interactive")
+        (self.home / "session.db").write_bytes(b"synthetic-session")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "already linked"):
+            self.backend.link_account("home", "interactive")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "authorize interactive"):
+            self.backend.link_account("work", "")
+
+        full = [backend_module.Account(f"account-{index}", self.root / str(index))
+                for index in range(backend_module.MAX_ACCOUNTS)]
+        with mock.patch.object(self.backend, "accounts", return_value=full), \
+                mock.patch.object(self.backend, "_transport_interactive") as interactive, \
+                self.assertRaisesRegex(backend_module.OmaWhatsAppError, "maximum"):
+            self.backend.link_account("overflow", "interactive")
+        interactive.assert_not_called()
 
     def test_status_separates_what_is_aggregated_from_what_is_selected(self) -> None:
         probes = threading.Barrier(2)

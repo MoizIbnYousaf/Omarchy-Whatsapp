@@ -25,7 +25,8 @@ also runs an isolated, read-only install preflight—including the bundled agent
 skill safety contract—and compares the shipped registry with the installed
 wacli help tree. Offscreen QML coverage uses generated MP4, GIF, and WebP
 fixtures and exercises cross-window playback leasing, account-identical JIDs,
-and file-picker/action interleavings. Installer tests kill transactions at
+account-filter purity, private local avatars, missing-video transitions, and
+file-picker/action interleavings. Installer tests kill transactions at
 durable boundaries and prove the next run restores one coherent version.
 
 ## Live local verification
@@ -67,8 +68,13 @@ durable boundaries and prove the next run restores one coherent version.
    badge sums every account, and a middle-click clears all of them. Confirm a
    send, a receipt, and the offline pill act only on the open chat's account,
    and that `systemctl --user list-units 'wacli-sync@*'` shows one instance per
-   linked account.
-11. Only with explicit permission, send a meaningful text/image/voice note to a
+   linked account. Exercise `All` and each account chip and confirm filtering
+   never retargets the selected chat. Only with explicit permission, exercise
+   `+` and complete or cancel its terminal QR flow.
+11. Click profile-photo refresh only with explicit remote-read permission.
+   Confirm recent photos appear, fallbacks remain clear where no photo exists,
+   and opening/searching chats does not itself trigger network work.
+12. Only with explicit permission, send a meaningful text/image/voice note to a
    known chat. Never create a throwaway WhatsApp test message.
 
 ## Screenshot

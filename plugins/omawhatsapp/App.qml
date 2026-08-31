@@ -59,10 +59,11 @@ Item {
   property string demoSelectedJid: "demo-lab"
   property string demoSelectedAccount: "work"
   property string demoVoiceState: "idle"
+  property string accountScope: ""
   property var demoChats: [
-    { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", account: "work", account_label: "work", preview: "OmaWhatsApp is instant and native", timestamp: 1787539920, unread: 0, pinned: true },
-    { jid: "demo-team", name: "Design team", kind: "group", account: "work", account_label: "work", preview: "The interaction pass is ready", timestamp: 1787539000, unread: 3, pinned: false },
-    { jid: "demo-alex", name: "Alex", kind: "dm", account: "personal", account_label: "personal", preview: "Looks perfect — ship it", timestamp: 1787538200, unread: 1, pinned: false }
+    { jid: "demo-lab", name: "OmaWhatsApp Lab", kind: "group", account: "work", account_label: "work", avatar_path: "__demo_avatar__", preview: "OmaWhatsApp is instant and native", timestamp: 1787539920, unread: 0, pinned: true },
+    { jid: "demo-team", name: "Design team", kind: "group", account: "work", account_label: "work", avatar_path: "", preview: "The interaction pass is ready", timestamp: 1787539000, unread: 3, pinned: false },
+    { jid: "demo-alex", name: "Alex", kind: "dm", account: "personal", account_label: "personal", avatar_path: "__demo_avatar__", preview: "Looks perfect — ship it", timestamp: 1787538200, unread: 1, pinned: false }
   ]
   property var demoItems: [
     { id: "demo-5", text: "Yep — shipped.", sender: "Sam Rivera", sender_jid: "sam@s.whatsapp.net", timestamp: 1787540100, from_me: false, done: false, media_type: "", mime_type: "", local_path: "", tags: [] },
@@ -107,6 +108,11 @@ Item {
     ? root.demoItems : (root.service ? root.service.messages : [])
   readonly property var sourceChats: root.demoMode
     ? root.demoChats : (root.service ? root.service.chats : [])
+  readonly property var accountEntries: root.demoMode
+    ? [{ account: "work", label: "work" },
+       { account: "personal", label: "personal" }]
+    : (root.service && Array.isArray(root.service.accounts)
+      ? root.service.accounts : [])
   readonly property string displayGroupName: root.demoMode
     ? (root.demoChats.find(function(chat) { return chat.jid === root.demoSelectedJid }) || root.demoChats[0]).name
     : (root.service ? root.service.selectedChatName : "WhatsApp")
@@ -133,10 +139,8 @@ Item {
     root.sourceChats, root.forwardOriginRef)
   readonly property var visibleChats: {
     var needle = chatSearchField ? String(chatSearchField.text || "").trim().toLowerCase() : ""
-    return sourceChats.filter(function(chat) {
-      return needle === "" || String(chat.name || "").toLowerCase().indexOf(needle) >= 0
-        || String(chat.preview || "").toLowerCase().indexOf(needle) >= 0
-    })
+    var scope = AccountModel.normalizeScope(root.accountScope, root.accountEntries)
+    return AccountModel.filterChats(root.sourceChats, scope, needle, 0)
   }
   readonly property var visibleMessages: {
     var needle = messageSearchField ? String(messageSearchField.text || "").trim().toLowerCase() : ""
@@ -1902,6 +1906,35 @@ Item {
             }
           }
 
+          AccountSwitcher {
+            id: appAccountSwitcher
+            width: parent.width
+            accounts: root.accountEntries
+            selectedScope: root.accountScope
+            foreground: root.foreground
+            background: root.background
+            accent: root.accent
+            muted: root.dim
+            urgent: root.urgent
+            fontFamily: root.fontFamily
+            linkBusy: !!root.service && root.service.accountOperations.linkBusy
+            avatarBusy: !!root.service && root.service.accountOperations.avatarBusy
+            statusMessage: root.service
+              ? root.service.accountOperations.statusMessage : ""
+            allowAccountLink: !root.demoMode && !!root.service
+            allowAvatarRefresh: !root.demoMode && !!root.service
+            onScopeSelected: function(scope) {
+              root.accountScope = scope
+              root.chatCursorIndex = 0
+            }
+            onLinkRequested: function(name) {
+              if (root.service) root.service.accountOperations.linkAccount(name)
+            }
+            onAvatarRefreshRequested: {
+              if (root.service) root.service.accountOperations.refreshAvatars()
+            }
+          }
+
           AccountReadiness {
             id: appAccountReadiness
             width: parent.width
@@ -1914,7 +1947,8 @@ Item {
           ListView {
             id: chatList
             width: parent.width
-            height: sidebar.height - Style.space(106)
+            height: sidebar.height - Style.space(116)
+              - appAccountSwitcher.height
               - (appAccountReadiness.hasUnavailableAccounts
                 ? appAccountReadiness.height + Style.space(10) : 0)
             clip: true
@@ -1942,23 +1976,19 @@ Item {
               border.width: keyboardSelected ? 1 : 0
               border.color: root.accent
 
-              Rectangle {
+              ChatAvatar {
                 id: chatAvatar
                 anchors.left: parent.left
                 anchors.leftMargin: Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
                 width: Style.space(38)
                 height: width
-                radius: width / 2
-                color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, selected ? 0.22 : 0.12)
-                Text {
-                  textFormat: Text.PlainText
-                  anchors.centerIn: parent
-                  text: modelData.kind === "group" ? "󰠮" : String(modelData.name || "?").charAt(0).toUpperCase()
-                  color: root.accent
-                  font.family: root.fontFamily
-                  font.pixelSize: modelData.kind === "group" ? Style.font.icon : Style.font.body
-                }
+                chat: modelData
+                selected: chatRow.selected
+                foreground: root.foreground
+                background: root.background
+                accent: root.accent
+                fontFamily: root.fontFamily
               }
 
               Text {

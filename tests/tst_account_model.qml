@@ -58,6 +58,41 @@ TestCase {
     verify(!AccountModel.isMultiAccount(null))
   }
 
+  function test_account_scope_composes_with_search_without_retargeting_chats() {
+    var accounts = [
+      { account: "work", label: "Work" },
+      { account: "home", label: "Home" }
+    ]
+    compare(AccountModel.accountOptions(accounts), [
+      { scope: "", label: "All" },
+      { scope: "work", label: "Work" },
+      { scope: "home", label: "Home" }
+    ])
+    compare(AccountModel.normalizeScope("work", accounts), "work")
+    compare(AccountModel.normalizeScope("removed", accounts), "")
+
+    var chats = [
+      Object.assign({ name: "Robin work", preview: "handoff" }, workChat),
+      Object.assign({ name: "Robin home", preview: "dinner" }, homeChat),
+      { account: "work", jid: "team@g.us", name: "Design team", preview: "dinner" }
+    ]
+    compare(AccountModel.filterChats(chats, "work", "dinner", 0), [chats[2]])
+    compare(AccountModel.filterChats(chats, "home", "robin", 0), [chats[1]])
+    compare(AccountModel.filterChats(chats, "", "", 2), chats.slice(0, 2))
+    // Filtering returns the canonical chat object. It never synthesizes a
+    // different account/JID pair or selects a replacement chat.
+    compare(AccountModel.refOf(AccountModel.filterChats(chats, "work", "robin", 0)[0]),
+      AccountModel.refOf(workChat))
+  }
+
+  function test_account_names_match_the_transport_boundary() {
+    compare(AccountModel.accountNameError("work-2", false), "")
+    compare(AccountModel.accountNameError(" work ", false), "")
+    verify(AccountModel.accountNameError(".hidden", false) !== "")
+    verify(AccountModel.accountNameError("primary", true) !== "")
+    compare(AccountModel.accountNameError("primary", false), "")
+  }
+
   function test_rail_readiness_never_authorizes_an_unready_selected_account() {
     var readiness = AccountModel.statusReadiness({
       authenticated: false,
