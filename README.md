@@ -153,6 +153,30 @@ poller, and closing either surface does not throw away the warm chat rail. See
 
 ## Add it to Omarchy
 
+### Install once
+
+Paste this into your agent, then let it handle the rest:
+
+```text
+Install OmaWhatsApp for me.
+
+OmaWhatsApp is a native, local-first WhatsApp client for Omarchy. Read
+https://github.com/MoizIbnYousaf/Omarchy-Whatsapp and install it for this
+machine using the repository's installer. If you cannot run local commands in
+this chat, tell me to use Codex, Claude Code, OpenClaw, or another agent that
+can.
+
+Keep all WhatsApp data private. Never put chats, contacts, message IDs, media
+paths, session files, QR codes, or credentials in logs, commits, issues, or
+screenshots. Never write directly to WhatsApp's database or send a test
+message. Ask me to complete interactive WhatsApp authentication when required.
+
+Run the read-only preflight first, install the complete compatible set, and
+verify the helper, background sync service, and Quickshell plugin end to end.
+Use only the repository's synthetic/demo data for tests or screenshots. Then
+tell me what was installed, whether every check passed, and how to open it.
+```
+
 Requirements:
 
 - Omarchy with the plugin-capable Quickshell shell
