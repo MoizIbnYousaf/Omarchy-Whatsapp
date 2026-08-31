@@ -27,6 +27,9 @@ jobs:
           repository: basecamp/omarchy
           ref: b686ed892d9c3020c3336203f6d34cc75b544e2b
           path: .omarchy
+          sparse-checkout: |
+            bin
+            shell
 
       - name: Install audited wacli 0.17.1
         run: |
