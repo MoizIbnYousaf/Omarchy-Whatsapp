@@ -1077,6 +1077,9 @@ class BackendTests(unittest.TestCase):
     def test_wacli_interactive_mode_is_limited_and_exact(self) -> None:
         completed = subprocess.CompletedProcess([], 0, "", "")
         with mock.patch.object(self.backend, "_unit_active", return_value=False), \
+             mock.patch.object(
+                 self.backend, "_systemctl_user", return_value=completed
+             ) as systemctl, \
              mock.patch.object(backend_module.subprocess, "run", return_value=completed) as run:
             code = self.backend.transport_interactive(
                 ["auth", "--qr-format", "terminal"], authorization="interactive"
@@ -1084,6 +1087,9 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(run.call_args.args[0], [
             str(self.wacli), "auth", "--qr-format", "terminal"
+        ])
+        systemctl.assert_called_once_with([
+            "enable", "--now", "wacli-sync.service"
         ])
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError,
                                     "only for linking"):
