@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.1 — 2026-08-31
 
 - Keep the last decoded GIF or video frame visible when another timeline
   player takes over. Fully hidden surfaces still stop and release media

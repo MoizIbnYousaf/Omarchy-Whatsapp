@@ -265,9 +265,9 @@ archived chats, and never send a read receipt.
 ./scripts/test
 ```
 
-The release gate runs 65 backend boundary/write-path/parity tests, 21 offscreen
-QML tests, an isolated installer preflight, manifest validation, QML lint,
-shell syntax checks, a diff check, and a heavyweight-runtime dependency guard.
+The release gate runs 161 backend and transaction tests, every offscreen QML
+suite, an isolated installer preflight, manifest validation, QML lint, shell
+syntax checks, a diff check, and a heavyweight-runtime dependency guard.
 Installed verification and screenshot rules live in [testing](docs/TESTING.md);
 the architecture and privacy boundaries are documented alongside the code.
 
