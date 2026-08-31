@@ -22,18 +22,18 @@ Three properties matter for this work:
 - `accounts list` already resolves `store_dir` to an absolute path, so the
   helper reads store locations straight from it and never has to guess a layout
   or run `doctor` per account. The default layout is `<state>/wacli/accounts/<name>`.
-- `configured_store` accepts `.`, which resolves to the root store. The account
-  already linked on a machine can therefore be registered by name **without
-  moving a single file**, which is the migration path this project should take.
+- `configured_store` accepts `.`, which resolves to the root store. Earlier
+  releases documented that as a manual migration path; 0.11 instead leaves
+  the root store and upstream config untouched and scopes it with `--store`.
 - `--store` does not redirect the account config: `config_path` stays in the
   XDG state directory no matter what `--store` says. The two are parallel ways
   to pick a store, never a way to sandbox `config.yaml`.
 
 One migration hazard follows from this: the first named account added becomes
-`default_account`, so plain `wacli` commands stop pointing at the root store
-the moment a second account is introduced. Registering the existing session as
-a named account with `store: .` before adding any other account keeps the
-current mirror addressable.
+`default_account`, so plain `wacli` commands stop pointing at the root store.
+OmaWhatsApp avoids owning wacli's YAML contract: it discovers that still-linked
+root session as `primary`, scopes it with `--store`, and keeps the original
+root-store-pinned sync unit alongside named-account template units.
 
 OmaWhatsApp assumes a single implicit account everywhere:
 
@@ -221,6 +221,8 @@ All five steps landed in 0.9.0 and 0.10.0:
    names the account when more than one is linked.
 5. Architecture, technical, privacy, testing, README, skill, and changelog
    notes describe the account boundary.
+6. Version 0.11 adds one-click account filters/linking while preserving an
+   existing root session as synthetic `primary`; no wacli config is rewritten.
 
 ## Verified against two real accounts
 

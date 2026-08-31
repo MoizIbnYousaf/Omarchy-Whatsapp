@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.11.0 — 2026-08-30
+
+- Add one-click `All`/per-account rail filters and a guarded in-app account
+  linking flow. An existing unnamed session remains untouched and appears as
+  `primary`, while every linked account keeps its own store and sync unit.
+- Add explicit profile-photo refresh for a bounded recent-chat batch. Remote
+  URLs stay behind the helper boundary; QML receives only owner-private,
+  account-isolated local cache paths and ordinary browsing stays local-only.
+- Turn a missing video's explicit download action into the same native player once its
+  bytes arrive, with real decoded previews for locally available videos.
+- Extend the isolated release harness with legacy-root, authorization,
+  avatar privacy, remote-URL rejection, account-filter, and real-video
+  transition regressions.
+- Resolve reports [#3](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/issues/3)
+  and [#5](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/issues/5), and
+  improve the explicit-download path tracked in
+  [#4](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/issues/4), reported by
+  [FoxesRCool1](https://github.com/FoxesRCool1).
+
 ## 0.10.1 — 2026-08-30
 
 - Bound every image, GIF, sticker, audio control, and video preview to its

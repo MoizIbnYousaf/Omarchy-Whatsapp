@@ -10,7 +10,6 @@ Item {
   visible: false
   width: 0
   height: 0
-
   property var shell: null
   property var manifest: null
   property bool ready: false
@@ -57,7 +56,6 @@ Item {
   property var messages: []
   property var members: []
   property var discardQueue: []
-
   readonly property string voiceState: voiceRecorder.state
   readonly property string voiceDraftAccount: voiceRecorder.chatAccount
   readonly property string voiceDraftJid: voiceRecorder.chatJid
@@ -69,6 +67,7 @@ Item {
   readonly property bool voicePlaying: voiceRecorder.playing
   readonly property bool voiceCapturing: voiceRecorder.capturing
   readonly property alias playback: playbackCoordinator
+  readonly property alias accountOperations: accountOperations
 
   readonly property bool windowOpen: appOpen || dropdownOpen
   readonly property bool multiAccount: AccountModel.isMultiAccount(accounts)
@@ -83,9 +82,13 @@ Item {
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
   property string pendingAppPayload: ""
-
   PlaybackCoordinator { id: playbackCoordinator }
-
+  AccountOperations {
+    id: accountOperations
+    helper: root.helper
+    accounts: root.accounts
+    onRefreshRequested: { root.refreshStatus(); root.refreshChats() }
+  }
   readonly property string helper: Quickshell.env("HOME") + "/.local/bin/omawhatsapp"
   readonly property string storeDirectory: AccountModel.defaultStoreDirectory(
     Quickshell.env("WACLI_STORE_DIR"), Quickshell.env("XDG_STATE_HOME"),

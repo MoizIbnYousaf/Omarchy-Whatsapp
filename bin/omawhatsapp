@@ -24,6 +24,20 @@ import time
 from typing import Any, Iterator, Sequence
 from urllib.parse import parse_qsl, quote, unquote, urlparse
 
+MODULE_DIRECTORY = str(Path(__file__).resolve().parent)
+if MODULE_DIRECTORY not in sys.path:
+    sys.path.insert(0, MODULE_DIRECTORY)
+try:
+    from omawhatsapp_assets import AvatarCache, AvatarCacheError, fetch_https_image
+except ModuleNotFoundError as exc:
+    if exc.name != "omawhatsapp_assets":
+        raise
+    AvatarCache = None
+    fetch_https_image = None
+
+    class AvatarCacheError(RuntimeError):
+        pass
+
 
 HOME = Path.home()
 
@@ -70,10 +84,20 @@ MAX_NOTIFY_WATERMARKS = 500
 NOTIFY_EXPIRE_MS = 8000
 SYNC_UNIT = "wacli-sync.service"
 SYNC_UNIT_TEMPLATE = "wacli-sync@{name}.service"
+SYNC_UNIT_NAME = re.compile(
+    r"wacli-sync(?:@[A-Za-z0-9][A-Za-z0-9._-]{0,63})?\.service\Z"
+)
+LIFECYCLE_LOCK_NAME = re.compile(r"lifecycle-[0-9a-f]{24}\.lock\Z")
 MAX_ACCOUNTS = 16
+MAX_LIFECYCLE_RECOVERY = 4096
 # Sentinel: run against whichever account this request selected.
 ACTIVE_ACCOUNT: Any = object()
-ACCOUNT_NAME = re.compile(r"[A-Za-z0-9._-]{1,64}")
+ACCOUNT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+LEGACY_ACCOUNT_NAME = "primary"
+AVATAR_REFRESH_LIMIT = 12
+AVATAR_REFRESH_TTL = 7 * 24 * 60 * 60
+AVATAR_MISSING_TTL = 24 * 60 * 60
+AVATAR_FAILURE_BACKOFF = 60 * 60
 VOICE_DRAFT_DIRECTORY = "voice-drafts"
 VOICE_DRAFT_PATTERN = re.compile(r"voice-[0-9a-f]{32}\.ogg\Z")
 CLIPBOARD_STAGE_DIRECTORY = "omawhatsapp"
@@ -312,16 +336,19 @@ class Account:
     single-instance sync unit, so nothing changes until accounts are named.
     """
 
-    __slots__ = ("name", "store_dir", "default", "managed_unit")
+    __slots__ = ("name", "store_dir", "default", "managed_unit", "selector")
 
     def __init__(
         self, name: str, store_dir: Path, default: bool = False,
-        managed_unit: bool = True,
+        managed_unit: bool = True, selector: str = "",
     ) -> None:
         self.name = name
         self.store_dir = store_dir
         self.default = default
         self.managed_unit = managed_unit
+        self.selector = selector or ("account" if name else "implicit")
+        if self.selector not in {"implicit", "account", "store"}:
+            raise ValueError("invalid account selector")
 
     @property
     def key(self) -> str:
@@ -337,7 +364,16 @@ class Account:
     def unit(self) -> str:
         if not self.managed_unit:
             return ""
-        return SYNC_UNIT_TEMPLATE.format(name=self.name) if self.name else SYNC_UNIT
+        return SYNC_UNIT_TEMPLATE.format(name=self.name) \
+            if self.selector == "account" else SYNC_UNIT
+
+    @property
+    def cli_args(self) -> list[str]:
+        if self.selector == "account":
+            return ["--account", self.name]
+        if self.selector == "store":
+            return ["--store", str(self.store_dir)]
+        return []
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"Account({self.name!r}, {str(self.store_dir)!r})"
@@ -492,6 +528,7 @@ class Backend:
         self.account_config = account_config or ACCOUNT_CONFIG
         self._accounts: list[Account] | None = None
         self._active: Account | None = None
+        self.avatar_cache = AvatarCache(state_dir) if AvatarCache is not None else None
 
     def accounts(self) -> list[Account]:
         if self._accounts is None:
@@ -499,7 +536,10 @@ class Backend:
         return self._accounts
 
     def _discover_accounts(self) -> list[Account]:
-        implicit = [Account("", self.store_dir, True)]
+        implicit = [Account(
+            LEGACY_ACCOUNT_NAME, self.store_dir.resolve(strict=False), True,
+            selector="store",
+        )]
         # No account config means no named accounts, and no reason to pay for a
         # wacli invocation on every request.
         if not self.account_config.exists() and not self.account_config.is_symlink():
@@ -546,13 +586,29 @@ class Backend:
             raise OmaWhatsAppError("The wacli account list contains duplicate identities.")
         if sum(account.default for account in accounts) != 1:
             raise OmaWhatsAppError("The wacli account list must identify exactly one default.")
+        root_store = self.store_dir.resolve(strict=False)
+        root_session = root_store / "session.db"
+        if root_session.is_file() and all(account.store_dir != root_store for account in accounts):
+            if any(account.name == LEGACY_ACCOUNT_NAME for account in accounts):
+                raise OmaWhatsAppError(
+                    f"The account name {LEGACY_ACCOUNT_NAME!r} is reserved for the existing root session."
+                )
+            if len(accounts) >= MAX_ACCOUNTS:
+                raise OmaWhatsAppError("The wacli account list contains too many accounts.")
+            accounts.insert(0, Account(
+                LEGACY_ACCOUNT_NAME, root_store, False, selector="store"
+            ))
         return accounts
 
     def account(self, name: Any = "") -> Account:
-        """Resolve a requested account name, empty meaning the default one."""
+        """Resolve a requested account; empty keeps a root session stable."""
         requested = str(name or "").strip()
         accounts = self.accounts()
         if not requested:
+            for candidate in accounts:
+                if candidate.name == LEGACY_ACCOUNT_NAME \
+                        and candidate.selector == "store":
+                    return candidate
             for candidate in accounts:
                 if candidate.default:
                     return candidate
@@ -567,6 +623,80 @@ class Backend:
     def use_account(self, name: Any = "") -> Account:
         self._active = self.account(name)
         return self._active
+
+    def _refresh_account_registry(self) -> None:
+        self._accounts = None
+        self._active = None
+
+    def link_account(self, value: Any, authorization: Any) -> int:
+        """Interactively add or resume one named account in a terminal."""
+        if str(authorization or "") != "interactive":
+            raise OmaWhatsAppError(
+                "Linking an account requires --authorize interactive."
+            )
+        name = str(value or "").strip()
+        if not ACCOUNT_NAME.fullmatch(name):
+            raise OmaWhatsAppError(
+                "Use 1-64 letters, digits, dots, underscores, or hyphens, "
+                "starting with a letter or digit."
+            )
+        accounts = self.accounts()
+        if name == LEGACY_ACCOUNT_NAME and any(
+                account.selector in {"implicit", "store"} for account in accounts):
+            raise OmaWhatsAppError(
+                f"{LEGACY_ACCOUNT_NAME!r} is reserved for your existing account."
+            )
+        existing = next(
+            (candidate for candidate in accounts if candidate.name == name), None
+        )
+        if existing is not None:
+            if (existing.store_dir / "session.db").is_file():
+                raise OmaWhatsAppError(f"Account {name!r} is already linked.")
+            result, _, _ = self._transport_interactive(
+                ["auth"], authorization="interactive", account=name
+            )
+        else:
+            if len(accounts) >= MAX_ACCOUNTS:
+                raise OmaWhatsAppError("OmaWhatsApp already has the maximum number of accounts.")
+            result, _, _ = self._transport_interactive(
+                ["accounts", "add", name], authorization="interactive"
+            )
+        self._refresh_account_registry()
+        try:
+            linked = self.account(name)
+        except OmaWhatsAppError as exc:
+            if result == 0:
+                raise OmaWhatsAppError(
+                    "The link command completed, but account state could not be reconciled."
+                ) from exc
+            return result
+        return self._finalize_link(linked, result)
+
+    def _finalize_link(self, account: Account, result: int) -> int:
+        """Reconcile one terminal auth result and enable its sync exactly once."""
+        committed = (account.store_dir / "session.db").is_file()
+        if not committed:
+            if result == 0:
+                raise OmaWhatsAppError(
+                    "The link command completed, but no linked session was created."
+                )
+            return result
+        if account.unit and self.online(account):
+            try:
+                self._systemctl_user(["enable", "--now", account.unit])
+            except OmaWhatsAppError as exc:
+                raise OmaWhatsAppPartialError(
+                    "The account linked, but its background sync could not start.",
+                    {"kind": "account-link", "committed": True,
+                     "account": account.name},
+                ) from exc
+        if result != 0:
+            raise OmaWhatsAppPartialError(
+                "The account linked even though the terminal exited with an error.",
+                {"kind": "account-link", "committed": True,
+                 "account": account.name},
+            )
+        return result
 
     @property
     def active(self) -> Account:
@@ -691,6 +821,84 @@ class Backend:
         finally:
             if descriptor >= 0:
                 os.close(descriptor)
+
+    def _lifecycle_recovery_records(self) -> list[dict[str, str]]:
+        value = self._read_state_json(
+            "lifecycle-recovery.json", MAX_LIFECYCLE_RECOVERY, {}
+        )
+        rows = value.get("records") if isinstance(value, dict) else None
+        if not isinstance(rows, list):
+            return []
+        records: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in rows[:MAX_ACCOUNTS + 1]:
+            if not isinstance(item, dict):
+                continue
+            unit = str(item.get("unit") or "")
+            lock = str(item.get("lock") or "")
+            if (unit in seen or not SYNC_UNIT_NAME.fullmatch(unit)
+                    or not LIFECYCLE_LOCK_NAME.fullmatch(lock)):
+                continue
+            records.append({"unit": unit, "lock": lock})
+            seen.add(unit)
+        return records
+
+    def _lifecycle_recovery_units(self) -> list[str]:
+        return [record["unit"] for record in self._lifecycle_recovery_records()]
+
+    def _write_lifecycle_recovery_records(
+        self, records: list[dict[str, str]]
+    ) -> None:
+        clean = [record for record in records[:MAX_ACCOUNTS + 1]
+                 if SYNC_UNIT_NAME.fullmatch(record.get("unit", ""))
+                 and LIFECYCLE_LOCK_NAME.fullmatch(record.get("lock", ""))]
+        self._write_state_json(
+            "lifecycle-recovery.json", {"records": clean},
+            MAX_LIFECYCLE_RECOVERY,
+        )
+
+    def _record_lifecycle_recovery(self, account: Account) -> None:
+        unit = account.unit
+        if not SYNC_UNIT_NAME.fullmatch(unit):
+            raise OmaWhatsAppError("OmaWhatsApp refused an unsafe sync unit.")
+        record = {"unit": unit, "lock": self._lifecycle_lock_name(account)}
+        with self._state_lock("lifecycle-recovery.lock"):
+            records = self._lifecycle_recovery_records()
+            if unit not in {item["unit"] for item in records}:
+                records.append(record)
+                self._write_lifecycle_recovery_records(records)
+
+    def _clear_lifecycle_recovery(self, unit: str) -> None:
+        with self._state_lock("lifecycle-recovery.lock"):
+            records = self._lifecycle_recovery_records()
+            if unit in {item["unit"] for item in records}:
+                self._write_lifecycle_recovery_records([
+                    record for record in records if record["unit"] != unit
+                ])
+
+    def recover_lifecycle(self) -> None:
+        """Restart units left stopped by a terminated foreground operation."""
+        with self._state_lock("lifecycle-recovery.lock"):
+            pending = self._lifecycle_recovery_records()
+        failed = False
+        for record in pending:
+            # Never hold the global intent lock while waiting for an account
+            # operation. Mutations use this same account -> global order.
+            with self._state_lock(record["lock"]):
+                with self._state_lock("lifecycle-recovery.lock"):
+                    current = self._lifecycle_recovery_records()
+                if record not in current:
+                    continue
+                try:
+                    self._systemctl_user(["start", record["unit"]])
+                except OmaWhatsAppError:
+                    failed = True
+                    continue
+                self._clear_lifecycle_recovery(record["unit"])
+        if failed:
+            raise OmaWhatsAppError(
+                "Background sync recovery is still pending; retry after checking the user service."
+            )
 
     @contextmanager
     def _voice_draft_directory(self, *, create: bool) -> Iterator[int]:
@@ -1055,7 +1263,7 @@ class Backend:
             raise OmaWhatsAppError("wacli is not installed.")
         if account is ACTIVE_ACCOUNT:
             account = self.active
-        scope = ["--account", account.name] if account is not None and account.name else []
+        scope = account.cli_args if account is not None else []
         try:
             return run_bounded(
                 [str(self.wacli), *scope, *args],
@@ -1109,6 +1317,49 @@ class Backend:
         except OmaWhatsAppError:
             return False
 
+    def _yield_active_sync(self, account: Account) -> bool:
+        """Stop an active unit under its lifecycle lock, leaving crash intent."""
+        if not self._sync_active(account):
+            return False
+        self._record_lifecycle_recovery(account)
+        try:
+            self._systemctl_user(["stop", account.unit])
+        except BaseException:
+            # A failed systemctl request is ambiguous. Only discard recovery
+            # intent when systemd positively confirms the unit stayed active.
+            if self._unit_active(account.unit):
+                self._clear_lifecycle_recovery(account.unit)
+            raise
+        return True
+
+    def _restore_yielded_sync(self, account: Account, yielded: bool) -> None:
+        """Restore a yielded unit and clear its durable crash intent."""
+        if not yielded:
+            return
+        self._systemctl_user(["start", account.unit])
+        self._clear_lifecycle_recovery(account.unit)
+
+    def _run_after_sync_yield(
+        self,
+        args: list[str],
+        *,
+        timeout: float,
+        stdout_limit: int = MAX_WACLI_OUTPUT,
+        stderr_limit: int = MAX_PROCESS_ERROR,
+        account: Any = ACTIVE_ACCOUNT,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run after stopping sync, tolerating its bounded lock-release delay."""
+        result: subprocess.CompletedProcess[str] | None = None
+        for attempt in range(5):
+            result = self._run(
+                args, timeout=timeout, stdout_limit=stdout_limit,
+                stderr_limit=stderr_limit, account=account,
+            )
+            if not self._locked(result) or attempt == 4:
+                return result
+            time.sleep(0.15)
+        raise AssertionError("bounded retry loop did not return")
+
     def _mutate(
         self,
         args: list[str],
@@ -1146,25 +1397,19 @@ class Backend:
             )
             if not self._locked(result):
                 return result
-            active = self._sync_active(lifecycle_account)
-            if active:
-                self._systemctl_user(["stop", lifecycle_account.unit])
-            operation_error: OmaWhatsAppError | None = None
+            active = self._yield_active_sync(lifecycle_account)
+            operation_error: BaseException | None = None
             try:
-                for attempt in range(5):
-                    result = self._run(
-                        args, timeout=timeout, stdout_limit=stdout_limit,
-                        stderr_limit=stderr_limit, account=account,
-                    )
-                    if not self._locked(result) or attempt == 4:
-                        break
-                    time.sleep(0.15)
-            except OmaWhatsAppError as exc:
+                result = self._run_after_sync_yield(
+                    args, timeout=timeout, stdout_limit=stdout_limit,
+                    stderr_limit=stderr_limit, account=account,
+                )
+            except BaseException as exc:
                 operation_error = exc
             restart_error: OmaWhatsAppError | None = None
-            if active and self.online(lifecycle_account):
+            if active:
                 try:
-                    self._systemctl_user(["start", lifecycle_account.unit])
+                    self._restore_yielded_sync(lifecycle_account, active)
                 except OmaWhatsAppError as exc:
                     restart_error = exc
             if restart_error is not None:
@@ -1175,8 +1420,10 @@ class Backend:
                         {"kind": "lifecycle", "committed": True,
                          "account": lifecycle_account.name},
                     ) from restart_error
-                raise OmaWhatsAppError(
-                    "Background sync could not restart after the WhatsApp request."
+                raise OmaWhatsAppPartialError(
+                    "The WhatsApp request failed, and background sync could not restart.",
+                    {"kind": "lifecycle", "committed": False,
+                     "account": lifecycle_account.name},
                 ) from restart_error
             if operation_error is not None:
                 raise operation_error
@@ -1184,7 +1431,62 @@ class Backend:
         return result
 
     def _write(self, args: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
-        return self._mutate(args, timeout=timeout, require_online=True)
+        return self._mutate(
+            args, timeout=timeout, require_online=True
+        )
+
+    def _profile_picture_metadata(
+        self, account: Account, candidates: list[dict[str, str]],
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Fetch one account batch while yielding its sync service only once."""
+        output: list[dict[str, Any]] = []
+        failed: list[str] = []
+        if not self.online(account):
+            return output, [candidate["key"] for candidate in candidates]
+        with self._state_lock(self._lifecycle_lock_name(account)):
+            if not self.online(account):
+                return output, [candidate["key"] for candidate in candidates]
+            active = self._yield_active_sync(account)
+            operation_error: BaseException | None = None
+            try:
+                for candidate in candidates:
+                    args = ["--json", "profile", "picture-info", "--jid",
+                            candidate["jid"], "--preview"]
+                    if candidate["picture_id"]:
+                        args.extend(["--existing-id", candidate["picture_id"]])
+                    try:
+                        result = self._run_after_sync_yield(
+                            args, timeout=20, account=account
+                        )
+                        envelope = self._envelope(result)
+                        data = envelope.get("data")
+                        if not isinstance(data, dict):
+                            raise OmaWhatsAppError(
+                                "WhatsApp returned invalid profile-photo metadata."
+                            )
+                        output.append({
+                            "key": candidate["key"],
+                            "picture_id": str(
+                                data.get("id") or candidate["picture_id"]
+                            ),
+                            "url": str(data.get("url") or ""),
+                            "unchanged": data.get("unchanged") is True,
+                        })
+                    except OmaWhatsAppError:
+                        failed.append(candidate["key"])
+            except BaseException as exc:
+                operation_error = exc
+            try:
+                self._restore_yielded_sync(account, active)
+            except OmaWhatsAppError as exc:
+                raise OmaWhatsAppPartialError(
+                    "Profile photos were checked, but background sync could not restart.",
+                    {"kind": "lifecycle", "committed": False,
+                     "account": account.name},
+                ) from exc
+            if operation_error is not None:
+                raise operation_error
+        return output, failed
 
     def _doctor(self, account: Account | None = None) -> dict[str, Any]:
         result = self._run(
@@ -1349,6 +1651,7 @@ class Backend:
                 "account": account.name,
                 "label": account.label,
                 "store": account.key,
+                "unit": account.unit,
                 "default": account.default,
                 "active": account.key == active.key,
                 "authenticated": authenticated,
@@ -1399,6 +1702,164 @@ class Backend:
             "dropdown_rows": preferences.get("dropdown_rows", 7),
             "fts_enabled": current["fts_enabled"],
             "error": current["error"],
+        }
+
+    @staticmethod
+    def _avatar_key(account: Account, jid: str) -> str:
+        return hashlib.sha256(
+            f"{account.key}\n{jid}".encode("utf-8")
+        ).hexdigest()
+
+    def _attach_cached_avatars(
+        self, chats: list[dict[str, Any]], accounts: list[Account]
+    ) -> None:
+        if self.avatar_cache is None:
+            return
+        by_name = {account.name: account for account in accounts}
+        keyed: list[tuple[dict[str, Any], str]] = []
+        for chat in chats:
+            account = by_name.get(str(chat.get("account") or ""))
+            if account is None:
+                continue
+            keyed.append((chat, self._avatar_key(account, str(chat.get("jid") or ""))))
+        paths = self.avatar_cache.paths([key for _, key in keyed])
+        for chat, key in keyed:
+            chat["avatar_path"] = paths.get(key, "")
+
+    def refresh_avatars(
+        self, authorization: Any, limit: Any = AVATAR_REFRESH_LIMIT
+    ) -> dict[str, Any]:
+        """Refresh a bounded set of recent chat photos after an explicit click."""
+        if str(authorization or "") != "remote-read":
+            raise OmaWhatsAppError(
+                "Refreshing profile photos requires authorization='remote-read'."
+            )
+        if self.avatar_cache is None or fetch_https_image is None:
+            raise OmaWhatsAppError(
+                "The profile-photo cache module is not installed. Re-run the installer."
+            )
+        with self._state_lock("avatars-refresh.lock"):
+            return self._refresh_avatars(limit)
+
+    def _refresh_avatars(self, limit: Any) -> dict[str, Any]:
+        """Run one serialized metadata/download/cache refresh."""
+        self.avatar_cache.prune()
+        bounded = bounded_int(limit, AVATAR_REFRESH_LIMIT, 1, AVATAR_REFRESH_LIMIT)
+        accounts = self.accounts()
+        by_name = {account.name: account for account in accounts}
+        rows = self.chats(limit=500)["chats"]
+        candidates: list[dict[str, str]] = []
+        keys: list[str] = []
+        for row in rows:
+            account = by_name.get(str(row.get("account") or ""))
+            if account is None:
+                continue
+            key = self._avatar_key(account, str(row.get("jid") or ""))
+            keys.append(key)
+            candidates.append({
+                "key": key, "jid": str(row.get("jid") or ""),
+                "account": account.name, "picture_id": "",
+            })
+        entries = self.avatar_cache.entries(keys)
+        cached_paths = self.avatar_cache.paths(keys)
+        now = int(time.time())
+        due: list[dict[str, str]] = []
+        for candidate in candidates:
+            entry = entries.get(candidate["key"], {})
+            candidate["picture_id"] = str(entry.get("picture_id") or "")
+            checked = bounded_int(entry.get("checked_at"), 0, 0, 2**63 - 1)
+            retry_after = bounded_int(entry.get("retry_after"), 0, 0, 2**63 - 1)
+            ttl = AVATAR_MISSING_TTL if entry.get("missing") is True \
+                else AVATAR_REFRESH_TTL
+            has_file = candidate["key"] in cached_paths
+            if entry.get("missing") is not True and not has_file:
+                candidate["picture_id"] = ""
+            if retry_after <= now and (
+                    checked <= 0 or now - checked >= ttl
+                    or (entry.get("missing") is not True and not has_file)):
+                due.append(candidate)
+        due = due[:bounded]
+
+        grouped: dict[str, list[dict[str, str]]] = {}
+        for candidate in due:
+            grouped.setdefault(candidate["account"], []).append(candidate)
+        metadata: list[dict[str, Any]] = []
+        failed_keys: list[str] = []
+        batches = [(by_name[name], values) for name, values in grouped.items()]
+        if batches:
+            with ThreadPoolExecutor(max_workers=min(4, len(batches))) as pool:
+                results = pool.map(
+                    lambda batch: self._profile_picture_metadata(*batch), batches
+                )
+                for records, account_failed in results:
+                    metadata.extend(records)
+                    failed_keys.extend(account_failed)
+
+        updates: list[dict[str, Any]] = []
+        downloads: list[dict[str, Any]] = []
+        unchanged = 0
+        missing = 0
+        for key in failed_keys:
+            previous = entries.get(key, {})
+            updates.append({
+                "key": key,
+                "picture_id": str(previous.get("picture_id") or ""),
+                "checked_at": bounded_int(previous.get("checked_at"), 0, 0, 2**63 - 1),
+                "retry_after": now + AVATAR_FAILURE_BACKOFF,
+                "missing": previous.get("missing") is True,
+            })
+        for item in metadata:
+            if item["unchanged"]:
+                unchanged += 1
+                updates.append({
+                    "key": item["key"], "picture_id": item["picture_id"],
+                    "checked_at": now, "missing": False,
+                })
+            elif item["url"]:
+                downloads.append(item)
+            else:
+                missing += 1
+                updates.append({
+                    "key": item["key"], "picture_id": item["picture_id"],
+                    "checked_at": now, "missing": True,
+                })
+
+        refreshed = 0
+        if downloads:
+            with ThreadPoolExecutor(max_workers=min(4, len(downloads))) as pool:
+                futures = [(item, pool.submit(fetch_https_image, item["url"]))
+                           for item in downloads]
+                for item, future in futures:
+                    try:
+                        image = future.result()
+                    except AvatarCacheError:
+                        failed_keys.append(item["key"])
+                        previous = entries.get(item["key"], {})
+                        updates.append({
+                            "key": item["key"],
+                            "picture_id": str(previous.get("picture_id") or ""),
+                            "checked_at": bounded_int(
+                                previous.get("checked_at"), 0, 0, 2**63 - 1
+                            ),
+                            "retry_after": now + AVATAR_FAILURE_BACKOFF,
+                            "missing": previous.get("missing") is True,
+                        })
+                        continue
+                    refreshed += 1
+                    updates.append({
+                        "key": item["key"], "picture_id": item["picture_id"],
+                        "checked_at": now, "missing": False, "data": image,
+                    })
+        try:
+            if updates:
+                self.avatar_cache.update(updates)
+        except AvatarCacheError as exc:
+            raise OmaWhatsAppError(str(exc)) from exc
+        cached = len(self.avatar_cache.paths(keys))
+        return {
+            "ok": True, "kind": "avatars", "checked": len(due),
+            "refreshed": refreshed, "unchanged": unchanged,
+            "missing": missing, "failed": len(failed_keys), "cached": cached,
         }
 
     def _account_chats(
@@ -1486,7 +1947,8 @@ class Backend:
         preferences = self._preferences()
         merged: list[dict[str, Any]] = []
         reports: list[dict[str, Any]] = []
-        for account in self.accounts():
+        accounts = self.accounts()
+        for account in accounts:
             with self._using(account):
                 try:
                     rows = self._account_chats(cleaned, limit, preferences)
@@ -1499,7 +1961,9 @@ class Backend:
             merged.extend(rows)
         merged.sort(key=lambda chat: (
             not chat["pinned"], -chat["timestamp"], chat["name"].casefold()))
-        return {"ok": True, "query": cleaned, "chats": merged[:limit], "accounts": reports}
+        visible = merged[:limit]
+        self._attach_cached_avatars(visible, accounts)
+        return {"ok": True, "query": cleaned, "chats": visible, "accounts": reports}
 
     def acknowledge_notifications(self, jid: str = "") -> dict[str, Any]:
         target = jid.strip()
@@ -3189,7 +3653,7 @@ class Backend:
         }
 
     @contextmanager
-    def _transport_scope(self, payload: dict[str, Any]) -> Iterator[None]:
+    def _transport_scope(self, payload: dict[str, Any]) -> Iterator[Account]:
         account = self._transport_account(payload.get("account"))
         store = self._transport_store(payload.get("store"))
         if account and store:
@@ -3198,13 +3662,15 @@ class Backend:
             # A one-off store is not owned by either managed sync unit. Lock
             # recovery may serialize against it, but must never stop the
             # unrelated default account's background service.
-            scoped = Account("", Path(store), managed_unit=False)
+            scoped = Account(
+                "", Path(store), managed_unit=False, selector="store"
+            )
         elif account:
             scoped = self.account(account)
         else:
             scoped = self.active
         with self._using(scoped):
-            yield
+            yield scoped
 
     def transport(self, payload: dict[str, Any]) -> dict[str, Any]:
         args = self._transport_args(payload.get("args"))
@@ -3256,12 +3722,13 @@ class Backend:
             raise OmaWhatsAppError("Repository-export authorization was not needed for this path.")
         stream_destinations = self._external_stream_destinations(args, payload)
         self._authorize_external_stream(payload, stream_destinations)
-        with self._transport_scope(payload):
+        with self._transport_scope(payload) as scoped:
             self._validate_transport_targets(args, path)
+            unscoped_payload = dict(payload, account="", store="")
             global_args, timeout, output_limit, include_events = self._transport_globals(
-                payload, read_only=policy == "local-read", json_output=True
+                unscoped_payload, read_only=policy == "local-read", json_output=True
             )
-            command = [*global_args, *args]
+            command = [*scoped.cli_args, *global_args, *args]
             if policy == "local-read":
                 result = self._run(
                     command, timeout=timeout + 5, stdout_limit=output_limit,
@@ -3289,14 +3756,14 @@ class Backend:
             result, path, policy, include_events, sensitive
         )
 
-    def transport_interactive(
+    def _transport_interactive(
         self,
         values: Sequence[str],
         *,
         authorization: str,
         account: str = "",
         store: str = "",
-    ) -> int:
+    ) -> tuple[int, Account, tuple[str, ...]]:
         args = list(values)
         if args and args[0] == "--":
             args = args[1:]
@@ -3315,19 +3782,16 @@ class Backend:
             raise OmaWhatsAppError(
                 "Interactive sync cannot export events. Use the structured gateway with exact external-stream authorization."
             )
-        global_args: list[str] = []
         clean_account = self._transport_account(account)
         clean_store = self._transport_store(store)
         if clean_account and clean_store:
             raise OmaWhatsAppError("Choose either a named account or a one-off store, not both.")
-        if clean_account:
-            global_args.extend(["--account", clean_account])
-        if clean_store:
-            global_args.extend(["--store", clean_store])
         if not self.wacli.is_file() or not os.access(self.wacli, os.X_OK):
             raise OmaWhatsAppError("wacli is not installed.")
         if clean_store:
-            scoped = Account("", Path(clean_store))
+            scoped = Account(
+                "", Path(clean_store), managed_unit=False, selector="store"
+            )
             unit = ""
         elif clean_account:
             scoped = self.account(clean_account)
@@ -3335,6 +3799,7 @@ class Backend:
         else:
             scoped = self.active
             unit = scoped.unit
+        global_args = scoped.cli_args
         with self._using(scoped):
             self._validate_transport_targets(args, path)
         if policy == "sync" and not self.online(scoped):
@@ -3344,9 +3809,7 @@ class Backend:
             if policy == "sync" and not self.online(scoped):
                 raise OmaWhatsAppError("Offline mode is on. Go online before syncing WhatsApp.")
             active = bool(unit) and path in {("auth",), ("sync",)} \
-                and self._unit_active(unit)
-            if active:
-                self._systemctl_user(["stop", unit])
+                and self._yield_active_sync(scoped)
             operation_error: BaseException | None = None
             returncode: int | None = None
             try:
@@ -3356,20 +3819,13 @@ class Backend:
                 returncode = result.returncode
             except BaseException as exc:
                 operation_error = exc
-            restore = active and self.online(scoped)
-            enable_after_link = bool(unit) and path == ("auth",) \
-                and returncode == 0 and self.online(scoped) and not active
-            if restore or enable_after_link:
-                parts = ["start", unit] if restore \
-                    else ["enable", "--now", unit]
+            if active:
                 try:
-                    self._systemctl_user(parts)
+                    self._restore_yielded_sync(scoped, active)
                 except OmaWhatsAppError as exc:
                     if returncode == 0:
                         raise OmaWhatsAppPartialError(
-                            "Account linking completed, but background sync could not start."
-                            if path == ("auth",) else
-                            "Foreground sync completed, but background sync could not restart.",
+                            "The terminal command completed, but background sync could not restart.",
                             {"kind": "lifecycle", "committed": True,
                              "account": scoped.name},
                         ) from exc
@@ -3382,7 +3838,22 @@ class Backend:
                         "wacli could not be started in the terminal."
                     ) from operation_error
                 raise operation_error
-            return int(returncode or 0)
+            return int(returncode or 0), scoped, path
+
+    def transport_interactive(
+        self,
+        values: Sequence[str],
+        *,
+        authorization: str,
+        account: str = "",
+        store: str = "",
+    ) -> int:
+        result, scoped, path = self._transport_interactive(
+            values, authorization=authorization, account=account, store=store
+        )
+        if path == ("auth",):
+            return self._finalize_link(scoped, result)
+        return result
 
     def session_ready(self) -> bool:
         """True when the active account has a linked-device session on disk."""
@@ -3393,6 +3864,9 @@ def parser() -> argparse.ArgumentParser:
     commands = value.add_subparsers(dest="command", required=True)
     status = commands.add_parser("status")
     status.add_argument("--account", default="")
+    link_account = commands.add_parser("link-account")
+    link_account.add_argument("name")
+    link_account.add_argument("--authorize", default="")
     session_ready = commands.add_parser("session-ready")
     session_ready.add_argument("--account", default="")
     chats = commands.add_parser("chats")
@@ -3421,6 +3895,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("notify-mode")
     commands.add_parser("sync-mode")
     commands.add_parser("settings")
+    commands.add_parser("avatars")
     commands.add_parser("capabilities")
     transport = commands.add_parser("wacli")
     transport.add_argument("--interactive", action="store_true")
@@ -3434,6 +3909,27 @@ def parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = parser().parse_args()
     backend = Backend()
+    if args.command != "session-ready":
+        try:
+            backend.recover_lifecycle()
+        except OmaWhatsAppError as exc:
+            return emit({
+                "ok": False,
+                "error": clean_error(
+                    exc, "OmaWhatsApp could not recover background sync."
+                ),
+            }, 1)
+    if args.command == "link-account":
+        try:
+            return backend.link_account(args.name, args.authorize)
+        except OmaWhatsAppPartialError as exc:
+            print(clean_error(exc, "OmaWhatsApp partly linked that account."),
+                  file=sys.stderr)
+            return 1
+        except OmaWhatsAppError as exc:
+            print(clean_error(exc, "OmaWhatsApp could not link that account."),
+                  file=sys.stderr)
+            return 1
     if args.command == "wacli" and args.interactive:
         try:
             return backend.transport_interactive(
@@ -3457,8 +3953,8 @@ def main() -> int:
         if args.command == "capabilities":
             return emit(backend.capabilities())
         payload = request()
-        # Every request may name the account it belongs to; empty means the
-        # wacli default account.
+        # Every request may name the account it belongs to. Empty keeps a
+        # preserved root session stable, then falls back to wacli's default.
         backend.use_account(payload.get("account"))
         if args.command == "wacli":
             if args.transport_args:
@@ -3545,6 +4041,10 @@ def main() -> int:
         if args.command == "settings":
             update = payload.get("settings") if "settings" in payload else None
             return emit(backend.settings(update))
+        if args.command == "avatars":
+            return emit(backend.refresh_avatars(
+                payload.get("authorization"), payload.get("limit")
+            ))
     except OmaWhatsAppPartialError as exc:
         return emit({
             "ok": False,

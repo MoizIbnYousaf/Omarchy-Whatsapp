@@ -42,7 +42,8 @@ while IFS= read -r -d '' qml_test; do
 done < <(find tests -maxdepth 1 -type f -name 'tst_*.qml' -print0 | sort -z)
 
 bash -n scripts/install scripts/install-common scripts/test scripts/uninstall
-python3 -m py_compile scripts/check-wacli-parity scripts/install-transaction.py
+python3 -m py_compile bin/omawhatsapp_assets.py \
+  scripts/check-wacli-parity scripts/install-transaction.py
 python3 -m py_compile tests/test_install_transaction.py tests/write_media_fixtures.py
 git diff --check
 
@@ -60,8 +61,8 @@ rg -q 'systemctl --user restart "\$unit"' scripts/install || {
   echo "test: installer upgrades must activate the new sync unit" >&2
   exit 1
 }
-rg -q 'wacli-sync@\$\{account_name\}\.service' scripts/install || {
-  echo "test: installer must activate one sync instance per named account" >&2
+rg -q "mapfile -t account_units .*\.accounts\[\]\.unit" scripts/install || {
+  echo "test: installer must reuse each helper-resolved account unit" >&2
   exit 1
 }
 rg -q 'status_json=.*staged_helper.*status' scripts/install || {
@@ -83,6 +84,10 @@ for sync_unit in systemd/user/wacli-sync.service systemd/user/wacli-sync@.servic
     exit 1
   }
 done
+rg -q -- '--store %h/\.local/state/wacli' systemd/user/wacli-sync.service || {
+  echo "test: the legacy unit must remain pinned to the preserved root store" >&2
+  exit 1
+}
 
 rg -q 'install_plugin_dir=\$plugin_id' scripts/install || {
   echo "test: installer must target Omarchy's canonical manifest-id directory" >&2

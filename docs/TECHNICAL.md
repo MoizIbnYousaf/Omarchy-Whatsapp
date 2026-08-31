@@ -57,6 +57,16 @@ chat-menu action. Archived and currently muted chats retain their
 true unread count inside the chat rail while contributing zero to the bar's
 local notification total.
 
+`avatars.json` and its opaque-named image directory form a separate bounded,
+owner-private cache. Cache keys hash the account store and exact chat JID;
+remote CDN URLs are used only in memory by the helper and never reach QML.
+Refresh is an explicit `remote-read` action over a small recent-chat batch, so
+opening or searching the rail remains a SQLite/local-file operation. A
+lock-contended metadata read uses the same short, exact-account sync yield as
+other live requests. One refresh yields each account once for its whole bounded
+batch; failed entries use a retained retry deadline so they cannot starve later
+chats even when the cache is full.
+
 `VoiceRecorder.qml` is instantiated once by the resident service and shared by
 both composers. Qt Multimedia writes 48 kHz mono OGG/Opus into a random path
 allocated below the helper's private state directory. Stopping capture runs a
@@ -71,8 +81,14 @@ confirmed send deletes it and never retries automatically.
 wacli's companion socket handles supported mutations without stopping sync.
 If a command reports the store is locked, the helper retries under a private
 file lock. Only after a second locked result does it briefly stop the exact
-`wacli-sync.service`; a `finally` block always starts it again. This avoids two
-writers while preserving the normal instant path.
+sync unit; every normal completion and exception path attempts to start it
+again. Before stopping it, the helper durably records a bounded restart intent;
+the next helper invocation repairs a unit left down by process termination
+before serving any request. Recovery takes the same per-account lifecycle lock
+and re-reads the intent, so it cannot restart sync under a live foreground
+operation. This avoids two writers while preserving the normal instant path.
+`lifecycle-recovery.json` contains only a validated public systemd unit name
+and an opaque lock filename—never WhatsApp data.
 
 ## File picker isolation
 
@@ -128,6 +144,7 @@ Build/test artifacts remain outside the installed plugin tree.
 | `~/.config/omarchy/plugins/io.github.moizibnyousaf.omawhatsapp` | installed plugin |
 | `~/.agents/skills/omawhatsapp` | shared on-device agent skill |
 | `~/.local/bin/omawhatsapp` | bounded helper |
+| `~/.local/bin/omawhatsapp_assets.py` | private bounded avatar-cache module |
 | `~/.config/systemd/user/wacli-sync.service` | background sync unit |
 | `~/.local/state/wacli` | linked-device store owned by wacli |
 | `~/.local/state/omawhatsapp` | helper lock/disposable app state |
@@ -137,7 +154,7 @@ Build/test artifacts remain outside the installed plugin tree.
 
 `scripts/test` runs backend unit tests, root manifest validation, QML lint,
 real synthetic MP4/GIF/WebP decode tests, cross-surface playback and deferred
-intent tests, interrupted-install recovery tests, shell syntax checks, diff
+intent tests, account/avatar boundary tests, interrupted-install recovery tests, shell syntax checks, diff
 hygiene, and a guard against browser/Electron runtime dependencies. Live
 verification also checks service health, picker cancellation, window
 breakpoints, shell logs, and coredump count without sending test messages.

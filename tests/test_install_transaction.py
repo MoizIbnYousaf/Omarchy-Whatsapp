@@ -17,6 +17,7 @@ from unittest import mock
 
 SOURCE = Path(__file__).resolve().parent.parent
 HELPER = SOURCE / "scripts" / "install-transaction.py"
+INSTALL = SOURCE / "scripts" / "install"
 UNINSTALL = SOURCE / "scripts" / "uninstall"
 PLUGIN_ID = "io.github.moizibnyousaf.omawhatsapp"
 
@@ -134,6 +135,12 @@ class TransactionFixture:
 
 
 class InstallTransactionTests(unittest.TestCase):
+    def test_companion_module_publishes_before_the_resilient_entrypoint(self) -> None:
+        source = INSTALL.read_text(encoding="utf-8")
+        module = '{operation:"replace", staged:$staged_assets_helper'
+        entrypoint = '{operation:"replace", staged:$staged_helper'
+        self.assertLess(source.index(module), source.index(entrypoint))
+
     def test_every_begin_kill_point_recovers_exact_originals(self) -> None:
         points = {
             "begin": ["after-initial-journal", "after-begin"],
@@ -531,6 +538,8 @@ class UninstallEnvironmentTests(unittest.TestCase):
         helper = home / ".local" / "bin" / "omawhatsapp"
         helper.parent.mkdir(parents=True)
         helper.write_text("synthetic\n", encoding="utf-8")
+        for name in ("omawhatsapp_assets.py",):
+            (helper.parent / name).write_text("synthetic\n", encoding="utf-8")
         service_root.mkdir(parents=True)
         for name in ("wacli-sync.service", "wacli-sync@.service"):
             (service_root / name).write_text("synthetic\n", encoding="utf-8")
@@ -605,6 +614,8 @@ class UninstallEnvironmentTests(unittest.TestCase):
             self.assertFalse(runtime.exists())
             self.assertTrue((home / ".local" / "state" / "wacli" / "preserve").exists())
             self.assertFalse((service_root / "wacli-sync.service").exists())
+            self.assertFalse((home / ".local" / "bin" / "omawhatsapp").exists())
+            self.assertFalse((home / ".local" / "bin" / "omawhatsapp_assets.py").exists())
 
     def test_absolute_custom_xdg_and_cross_device_state_are_honored(self) -> None:
         shared_memory = Path("/dev/shm")

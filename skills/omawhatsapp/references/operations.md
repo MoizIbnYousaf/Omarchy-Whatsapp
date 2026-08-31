@@ -22,6 +22,18 @@ jq -nc --arg jid "$resolved_jid" --arg account "$row_account" --arg text "$messa
 
 Never send to a JID resolved from a different account's rail.
 
+The graphical account chips are a local view filter and never authorize a
+target change. Account linking is interactive and must be explicitly requested:
+
+```bash
+"$oma" link-account NAME --authorize interactive
+```
+
+On a legacy single-account installation the existing root store stays
+untouched and remains addressable as `primary` while the requested named
+account is linked.
+Never invent the account name or retry a canceled/uncertain QR flow.
+
 ## Read-only operations
 
 Status needs no stdin:
@@ -167,6 +179,14 @@ Account linking is interactive and must be explicitly requested:
 
 ```bash
 "$oma" wacli --interactive --authorize interactive -- auth
+```
+
+Profile-photo refresh is a separate explicit remote read. It operates on a
+bounded recent-chat batch, stores only private local cache paths, and must not
+be used merely because a chat was opened or inspected:
+
+```bash
+printf '{"authorization":"remote-read","limit":12}\n' | "$oma" avatars
 ```
 
 For calls, channels, contacts, group administration, history/backfill, media

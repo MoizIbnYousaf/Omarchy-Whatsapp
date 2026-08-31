@@ -158,6 +158,85 @@ class BackendHardeningTests(unittest.TestCase):
             self.backend.set_online(False)
         update.assert_not_called()
 
+    def test_interrupted_foreground_intent_is_recovered_by_the_next_helper(self) -> None:
+        account = self.backend.account("")
+        unit = account.unit
+        self.backend._record_lifecycle_recovery(account)
+        recovery = json.loads(
+            (self.root / "state" / "lifecycle-recovery.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual([item["unit"] for item in recovery["records"]], [unit])
+
+        next_helper = backend_module.Backend(
+            store_dir=self.store, state_dir=self.root / "state",
+            wacli=self.wacli, account_config=self.root / "absent.yaml",
+        )
+        with mock.patch.object(next_helper, "_systemctl_user") as systemctl:
+            next_helper.recover_lifecycle()
+        systemctl.assert_called_once_with(["start", unit])
+        recovered = json.loads(
+            (self.root / "state" / "lifecycle-recovery.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(recovered["records"], [])
+
+    def test_failed_lifecycle_recovery_remains_durable_and_fails_closed(self) -> None:
+        account = self.backend.account("")
+        unit = account.unit
+        self.backend._record_lifecycle_recovery(account)
+        with mock.patch.object(
+                self.backend, "_systemctl_user",
+                side_effect=backend_module.OmaWhatsAppError("service failed")), \
+                self.assertRaisesRegex(
+                    backend_module.OmaWhatsAppError, "recovery is still pending"
+                ):
+            self.backend.recover_lifecycle()
+        self.assertEqual(self.backend._lifecycle_recovery_units(), [unit])
+
+    def test_recovery_waits_for_an_active_account_operation(self) -> None:
+        account = self.backend.account("")
+        self.backend._record_lifecycle_recovery(account)
+        next_helper = backend_module.Backend(
+            store_dir=self.store, state_dir=self.root / "state",
+            wacli=self.wacli, account_config=self.root / "absent.yaml",
+        )
+        snapshotted = threading.Event()
+        failures = []
+        original_records = next_helper._lifecycle_recovery_records
+
+        def records():
+            value = original_records()
+            snapshotted.set()
+            return value
+
+        def recover():
+            try:
+                next_helper.recover_lifecycle()
+            except BaseException as exc:
+                failures.append(exc)
+
+        with self.backend._state_lock(
+                self.backend._lifecycle_lock_name(account)), \
+                mock.patch.object(
+                    next_helper, "_lifecycle_recovery_records",
+                    side_effect=records,
+                ), mock.patch.object(
+                    next_helper, "_systemctl_user"
+                ) as systemctl:
+            worker = threading.Thread(target=recover)
+            worker.start()
+            self.assertTrue(snapshotted.wait(timeout=2))
+            time.sleep(0.05)
+            systemctl.assert_not_called()
+            self.backend._clear_lifecycle_recovery(account.unit)
+        worker.join(timeout=2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(failures, [])
+        systemctl.assert_not_called()
+
     def test_gateway_resolves_chat_group_contact_and_message_targets(self) -> None:
         cases = [
             ({"args": ["chats", "archive", "--chat", "Team"],
@@ -784,6 +863,7 @@ class AccountLifecycleTests(unittest.TestCase):
 
     def test_linking_an_inactive_named_account_starts_only_its_unit(self) -> None:
         self._online(self.home, True)
+        (self.home_store / "session.db").write_bytes(b"synthetic-session")
         completed = subprocess.CompletedProcess([], 0, "", "")
         with mock.patch.object(self.backend, "_unit_active", return_value=False), \
                 mock.patch.object(
@@ -821,11 +901,17 @@ class AccountLifecycleTests(unittest.TestCase):
     def test_interrupted_terminal_link_always_restores_active_sync(self) -> None:
         self._online(self.home, True)
         completed = subprocess.CompletedProcess([], 0, "", "")
+        observed_intent = []
+
+        def interrupt(*args, **kwargs):
+            observed_intent.extend(self.backend._lifecycle_recovery_units())
+            raise KeyboardInterrupt
+
         with mock.patch.object(self.backend, "_unit_active", return_value=True), \
                 mock.patch.object(
                     self.backend, "_systemctl_user", return_value=completed
                 ) as systemctl, mock.patch.object(
-                    backend_module.subprocess, "run", side_effect=KeyboardInterrupt
+                    backend_module.subprocess, "run", side_effect=interrupt
                 ), self.assertRaises(KeyboardInterrupt):
             self.backend.transport_interactive(
                 ["auth"], authorization="interactive", account="home"
@@ -835,6 +921,8 @@ class AccountLifecycleTests(unittest.TestCase):
             [["stop", "wacli-sync@home.service"],
              ["start", "wacli-sync@home.service"]],
         )
+        self.assertEqual(observed_intent, ["wacli-sync@home.service"])
+        self.assertEqual(self.backend._lifecycle_recovery_units(), [])
 
     def test_lock_contention_recovery_is_serialized_per_account(self) -> None:
         self._online(self.home, True)
@@ -859,6 +947,26 @@ class AccountLifecycleTests(unittest.TestCase):
         self.assertNotEqual(
             self.backend._lifecycle_lock_name(self.work),
             self.backend._lifecycle_lock_name(self.home),
+        )
+
+    def test_ambiguous_stop_failure_keeps_durable_recovery_intent(self) -> None:
+        self._online(self.home, True)
+        self.backend.use_account("home")
+        locked = subprocess.CompletedProcess([], 1, "", "store is locked")
+        with mock.patch.object(
+                self.backend, "_run", side_effect=[locked, locked]), \
+                mock.patch.object(self.backend, "_sync_active", return_value=True), \
+                mock.patch.object(self.backend, "_unit_active", return_value=False), \
+                mock.patch.object(
+                    self.backend, "_systemctl_user",
+                    side_effect=backend_module.OmaWhatsAppError("stop uncertain"),
+                ), self.assertRaisesRegex(
+                    backend_module.OmaWhatsAppError, "stop uncertain"
+                ):
+            self.backend._write(["--json", "send", "text"], timeout=10)
+        self.assertEqual(
+            self.backend._lifecycle_recovery_units(),
+            ["wacli-sync@home.service"],
         )
 
     def test_committed_mutation_reports_partial_when_sync_restart_fails(self) -> None:

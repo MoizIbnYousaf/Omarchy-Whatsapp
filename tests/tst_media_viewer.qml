@@ -206,6 +206,17 @@ TestCase {
     compare(bubble.mediaKind, "missing")
     tryCompare(bubble, "implicitHeight", 68)
     verify(findChild(bubble, "missingMediaSurface") !== null)
+    compare(findChild(bubble, "missingMediaAction").text,
+      "Download to preview · 1.2 KB")
+
+    // The same timeline object becomes the native player as soon as the
+    // exact-message download refresh publishes its local path.
+    bubble.message = video(fixturePath("synthetic.mp4"))
+    tryVerify(function() {
+      return findChild(bubble, "videoMediaSurface") !== null
+    })
+    var player = findChild(bubble, "videoMediaSurface")
+    tryVerify(function() { return player.duration > 0 && !player.failed }, 5000)
   }
 
   function test_timeline_animations_are_static_posters() {

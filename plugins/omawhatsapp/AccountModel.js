@@ -64,6 +64,56 @@ function isMultiAccount(accounts) {
   return Array.isArray(accounts) && accounts.length > 1
 }
 
+function accountOptions(accounts) {
+  var values = Array.isArray(accounts) ? accounts : []
+  var options = []
+  var seen = []
+  for (var i = 0; i < values.length; i++) {
+    var account = values[i] || ({})
+    var scope = String(account.account || "")
+    if (seen.indexOf(scope) >= 0) continue
+    seen.push(scope)
+    options.push({
+      scope: scope,
+      label: String(account.label || account.account || "default")
+    })
+  }
+  return options.length > 1
+    ? [{ scope: "", label: "All" }].concat(options) : options
+}
+
+function normalizeScope(scope, accounts) {
+  var value = String(scope || "")
+  if (value === "") return ""
+  var options = accountOptions(accounts)
+  for (var i = 0; i < options.length; i++)
+    if (options[i].scope === value) return value
+  return ""
+}
+
+function filterChats(chats, scope, query, limit) {
+  var values = Array.isArray(chats) ? chats : []
+  var account = String(scope || "")
+  var needle = String(query || "").trim().toLowerCase()
+  var filtered = values.filter(function(chat) {
+    if (account !== "" && accountOf(chat) !== account) return false
+    return needle === ""
+      || String(chat.name || "").toLowerCase().indexOf(needle) >= 0
+      || String(chat.preview || "").toLowerCase().indexOf(needle) >= 0
+  })
+  var maximum = Number(limit || 0)
+  return maximum > 0 ? filtered.slice(0, Math.max(1, maximum)) : filtered
+}
+
+function accountNameError(value, legacyAccount) {
+  var name = String(value || "").trim()
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name))
+    return "Use 1–64 letters, digits, dots, underscores, or hyphens."
+  if (legacyAccount === true && name === "primary")
+    return "primary is reserved for your existing account."
+  return ""
+}
+
 // Status has two deliberate scopes: the merged rail is available when any
 // one account is usable, while mutations require the selected account itself.
 function statusReadiness(payload) {

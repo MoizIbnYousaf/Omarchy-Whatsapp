@@ -65,6 +65,9 @@ TestCase {
       property var accounts: []
       property var messages: []
       property var members: []
+      property var accountOperations: ({
+        linkBusy: false, avatarBusy: false, statusMessage: ""
+      })
       property var lastDelete: null
       property var lastForward: null
       property var lastPoll: null

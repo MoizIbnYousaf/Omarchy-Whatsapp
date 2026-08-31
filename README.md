@@ -61,6 +61,11 @@ native, and visually at home in Omarchy.
 - Render images, stickers, animated GIFs, WhatsApp's looping-video GIFs,
   videos, voice/audio messages, documents, locations, quotes, reactions,
   edited/forwarded/starred state, and button rows.
+- Download a missing video into its native inline player with one click; locally
+  available videos show a real decoded preview rather than a blank panel.
+- Filter the merged chat rail by account with one click, link another account
+  in a guarded terminal flow, and explicitly refresh privately cached profile
+  photos without making ordinary chat browsing network-dependent.
 - Open photos, GIFs, and videos in a full-window native gallery with fit/zoom,
   previous/next navigation, playback, metadata, and external-open controls.
 - When [`Omasnap`](https://github.com/tobi/omasnap) is installed, Open
@@ -167,9 +172,9 @@ After pulling a newer release, always re-run `./scripts/install`. Do not copy
 only the plugin directory: the installer stages the QML, the
 `~/.local/bin/omawhatsapp` helper, the agent skill, and the user-service
 templates as one compatible set. This is especially important when upgrading
-to 0.10.1: it replaces the media player, account-aware intent routing, helper,
-and service lifecycle as one compatible release. The installer resumes or
-rolls back an interrupted upgrade before applying the new version.
+to 0.11.0: it adds a helper module used by the private profile-photo cache.
+The installer resumes or rolls back an interrupted
+upgrade before applying the new version.
 
 Link this machine once when needed:
 
@@ -179,20 +184,24 @@ Link this machine once when needed:
 
 ### More than one WhatsApp account
 
-wacli owns the account list, and OmaWhatsApp follows it. Name the session this
-machine already has before adding a second one, so its history stays where it
-is:
+wacli owns the account list, and OmaWhatsApp follows it. Click `+` beside the
+account filters, choose a name, and complete the QR flow in the terminal that
+opens. When upgrading a machine with one unnamed session, OmaWhatsApp keeps
+that existing store untouched and exposes it as `primary`—no session, history,
+or upstream configuration is moved. That identity stays `primary` across the
+first link, so an already-open draft or receipt cannot retarget to the newly
+created default account.
+
+The equivalent manual flow remains available for administration:
 
 ```bash
-~/.local/bin/wacli accounts add personal --no-auth
-# then set `store: .` for that account in ~/.local/state/wacli/config.yaml
-~/.local/bin/wacli accounts add work
+~/.local/bin/omawhatsapp link-account work --authorize interactive
 ```
 
-Re-run `./scripts/install` afterwards to start one sync instance per account.
-The chat rail then merges every account, each row named by the account it came
-from, and the bar badge sums them. Sending, receipts, offline mode, and the
-badge stay inside the account of the chat you are looking at.
+The chat rail merges every account and offers `All` plus one filter per
+account; filtering never changes a chat's destination. Sending, receipts,
+offline mode, and the badge stay inside the account of the chat you are
+looking at.
 
 Run `./scripts/install --check` for a read-only installation preflight. A real
 install validates and stages the complete plugin tree before replacing it,

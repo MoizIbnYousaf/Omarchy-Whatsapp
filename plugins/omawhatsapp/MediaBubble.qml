@@ -37,6 +37,7 @@ Item {
   readonly property bool unavailable: message.media_unavailable === true
   readonly property bool gifVideo: MediaModel.isGifVideo(message)
   readonly property bool video: !gifVideo && MediaModel.isVideo(message)
+  readonly property bool previewableVideo: gifVideo || video
   readonly property bool animatedImage: MediaModel.isAnimatedImage(message)
   readonly property bool staticImage: MediaModel.isImage(message)
   readonly property bool audio: MediaModel.isAudio(message)
@@ -532,8 +533,11 @@ Item {
           }
           Text {
             textFormat: Text.PlainText
+            objectName: "missingMediaAction"
             text: root.unavailable ? "No longer available from WhatsApp"
-              : (root.busy ? "Downloading…" : "Click to download"
+              : (root.busy
+                ? (root.previewableVideo ? "Downloading video…" : "Downloading…")
+                : (root.previewableVideo ? "Download to preview" : "Click to download")
                 + (root.humanSize(root.message.file_size) !== ""
                   ? " · " + root.humanSize(root.message.file_size) : ""))
             color: root.dimmer
