@@ -75,19 +75,26 @@ Item {
 
   function stopPlayback() {
     player.stop()
+    hasStartedPlayback = false
+  }
+
+  function suspendPlayback() {
+    // A stopped MediaPlayer clears its VideoOutput. Preserve the last decoded
+    // frame as a useful timeline preview; untouched media keeps its poster.
+    if (hasStartedPlayback) player.pause()
+    else stopPlayback()
   }
 
   onActiveChanged: {
-    if (!active) player.stop()
+    if (!active) stopPlayback()
     else playIfAutomatic()
   }
   onSourceChanged: {
-    player.stop()
-    hasStartedPlayback = false
+    stopPlayback()
     playIfAutomatic()
   }
   onAutoPlayChanged: playIfAutomatic()
-  onPlaybackGrantedChanged: if (!playbackGranted) player.stop()
+  onPlaybackGrantedChanged: if (!playbackGranted) suspendPlayback()
   Component.onCompleted: playIfAutomatic()
 
   Rectangle {

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep the last decoded GIF or video frame visible when another timeline
+  player takes over. Fully hidden surfaces still stop and release media
+  resources instead of retaining offscreen decoders.
 - Press `R` or `r` while navigating messages to reply to the selected message
   and focus the composer. Modified shortcuts and active text fields remain
   untouched, so ordinary typing and shortcuts such as `Ctrl+R` do not get

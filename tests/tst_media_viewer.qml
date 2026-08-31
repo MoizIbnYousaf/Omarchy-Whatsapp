@@ -370,6 +370,54 @@ TestCase {
     compare(videoSurface.posterShown, false)
   }
 
+  function test_suspended_timed_media_keeps_its_decoded_preview_data() {
+    return [
+      { tag: "video", mediaType: "video" },
+      { tag: "gif-video", mediaType: "gif" }
+    ]
+  }
+
+  function test_suspended_timed_media_keeps_its_decoded_preview(data) {
+    var message = video(fixturePath("synthetic.mp4"))
+    message.media_type = data.mediaType
+    var bubble = createTemporaryObject(genericMediaBubbleComponent, testCase,
+      { message: message, activePlaybackId: "synthetic-video" })
+    verify(bubble !== null)
+    var videoSurface = findChild(bubble, "videoMediaSurface")
+    verify(videoSurface !== null)
+    tryVerify(function() { return videoSurface.duration > 0 }, 5000)
+    videoSurface.togglePlayback()
+    tryCompare(videoSurface, "playing", true, 5000)
+    tryVerify(function() {
+      return videoSurface.hasDecodedFrame && videoSurface.position > 0
+    }, 5000)
+
+    bubble.activePlaybackId = ""
+    tryCompare(videoSurface, "playing", false, 1000)
+    compare(videoSurface.hasStartedPlayback, true)
+    compare(videoSurface.posterShown, false)
+    verify(videoSurface.hasDecodedFrame)
+    verify(videoSurface.position > 0)
+  }
+
+  function test_inactive_timed_media_releases_its_preview() {
+    var bubble = createTemporaryObject(genericMediaBubbleComponent, testCase,
+      { message: video(fixturePath("synthetic.mp4")),
+        activePlaybackId: "synthetic-video" })
+    verify(bubble !== null)
+    var videoSurface = findChild(bubble, "videoMediaSurface")
+    verify(videoSurface !== null)
+    tryVerify(function() { return videoSurface.duration > 0 }, 5000)
+    videoSurface.togglePlayback()
+    tryCompare(videoSurface, "playing", true, 5000)
+
+    bubble.surfaceActive = false
+    tryCompare(videoSurface, "playing", false, 1000)
+    compare(videoSurface.hasStartedPlayback, false)
+    compare(videoSurface.posterShown, true)
+    compare(videoSurface.position, 0)
+  }
+
   function test_local_media_urls_encode_reserved_filename_characters() {
     var bubble = createTemporaryObject(genericMediaBubbleComponent, testCase,
       { message: video("__demo_video__") })
