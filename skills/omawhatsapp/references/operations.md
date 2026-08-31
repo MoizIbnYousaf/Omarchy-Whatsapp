@@ -140,6 +140,29 @@ Offline mode stops and disables that account's sync service while preserving
 local reads. It blocks that account's WhatsApp mutations until the user returns
 online, and leaves the other accounts alone.
 
+## Desktop notifications
+
+Inspect only the non-identifying notification state:
+
+```bash
+"$oma" status | jq '{notifications,notify_available}'
+```
+
+Change notifications only when the user explicitly asks:
+
+```bash
+printf '{"enabled":true,"preview":false}\n' | "$oma" notify-mode
+printf '{"preview":true}\n' | "$oma" notify-mode
+printf '{"enabled":false}\n' | "$oma" notify-mode
+```
+
+While notifications are enabled, future popups send the chat name and, in
+multi-account setups, the account label to the desktop notification daemon;
+the daemon may retain them in history. With previews enabled, sender names and
+message text also cross that boundary. The resident app owns the `notify`
+sweep; never invoke it as a test over a real archive. Use demo data or mocks
+when testing notification behavior.
+
 Account linking is interactive and must be explicitly requested:
 
 ```bash

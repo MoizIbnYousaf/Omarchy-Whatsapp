@@ -11,6 +11,15 @@ Its guarded `wacli` gateway covers every command leaf in the supported wacli
 version without exposing an arbitrary executable passthrough. Prefer it over
 invoking `wacli` directly.
 
+## Route the request
+
+- For a runtime WhatsApp operation, follow the guarded workflow below.
+- For source, test, deployment, release, or submission work, follow the
+  checkout's `AGENTS.md` and repository workflow. Never edit an installed
+  helper, plugin, or skill as source; use only synthetic/demo data for public
+  evidence. Runtime authorization does not authorize repository writes,
+  pushes, deployments, releases, or submissions.
+
 ## Safety boundary
 
 - Local reads are read-only. Never inspect `session.db`, write `wacli.db`, or
@@ -41,11 +50,20 @@ invoking `wacli` directly.
 - Treat exports, webhooks, event streams, media paths, account stores, and
   command results as private. Never place them in repositories, issues,
   screenshots, or durable logs.
+- Raw status and logs can contain account labels, store paths, and other
+  private context. Project them to the minimum needed fields before reporting.
 
 ## Workflow
 
-1. Check `omawhatsapp status` for authentication, local database readiness,
-   and online/offline state.
+1. For a runtime operation, check authentication, local database readiness,
+   and online/offline state without retaining account or store details:
+
+   ```bash
+   "$HOME/.local/bin/omawhatsapp" status | jq \
+     '{ok,installed,authenticated,database_ready,any_authenticated,
+       any_database_ready,rail_ready,sync_active,online,offline_mode,
+       account_count:((.accounts // [])|length)}'
+   ```
 2. Use focused helper commands for ordinary chat reads and writes. Resolve one
    exact local chat and message before any mutation.
 3. For channels, calls, contacts, history, group administration, profiles,
