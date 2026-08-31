@@ -51,6 +51,7 @@ jobs:
           export HOME="$RUNNER_TEMP/omawhatsapp-home"
           export PATH="/usr/lib/qt6/bin:$GITHUB_WORKSPACE/.omarchy/bin:$PATH"
           export OMARCHY_SHELL_DIR="$GITHUB_WORKSPACE/.omarchy/shell"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           install -d "$HOME/.config/omarchy"
           printf '%s\n' \
             '{"plugins":[],"bar":{"layout":{"left":[],"center":[],"right":[]}}}' \
