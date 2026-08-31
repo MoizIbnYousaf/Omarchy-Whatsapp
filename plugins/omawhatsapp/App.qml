@@ -408,7 +408,8 @@ Item {
     var value = composer.text.trim()
     if (value === "" && pendingAttachments.length === 0) return
     if (demoMode) {
-      demoItems = [{ id: "demo-" + Date.now(), text: value, sender: "You", sender_jid: "", timestamp: Math.floor(Date.now() / 1000), from_me: true, done: false, media_type: "", mime_type: "", local_path: "", tags: [] }].concat(demoItems)
+      demoItems = [ComposerModel.demoMessage(value,
+        pendingAttachments.length > 0, replyTarget, Date.now())].concat(demoItems)
       composer.text = ""
       pendingAttachments = []
       pendingStickerPath = ""
@@ -1000,6 +1001,15 @@ Item {
     root.openMedia(visibleMessages[Math.max(0, Math.min(cursorIndex, visibleMessages.length - 1))].local_path)
   }
 
+  function replyToCursor() {
+    if (visibleMessages.length === 0) return false
+    var index = Math.max(0, Math.min(cursorIndex, visibleMessages.length - 1))
+    var item = visibleMessages[index]
+    if (!item) return false
+    root.startReply(item)
+    return true
+  }
+
   Connections {
     target: root.service
     function onSelectedChatJidChanged() {
@@ -1312,6 +1322,9 @@ Item {
         } else if (keyboardNavigation.wantsChatSearch(event.key, root.textEntryActive)) {
           root.focusChatSearch()
           event.accepted = true
+        } else if (keyboardNavigation.wantsMessageReply(
+                     event.key, event.modifiers, root.textEntryActive)) {
+          event.accepted = root.replyToCursor()
         } else if (event.key === Qt.Key_C && !root.textEntryActive) {
           root.focusComposer()
           event.accepted = true
@@ -2383,7 +2396,8 @@ Item {
               dimmer: root.dimmer
               fontFamily: root.fontFamily
               groupChat: root.displayKind === "group"
-              selected: index === root.cursorIndex
+              selected: root.keyboardContext === "messages"
+                && index === root.cursorIndex
               narrow: root.narrow
               surfaceActive: root.timelineMediaActive
               activePlaybackId: root.activeTimelinePlaybackId

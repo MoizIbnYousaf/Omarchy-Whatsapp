@@ -238,6 +238,7 @@ Add the `Super+Shift+W` binding from
 | `Ctrl+Shift+O` | Add photos and videos |
 | `Ctrl+Shift+V` | Start/stop a voice note; preview, discard, or explicitly send |
 | `J`/Down · `K`/Up | Move visibly down/up through messages or the focused chat list |
+| `R`/`r` | Reply to the keyboard-selected message and focus the composer |
 | `Enter` | Open the selected chat and focus its composer immediately |
 | `C` | Focus the message composer |
 | `Space` | Open selected media; play/pause inside the viewer |

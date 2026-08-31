@@ -5,6 +5,22 @@ import "../plugins/omawhatsapp/ComposerModel.js" as ComposerModel
 TestCase {
   name: "ComposerModel"
 
+  function test_demo_reply_preserves_visible_quote_context() {
+    var message = ComposerModel.demoMessage("release-safe demo", true, {
+      id: "quoted-1", sender: "Synthetic sender",
+      text: "Synthetic quoted text", media_type: "image"
+    }, 123000)
+    compare(message.id, "demo-123000")
+    compare(message.text, "release-safe demo")
+    compare(message.timestamp, 123)
+    compare(message.from_me, true)
+    compare(message.media_type, "document")
+    compare(message.quoted_id, "quoted-1")
+    compare(message.quoted_sender, "Synthetic sender")
+    compare(message.quoted_text, "Synthetic quoted text")
+    compare(message.quoted_media_type, "image")
+  }
+
   function test_only_the_initiating_surface_owns_a_write_result() {
     verify(ComposerModel.ownsOperation("app", "app"))
     verify(ComposerModel.ownsOperation("dropdown", "dropdown"))

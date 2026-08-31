@@ -226,4 +226,25 @@ TestCase {
     compare(service.lastPoll.ref.jid, "shared@example")
     compare(service.lastPoll.selectable, 1)
   }
+
+  function test_keyboard_reply_targets_the_selected_message() {
+    var harness = createHarness()
+    var app = harness.app
+    var first = {
+      id: "synthetic-first", text: "First synthetic message",
+      from_me: false, media_type: ""
+    }
+    var selected = {
+      id: "synthetic-selected", text: "Selected synthetic message",
+      from_me: false, media_type: ""
+    }
+    harness.service.messages = [first, selected]
+    app.focusMessages()
+    app.cursorIndex = 1
+
+    verify(app.replyToCursor())
+    compare(app.replyTarget.id, selected.id)
+    compare(app.editTarget, null)
+    compare(app.keyboardContext, "composer")
+  }
 }

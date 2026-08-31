@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Press `R` or `r` while navigating messages to reply to the selected message
+  and focus the composer. Modified shortcuts and active text fields remain
+  untouched, so ordinary typing and shortcuts such as `Ctrl+R` do not get
+  intercepted. Demo replies preserve their quoted-message preview, and the
+  keyboard selection outline appears only while the timeline owns focus.
+
 ## 0.11.0 — 2026-08-30
 
 - Add one-click `All`/per-account rail filters and a guarded in-app account

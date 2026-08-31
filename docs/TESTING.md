@@ -46,7 +46,10 @@ durable boundaries and prove the next run restores one coherent version.
 5. Verify chat search, conversation search, filters, keyboard navigation,
    image previews, animated GIF playback, video/audio controls, on-demand
    attachment download, attachment opening, per-chat draft preservation,
-   `@` member completion, selection-to-copy, and its clipboard toast.
+   `@` member completion, selection-to-copy, and its clipboard toast. With the
+   message timeline focused, select a message with J/K and press `r` or `R`;
+   verify its reply context opens and the composer receives focus. Confirm the
+   same keys type normally while a text field owns focus.
 6. With explicit microphone permission, press `Ctrl+Shift+V`, speak briefly,
    press it again, and confirm capture stops into a playable draft without a
    send. Verify Escape also stops into review, discard removes the draft, a

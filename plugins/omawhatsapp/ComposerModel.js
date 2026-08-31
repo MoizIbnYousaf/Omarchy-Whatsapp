@@ -4,6 +4,25 @@ function ownsOperation(owner, expected) {
   return String(owner || "") === String(expected || "")
 }
 
+function demoMessage(text, hasAttachment, reply, nowMilliseconds) {
+  var now = Number(nowMilliseconds) || Date.now()
+  return {
+    id: "demo-" + now,
+    text: String(text || ""),
+    sender: "You",
+    timestamp: Math.floor(now / 1000),
+    from_me: true,
+    media_type: hasAttachment === true ? "document" : "",
+    mime_type: "",
+    local_path: "",
+    reactions: [],
+    quoted_id: String(reply && reply.id || ""),
+    quoted_sender: String(reply && reply.sender || ""),
+    quoted_text: String(reply && reply.text || ""),
+    quoted_media_type: String(reply && reply.media_type || "")
+  }
+}
+
 // A failed multi-file send may already have delivered a prefix. Remove only
 // those exact paths; preserving every unsent or newly-added attachment makes
 // the next send safe instead of duplicating WhatsApp mutations.

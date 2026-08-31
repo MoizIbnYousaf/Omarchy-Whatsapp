@@ -69,4 +69,16 @@ TestCase {
     navigation.enterMessages(3)
     verify(!navigation.wantsChatSearch(Qt.Key_Slash, false))
   }
+
+  function test_r_replies_only_from_message_navigation() {
+    var navigation = createTemporaryObject(navigationComponent, testCase)
+    navigation.enterMessages(3)
+    verify(navigation.wantsMessageReply(Qt.Key_R, Qt.NoModifier, false))
+    verify(navigation.wantsMessageReply(Qt.Key_R, Qt.ShiftModifier, false))
+    verify(!navigation.wantsMessageReply(Qt.Key_R, Qt.ControlModifier, false))
+    verify(!navigation.wantsMessageReply(Qt.Key_R, Qt.NoModifier, true))
+    verify(!navigation.wantsMessageReply(Qt.Key_J, Qt.NoModifier, false))
+    navigation.enterComposer()
+    verify(!navigation.wantsMessageReply(Qt.Key_R, Qt.NoModifier, false))
+  }
 }

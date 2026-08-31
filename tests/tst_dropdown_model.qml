@@ -32,12 +32,4 @@ TestCase {
     })
   }
 
-  function test_demo_send_never_needs_a_transport() {
-    var message = DropdownModel.demoMessage("release-safe demo", true, 123000)
-    compare(message.id, "demo-123000")
-    compare(message.text, "release-safe demo")
-    compare(message.timestamp, 123)
-    compare(message.from_me, true)
-    compare(message.media_type, "document")
-  }
 }

@@ -20,18 +20,3 @@ function fullAppPayload(chat) {
     conversation: true
   }
 }
-
-function demoMessage(text, hasAttachment, nowMilliseconds) {
-  var now = Number(nowMilliseconds) || Date.now()
-  return {
-    id: "demo-" + now,
-    text: String(text || ""),
-    sender: "You",
-    timestamp: Math.floor(now / 1000),
-    from_me: true,
-    media_type: hasAttachment === true ? "document" : "",
-    mime_type: "",
-    local_path: "",
-    reactions: []
-  }
-}

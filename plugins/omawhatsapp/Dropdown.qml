@@ -346,8 +346,8 @@ Panel {
     var text = String(composer.text || "").trim()
     if (text === "" && pendingAttachments.length === 0) return
     if (demoMode) {
-      demoItems = [DropdownModel.demoMessage(text,
-        pendingAttachments.length > 0, Date.now())].concat(demoItems)
+      demoItems = [ComposerModel.demoMessage(text,
+        pendingAttachments.length > 0, replyTarget, Date.now())].concat(demoItems)
       composer.text = ""
       pendingAttachments = []
       replyTarget = null
