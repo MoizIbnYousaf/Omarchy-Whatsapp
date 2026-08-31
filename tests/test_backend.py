@@ -749,6 +749,44 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(command[command.index("--reply-to-sender") + 1],
                          "member@s.whatsapp.net")
 
+    def test_successful_reply_hint_restores_quote_before_the_index_links_it(self) -> None:
+        completed = subprocess.CompletedProcess(
+            [], 0, '{"success":true,"data":{"id":"sent-reply"}}', ""
+        )
+        with mock.patch.object(self.backend, "_write", return_value=completed):
+            self.backend.send("team@g.us", "synthetic reply", "t1")
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                """INSERT INTO messages
+                (chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+                 from_me, text, reaction_to_id)
+                VALUES (?, 'Design team', ?, 'me@s.whatsapp.net', '', ?, 1, ?, '')""",
+                ["team@g.us", "sent-reply", 50, "synthetic reply"],
+            )
+
+        item = next(value for value in self.backend.messages("team@g.us")["messages"]
+                    if value["id"] == "sent-reply")
+        self.assertEqual(item["quoted_id"], "t1")
+        self.assertEqual(item["quoted_sender"], "Sam")
+        self.assertEqual(item["quoted_text"], "ship it")
+        state = self.root / "state" / "sent-replies.json"
+        self.assertEqual(state.stat().st_mode & 0o777, 0o600)
+        hint_text = state.read_text(encoding="utf-8")
+        self.assertNotIn("synthetic reply", hint_text)
+        self.assertNotIn("ship it", hint_text)
+
+    def test_reply_hint_bookkeeping_never_makes_a_delivered_send_retryable(self) -> None:
+        completed = subprocess.CompletedProcess(
+            [], 0, '{"success":true,"data":{"id":"sent-reply"}}', ""
+        )
+        with mock.patch.object(self.backend, "_write", return_value=completed), \
+             mock.patch.object(
+                 self.backend, "_remember_sent_reply",
+                 side_effect=backend_module.OmaWhatsAppError("state is full"),
+             ):
+            result = self.backend.send("team@g.us", "synthetic reply", "t1")
+        self.assertTrue(result["ok"])
+
     def test_attachment_reply_is_applied_only_to_first_file(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
         with mock.patch.object(self.backend, "_write", return_value=completed) as write:
@@ -1020,6 +1058,12 @@ class BackendTests(unittest.TestCase):
                        if item["id"] == "t2")
         self.assertEqual(message["local_path"], "")
 
+    def test_sent_reply_hints_are_scoped_by_chat(self) -> None:
+        self.backend._remember_sent_reply("alex@s.whatsapp.net", "t2", "a1")
+        message = next(item for item in self.backend.messages("team@g.us")["messages"]
+                       if item["id"] == "t2")
+        self.assertEqual(message["quoted_id"], "")
+
     def test_multi_file_send_rejects_remote_and_oversized_batches(self) -> None:
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Only local"):
             self.backend.send_files("team@g.us", ["https://example.com/file.png"])
@@ -1070,6 +1114,19 @@ class BackendTests(unittest.TestCase):
                                 encoding="utf-8")
         (state / "sent-media.json").symlink_to(media_victim)
         self.assertEqual(self.backend._sent_media_hints(), {})
+
+        reply_victim = self.root / "reply-victim.json"
+        reply_victim.write_text('{"foreign":{"quoted_id":"private"}}',
+                                encoding="utf-8")
+        (state / "sent-replies.json").symlink_to(reply_victim)
+        self.assertEqual(self.backend._sent_reply_hints(), {})
+        self.backend._remember_sent_reply("team@g.us", "sent", "quoted")
+        self.assertEqual(
+            reply_victim.read_text(encoding="utf-8"),
+            '{"foreign":{"quoted_id":"private"}}',
+        )
+        self.assertFalse((state / "sent-replies.json").is_symlink())
+        self.assertEqual((state / "sent-replies.json").stat().st_mode & 0o777, 0o600)
 
     def test_state_locks_never_follow_predictable_symlinks(self) -> None:
         state = self.root / "state"

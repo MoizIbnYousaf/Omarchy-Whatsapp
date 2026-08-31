@@ -724,7 +724,7 @@ class BackendHardeningTests(unittest.TestCase):
         delivered = self.root / "delivered-corrupt-state.pdf"
         delivered.write_bytes(b"delivered")
         hints = {
-            self.backend._media_hint_key("team@g.us", f"old-{index}"): {
+            self.backend._sent_hint_key("team@g.us", f"old-{index}"): {
                 "local_path": str(delivered),
                 "saved_at": {"not": "an integer"} if index == 0 else index,
             }

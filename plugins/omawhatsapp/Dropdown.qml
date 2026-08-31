@@ -32,6 +32,8 @@ Panel {
   property bool resumePendingWrite: false
   property string errorText: ""
   property bool copiedVisible: false
+  property bool clearConfirmOpen: false
+  property bool demoNotificationsCleared: false
   property string demoPlaybackId: ""
   property var demoItems: [
     { id: "demo-message-1", text: "The bar dropdown can send now.", sender: "Alex", timestamp: 1787540400, from_me: false, media_type: "", mime_type: "", local_path: "", reactions: [] },
@@ -96,7 +98,8 @@ Panel {
   readonly property int desiredHeight: viewMode === "conversation"
     ? Style.space(620) : chatChromeHeight
       + accountReadinessHeight + chatListHeight
-  readonly property int notificationCount: demoMode ? 4
+  readonly property int notificationCount: demoMode
+    ? (demoNotificationsCleared ? 0 : 4)
     : (service ? Number(service.notificationUnreadCount || 0) : 0)
   readonly property bool ready: demoMode || (service && service.railReady)
   readonly property bool accountStatusReady: demoMode || (!!service
@@ -193,6 +196,8 @@ Panel {
     resumePendingWrite = false
     if (!demoMode && service) service.discardStages(pendingAttachments)
     demoMode = realData === false
+    clearConfirmOpen = false
+    demoNotificationsCleared = false
     searchText = ""
     selectedIndex = 0
     messageIndex = 0
@@ -219,6 +224,7 @@ Panel {
       resumePendingWrite = true
     searchField.focus = false
     composer.focus = false
+    clearConfirmOpen = false
     stopPlayback()
     if (!demoMode && service) service.stopVoiceForSurfaceClose()
     if (!demoMode && service) service.dropdownOpen = false
@@ -304,6 +310,28 @@ Panel {
       if (viewMode === "conversation") service.refreshMessages()
     }
     refreshRequested()
+  }
+
+  function requestClearNotifications() {
+    if (notificationCount <= 0 || clearConfirmOpen) return false
+    clearConfirm.selectedIndex = 1
+    clearConfirmOpen = true
+    Qt.callLater(function() { clearConfirmKeys.forceActiveFocus() })
+    return true
+  }
+
+  function cancelClearNotifications() {
+    clearConfirmOpen = false
+    Qt.callLater(function() { if (root.opened) keyCatcher.forceActiveFocus() })
+  }
+
+  function confirmClearNotifications() {
+    if (!clearConfirmOpen) return false
+    clearConfirmOpen = false
+    if (demoMode) demoNotificationsCleared = true
+    else if (service) service.dismissNotifications("", "")
+    Qt.callLater(function() { if (root.opened) keyCatcher.forceActiveFocus() })
+    return true
   }
 
   function focusSearch() {
@@ -591,6 +619,7 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       blocked: searchField.activeFocus || composer.activeFocus
+        || root.clearConfirmOpen
       onMoveRequested: function(dx, dy) {
         if (dy !== 0) root.moveSelection(dy)
         else if (dx !== 0 && root.viewMode === "chats") root.switchPanel(dx)
@@ -677,6 +706,7 @@ Panel {
             }
 
             Rectangle {
+              id: notificationBadge
               visible: root.notificationCount > 0
               anchors.right: refreshButton.left
               anchors.rightMargin: Style.space(8)
@@ -685,6 +715,7 @@ Panel {
               height: Style.space(24)
               radius: height / 2
               color: root.accent
+              opacity: notificationBadgeHover.hovered ? 0.82 : 1
               Text {
                 textFormat: Text.PlainText
                 id: unreadHeader
@@ -695,6 +726,11 @@ Panel {
                 font.pixelSize: Style.font.caption
                 font.weight: Font.DemiBold
               }
+              HoverHandler {
+                id: notificationBadgeHover
+                cursorShape: Qt.PointingHandCursor
+              }
+              TapHandler { onTapped: root.requestClearNotifications() }
             }
 
             Rectangle {
@@ -1408,6 +1444,35 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
               font.weight: Font.DemiBold
+            }
+          }
+
+          Item {
+            id: clearConfirmKeys
+            anchors.fill: parent
+            visible: root.clearConfirmOpen
+            focus: visible
+            z: 20
+            Keys.priority: Keys.BeforeItem
+            Keys.onPressed: function(event) {
+              if (clearConfirm.handleKey(event)) event.accepted = true
+            }
+
+            ConfirmDialog {
+              id: clearConfirm
+              objectName: "clearNotificationsConfirm"
+              anchors.fill: parent
+              opened: root.clearConfirmOpen
+              message: "Clear all notification badges? Messages stay unread and no read receipts are sent."
+              confirmText: "Clear"
+              background: root.background
+              foreground: root.foreground
+              selectedBackground: root.selected
+              selectedText: root.accent
+              fontFamily: root.fontFamily
+              cornerRadius: Style.cornerRadius
+              onCanceled: root.cancelClearNotifications()
+              onConfirmed: root.confirmClearNotifications()
             }
           }
         }

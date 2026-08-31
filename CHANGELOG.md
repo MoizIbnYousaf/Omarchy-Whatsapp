@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.2 — 2026-08-31
+
+- Make the aggregate notification count in the dropdown header actionable.
+  Clearing it requires confirmation, dismisses only local notification badges,
+  and never marks messages read or sends read receipts.
+- Add an offscreen dropdown regression harness with shell-surface test doubles,
+  covering cancel, confirm, and already-clear behavior without loading private
+  chat data.
+- Resolve [#7](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/issues/7),
+  reported by [FoxesRCool1](https://github.com/FoxesRCool1).
+
 ## 0.11.1 — 2026-08-31
 
 - Keep the last decoded GIF or video frame visible when another timeline

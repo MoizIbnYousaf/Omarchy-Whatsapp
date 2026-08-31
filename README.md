@@ -275,9 +275,11 @@ Add the `Super+Shift+W` binding from
 | Header settings button | Private reading, badge, sync, and dropdown-size controls |
 | Chat menu `Mark read · send receipt` | Explicitly mark the chat read on WhatsApp |
 
-Middle-click the bar item to dismiss the current local notification batch;
-right-click refreshes. Neither action sends a read receipt. The in-app settings
-card controls automatic receipts, the badge, background sync, and dropdown size.
+Click the notification count in the dropdown header to clear every local badge
+after a confirmation. Middle-clicking the bar item does the same immediately;
+right-click refreshes. None of these actions marks messages read or sends a read
+receipt. The in-app settings card controls automatic receipts, the badge,
+background sync, and dropdown size.
 
 Desktop popups are a separate surface from the bar badge and are off until you
 turn them on. They need `notify-send` from libnotify, stay quiet for muted and

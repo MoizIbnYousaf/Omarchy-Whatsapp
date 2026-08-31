@@ -69,12 +69,14 @@ MAX_MESSAGE = 4096
 MAX_FILE = 100 * 1024 * 1024
 MAX_ATTACHMENTS = 10
 MAX_SENT_MEDIA_HINTS = 2000
+MAX_SENT_REPLY_HINTS = 2000
 MAX_WACLI_OUTPUT = 1024 * 1024
 MAX_PROCESS_ERROR = 64 * 1024
 MAX_CLIPBOARD_TYPES = 64 * 1024
 MAX_CLIPBOARD_TEXT = MAX_MESSAGE * 4
 MAX_PREFERENCES = 1024 * 1024
 MAX_SENT_MEDIA_STATE = 2 * 1024 * 1024
+MAX_SENT_REPLY_STATE = 2 * 1024 * 1024
 PREFERENCES_VERSION = 2
 MAX_NOTIFY_BURST = 5
 MAX_NOTIFY_SUMMARY = 96
@@ -1183,7 +1185,7 @@ class Backend:
             "dropdown_rows": value.get("dropdown_rows", 7),
         }
 
-    def _media_hint_key(self, jid: str, message_id: str) -> str:
+    def _sent_hint_key(self, jid: str, message_id: str) -> str:
         # WhatsApp message IDs can collide across chats, and a chat can be
         # reachable from more than one linked account.
         return f"{self.active.key}\n{jid}\n{message_id}"
@@ -1222,7 +1224,7 @@ class Backend:
             return
         with self._state_lock("sent-media.lock"):
             hints = self._sent_media_hints()
-            hints[self._media_hint_key(jid, target)] = {
+            hints[self._sent_hint_key(jid, target)] = {
                 "local_path": str(path),
                 "filename": path.name,
                 "mime_type": mime,
@@ -1246,6 +1248,54 @@ class Backend:
         """Preview bookkeeping must never turn a delivered send into a retry."""
         try:
             self._remember_sent_media(*args)
+        except (OmaWhatsAppError, OSError, TypeError, ValueError):
+            return False
+        return True
+
+    def _sent_reply_hints(self) -> dict[str, dict[str, Any]]:
+        value = self._read_state_json("sent-replies.json", MAX_SENT_REPLY_STATE, {})
+        if not isinstance(value, dict):
+            return {}
+        clean: dict[str, dict[str, Any]] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or key.count("\n") != 2 \
+                    or not isinstance(item, dict):
+                continue
+            quoted_id = str(item.get("quoted_id") or "").strip()
+            if not quoted_id or len(quoted_id) > 256:
+                continue
+            clean[key] = {
+                "quoted_id": quoted_id,
+                "saved_at": bounded_int(item.get("saved_at"), 0, 0, 2**63 - 1),
+            }
+        return clean
+
+    def _remember_sent_reply(
+        self, jid: str, message_id: str, quoted_id: str,
+    ) -> None:
+        target = message_id.strip()
+        quoted = quoted_id.strip()
+        if not target or not quoted:
+            return
+        with self._state_lock("sent-replies.lock"):
+            hints = self._sent_reply_hints()
+            hints[self._sent_hint_key(jid, target)] = {
+                "quoted_id": quoted[:256],
+                "saved_at": int(time.time()),
+            }
+            if len(hints) > MAX_SENT_REPLY_HINTS:
+                ordered = sorted(hints.items(), key=lambda pair: pair[1]["saved_at"])
+                hints = dict(ordered[-MAX_SENT_REPLY_HINTS:])
+            self._write_state_json(
+                "sent-replies.json", hints, MAX_SENT_REPLY_STATE
+            )
+
+    def _remember_sent_reply_best_effort(
+        self, jid: str, message_id: str, quoted_id: str,
+    ) -> bool:
+        """Reply bookkeeping must never turn a delivered send into a retry."""
+        try:
+            self._remember_sent_reply(jid, message_id, quoted_id)
         except (OmaWhatsAppError, OSError, TypeError, ValueError):
             return False
         return True
@@ -2268,6 +2318,7 @@ class Backend:
     def messages(self, jid: str, query: str = "", limit: int = 160) -> dict[str, Any]:
         chat = self._chat(jid)
         sent_media_hints = self._sent_media_hints()
+        sent_reply_hints = self._sent_reply_hints()
         cleaned = " ".join(query.split())[:256]
         limit = max(1, min(int(limit), 500))
         where = """base.chat_jid = ? AND base.deleted_at IS NULL
@@ -2290,20 +2341,12 @@ class Backend:
                       base.mime_type, base.local_path, base.file_length,
                       base.media_unavailable_at, base.edited, base.is_forwarded,
                       base.quoted_msg_id, base.buttons,
-                      quoted.sender_name AS quoted_sender_name,
-                      quoted.from_me AS quoted_from_me,
-                      quoted.media_type AS quoted_media_type,
-                      COALESCE(NULLIF(quoted.text, ''), NULLIF(quoted.media_caption, ''),
-                        NULLIF(quoted.display_text, ''), NULLIF(quoted.filename, '')) AS quoted_text,
                       location.latitude, location.longitude, location.name AS location_name,
                       location.address AS location_address, location.is_live AS location_live,
                       EXISTS(SELECT 1 FROM starred
                         WHERE starred.chat_jid = base.chat_jid
                           AND starred.msg_id = base.msg_id) AS is_starred
                     FROM messages AS base
-                    LEFT JOIN messages AS quoted
-                      ON quoted.chat_jid = base.chat_jid
-                        AND quoted.msg_id = base.quoted_msg_id
                     LEFT JOIN message_locations AS location
                       ON location.chat_jid = base.chat_jid
                         AND location.msg_id = base.msg_id
@@ -2312,6 +2355,28 @@ class Backend:
                     parameters,
                 ).fetchall()
                 message_ids = [str(row["msg_id"]) for row in rows]
+                quoted_by_message = {}
+                for row in rows:
+                    message_id = str(row["msg_id"])
+                    hint = sent_reply_hints.get(
+                        self._sent_hint_key(chat["jid"], message_id), {}
+                    )
+                    quoted_by_message[message_id] = str(
+                        row["quoted_msg_id"] or hint.get("quoted_id") or ""
+                    )
+                quoted_rows: dict[str, sqlite3.Row] = {}
+                quoted_ids = sorted({value for value in quoted_by_message.values() if value})
+                if quoted_ids:
+                    quoted_placeholders = ",".join("?" for _ in quoted_ids)
+                    resolved_quotes = connection.execute(
+                        f"""SELECT msg_id, sender_name, from_me, media_type,
+                          COALESCE(NULLIF(text, ''), NULLIF(media_caption, ''),
+                            NULLIF(display_text, ''), NULLIF(filename, '')) AS quoted_text
+                        FROM messages
+                        WHERE chat_jid = ? AND msg_id IN ({quoted_placeholders})""",
+                        [chat["jid"], *quoted_ids],
+                    ).fetchall()
+                    quoted_rows = {str(row["msg_id"]): row for row in resolved_quotes}
                 reactions: dict[str, list[dict[str, Any]]] = {}
                 if message_ids:
                     placeholders = ",".join("?" for _ in message_ids)
@@ -2350,13 +2415,15 @@ class Backend:
         values = []
         for row in rows:
             message_id = str(row["msg_id"])
+            quoted_id = quoted_by_message.get(message_id, "")
+            quoted = quoted_rows.get(quoted_id)
             media_type = str(row["media_type"] or "")
             text_keys = ("text", "media_caption") if media_type else ("text", "display_text")
             text = next((str(row[key]).strip() for key in text_keys
                 if row[key] is not None and str(row[key]).strip()), "")
             local_path = str(row["local_path"] or "")
             local_exists = bool(local_path) and Path(local_path).is_file()
-            hint = sent_media_hints.get(self._media_hint_key(chat["jid"], message_id), {})
+            hint = sent_media_hints.get(self._sent_hint_key(chat["jid"], message_id), {})
             hinted_path = str(hint.get("local_path") or "")
             if not local_exists and hinted_path and Path(hinted_path).is_file():
                 local_path = hinted_path
@@ -2374,11 +2441,17 @@ class Backend:
                 "media_unavailable": row["media_unavailable_at"] is not None,
                 "edited": bool(row["edited"]), "forwarded": bool(row["is_forwarded"]),
                 "starred": bool(row["is_starred"]),
-                "quoted_id": str(row["quoted_msg_id"] or ""),
-                "quoted_sender": "You" if bool(row["quoted_from_me"])
-                    else str(row["quoted_sender_name"] or "WhatsApp"),
-                "quoted_text": str(row["quoted_text"] or "")[:512],
-                "quoted_media_type": str(row["quoted_media_type"] or ""),
+                "quoted_id": quoted_id,
+                "quoted_sender": "You" if quoted is not None
+                    and bool(quoted["from_me"])
+                    else str((quoted["sender_name"] if quoted is not None else "")
+                             or "WhatsApp"),
+                "quoted_text": str(
+                    (quoted["quoted_text"] if quoted is not None else "") or ""
+                )[:512],
+                "quoted_media_type": str(
+                    (quoted["media_type"] if quoted is not None else "") or ""
+                ),
                 "reactions": reactions.get(str(row["msg_id"]), []),
                 "buttons": self._json_list(row["buttons"]),
                 "album_id": str(hint.get("album_id") or "")[:64],
@@ -2538,6 +2611,24 @@ class Backend:
             cleaned = "WhatsApp is busy with maintenance. Your draft is safe; try again shortly."
         raise OmaWhatsAppError(cleaned)
 
+    @staticmethod
+    def _sent_message_id(envelope: dict[str, Any]) -> str:
+        data = envelope.get("data")
+        return str(data.get("id") or "") if isinstance(data, dict) else ""
+
+    def _reply_args(
+        self, chat: dict[str, str], reply_id: str,
+    ) -> tuple[str, list[str]]:
+        if not reply_id.strip():
+            return "", []
+        _, reply = self._message(chat["jid"], reply_id)
+        quoted_id = str(reply["msg_id"])
+        args = ["--reply-to", quoted_id]
+        sender = str(reply["sender_jid"] or "")
+        if chat["kind"] == "group" and sender:
+            args.extend(["--reply-to-sender", sender])
+        return quoted_id, args
+
     def _validated_mentions(self, chat: dict[str, str], values: Any) -> list[str]:
         if values in (None, []):
             return []
@@ -2567,14 +2658,13 @@ class Backend:
             "--message", message, "--post-send-wait", "0"]
         for target in self._validated_mentions(chat, mentions):
             command.extend(["--mention", target])
-        if reply_id.strip():
-            _, reply = self._message(chat["jid"], reply_id)
-            command.extend(["--reply-to", str(reply["msg_id"])])
-            sender = str(reply["sender_jid"] or "")
-            if chat["kind"] == "group" and sender:
-                command.extend(["--reply-to-sender", sender])
+        quoted_id, reply_args = self._reply_args(chat, reply_id)
+        command.extend(reply_args)
         result = self._write(command, timeout=45)
-        self._envelope(result)
+        envelope = self._envelope(result)
+        self._remember_sent_reply_best_effort(
+            chat["jid"], self._sent_message_id(envelope), quoted_id
+        )
         return {"ok": True}
 
     def react(self, jid: str, message_id: str, emoji: str) -> dict[str, Any]:
@@ -2675,21 +2765,20 @@ class Backend:
             command.extend(["--mime", mime])
         if caption.strip():
             command.extend(["--caption", caption.strip()[:1024]])
-        if reply_id.strip():
-            _, reply = self._message(chat["jid"], reply_id)
-            command.extend(["--reply-to", str(reply["msg_id"])])
-            sender = str(reply["sender_jid"] or "")
-            if chat["kind"] == "group" and sender:
-                command.extend(["--reply-to-sender", sender])
+        quoted_id, reply_args = self._reply_args(chat, reply_id)
+        command.extend(reply_args)
         command.extend(["--post-send-wait", "0"])
         envelope = self._envelope(self._write(command, timeout=120))
         data = envelope.get("data") if isinstance(envelope, dict) else None
         data = data if isinstance(data, dict) else {}
-        message_id = str(data.get("id") or "")
+        message_id = self._sent_message_id(envelope)
         file_data = data.get("file") if isinstance(data.get("file"), dict) else {}
         detected_mime = str(file_data.get("mime_type") or mime)
         detected_type = str(file_data.get("media") or
                             ("image" if detected_mime.startswith("image/") else "document"))
+        self._remember_sent_reply_best_effort(
+            chat["jid"], message_id, quoted_id
+        )
         self._remember_sent_media_best_effort(
             chat["jid"], message_id, path, detected_mime, detected_type,
             album_id, album_index, album_count,
@@ -2805,14 +2894,13 @@ class Backend:
             raise OmaWhatsAppError("WhatsApp stickers must be WebP images.")
         command = ["--json", "send", "sticker", "--to", chat["jid"],
                    "--file", str(path)]
-        if reply_id.strip():
-            _, reply = self._message(chat["jid"], reply_id)
-            command.extend(["--reply-to", str(reply["msg_id"])])
-            sender = str(reply["sender_jid"] or "")
-            if chat["kind"] == "group" and sender:
-                command.extend(["--reply-to-sender", sender])
+        quoted_id, reply_args = self._reply_args(chat, reply_id)
+        command.extend(reply_args)
         command.extend(["--post-send-wait", "0"])
-        self._envelope(self._write(command, timeout=120))
+        envelope = self._envelope(self._write(command, timeout=120))
+        self._remember_sent_reply_best_effort(
+            chat["jid"], self._sent_message_id(envelope), quoted_id
+        )
         return {"ok": True, "kind": "sticker"}
 
     def send_voice(self, jid: str, value: Any, reply_id: str = "") -> dict[str, Any]:
@@ -2824,14 +2912,13 @@ class Backend:
             "--json", "send", "voice", "--to", chat["jid"],
             "--file", str(path), "--mime", "audio/ogg",
         ]
-        if reply_id.strip():
-            _, reply = self._message(chat["jid"], reply_id)
-            command.extend(["--reply-to", str(reply["msg_id"])])
-            sender = str(reply["sender_jid"] or "")
-            if chat["kind"] == "group" and sender:
-                command.extend(["--reply-to-sender", sender])
+        quoted_id, reply_args = self._reply_args(chat, reply_id)
+        command.extend(reply_args)
         command.extend(["--post-send-wait", "0"])
-        self._envelope(self._write(command, timeout=120))
+        envelope = self._envelope(self._write(command, timeout=120))
+        self._remember_sent_reply_best_effort(
+            chat["jid"], self._sent_message_id(envelope), quoted_id
+        )
         cleaned = True
         try:
             self.voice_draft("discard", path)

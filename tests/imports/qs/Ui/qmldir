@@ -1,3 +1,7 @@
 module qs.Ui
+ConfirmDialog 1.0 ConfirmDialog.qml
+KeyboardPanel 1.0 KeyboardPanel.qml
+Panel 1.0 Panel.qml
+PanelKeyCatcher 1.0 PanelKeyCatcher.qml
 TextField 1.0 TextField.qml
 ToggleSwitch 1.0 ToggleSwitch.qml
