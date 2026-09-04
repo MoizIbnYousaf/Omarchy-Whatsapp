@@ -2742,6 +2742,11 @@ class Backend:
 
     def chat_action(self, jid: str, action: str) -> dict[str, Any]:
         chat = self._chat(jid)
+        action_clean = action.strip().lower()
+        if action_clean in {"remove-local", "delete-local"}:
+            command = ["--json", "chats", "cleanup", "--jid", chat["jid"], "--confirm"]
+            self._envelope(self._mutate(command, timeout=45, require_online=False))
+            return {"ok": True, "kind": "chat-action", "action": action_clean}
         commands: dict[str, list[str]] = {
             "read": ["chats", "mark-read"],
             "unread": ["chats", "mark-unread"],
@@ -2752,7 +2757,7 @@ class Backend:
             "mute": ["chats", "mute", "--duration", "0"],
             "unmute": ["chats", "unmute"],
         }
-        suffix = commands.get(action.strip().lower())
+        suffix = commands.get(action_clean)
         if suffix is None:
             raise OmaWhatsAppError("That chat action is not supported.")
         command = ["--json", *suffix, "--chat", chat["jid"]]

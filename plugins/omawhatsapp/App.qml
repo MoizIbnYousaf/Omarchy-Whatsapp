@@ -44,6 +44,7 @@ Item {
   property var deleteTarget: null
   property var deleteOriginRef: AccountModel.chatRef("", "")
   property bool deleteForMe: true
+  property var removeLocalTargetRef: AccountModel.chatRef("", "")
   property var forwardTarget: null
   property var forwardOriginRef: AccountModel.chatRef("", "")
   property var pollOriginRef: AccountModel.chatRef("", "")
@@ -887,6 +888,34 @@ Item {
     if (demoMode || !service || !target || String(origin.jid || "") === "")
       return false
     return service.deleteMessage(origin, target, forMe, "app")
+  }
+
+  function requestRemoveLocalChat() {
+    var chat = root.selectedChat
+    if (!chat || !chat.jid) return
+    removeLocalTargetRef = currentChatRef()
+    removeLocalConfirm.open()
+  }
+
+  function dismissRemoveLocalChat() {
+    removeLocalTargetRef = AccountModel.chatRef("", "")
+    removeLocalConfirm.close()
+  }
+
+  function confirmRemoveLocalChat() {
+    var targetRef = removeLocalTargetRef
+    dismissRemoveLocalChat()
+    if (demoMode) {
+      demoChats = demoChats.filter(function(chat) {
+        return !AccountModel.sameRef(AccountModel.refOf(chat), targetRef)
+      })
+      if (demoChats.length > 0)
+        demoSelectedJid = demoChats[0].jid
+      return true
+    }
+    if (!service || String(targetRef.jid || "") === "")
+      return false
+    return service.chatAction(targetRef, "remove-local", "app")
   }
 
   function startForward(item) {
@@ -2318,13 +2347,14 @@ Item {
                   spacing: Style.space(2)
                   Repeater {
                     model: [
-                      { label: root.selectedChat && root.selectedChat.pinned ? "Unpin chat" : "Pin chat", action: root.selectedChat && root.selectedChat.pinned ? "unpin" : "pin" },
-                      { label: root.selectedChat && root.selectedChat.muted ? "Unmute notifications" : "Mute notifications", action: root.selectedChat && root.selectedChat.muted ? "unmute" : "mute" },
-                      { label: root.selectedChat && root.selectedChat.archived ? "Unarchive chat" : "Archive chat", action: root.selectedChat && root.selectedChat.archived ? "unarchive" : "archive" },
+                      { label: root.selectedChat && root.selectedChat.pinned ? "Unpin chat" : "Pin chat", action: root.selectedChat && root.selectedChat.pinned ? "unpin" : "pin", destructive: false },
+                      { label: root.selectedChat && root.selectedChat.muted ? "Unmute notifications" : "Mute notifications", action: root.selectedChat && root.selectedChat.muted ? "unmute" : "mute", destructive: false },
+                      { label: root.selectedChat && root.selectedChat.archived ? "Unarchive chat" : "Archive chat", action: root.selectedChat && root.selectedChat.archived ? "unarchive" : "archive", destructive: false },
                       { label: root.selectedChat && Number(root.selectedChat.unread || 0) > 0
                           ? "Mark read · send receipt" : "Mark as unread",
                         action: root.selectedChat && Number(root.selectedChat.unread || 0) > 0
-                          ? "read" : "unread" }
+                          ? "read" : "unread", destructive: false },
+                      { label: "Remove local chat", action: "remove-local", destructive: true }
                     ]
                     delegate: Rectangle {
                       required property var modelData
@@ -2339,7 +2369,7 @@ Item {
                         anchors.leftMargin: Style.space(8)
                         anchors.verticalCenter: parent.verticalCenter
                         text: modelData.label
-                        color: root.foreground
+                        color: modelData.destructive ? root.urgent : root.foreground
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.caption
                       }
@@ -2347,9 +2377,12 @@ Item {
                       TapHandler {
                         onTapped: {
                           chatMenu.close()
-                          if (!root.demoMode && root.service)
+                          if (modelData.action === "remove-local") {
+                            root.requestRemoveLocalChat()
+                          } else if (!root.demoMode && root.service) {
                             root.service.chatAction(
                               root.currentChatRef(), modelData.action, "app")
+                          }
                         }
                       }
                     }
@@ -3117,6 +3150,77 @@ Item {
                   onTapped: {
                     if (modelData.confirm) root.confirmDelete()
                     else root.dismissDelete()
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      Popup {
+        id: removeLocalConfirm
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(Style.space(380), window.width - Style.space(28))
+        height: removeLocalColumn.implicitHeight + Style.space(28)
+        padding: Style.space(14)
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onClosed: root.removeLocalTargetRef = AccountModel.chatRef("", "")
+        background: Rectangle {
+          radius: Style.cornerRadius
+          color: root.background
+          border.width: 1
+          border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
+        }
+        contentItem: Column {
+          id: removeLocalColumn
+          spacing: Style.space(12)
+          Text {
+            textFormat: Text.PlainText
+            text: "Remove local chat?"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.heading
+          }
+          Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            text: "This only deletes the local chat history from this device, not from Meta's WhatsApp servers. The chat will disappear from OmaWhatsApp and will only reappear if a new message is received."
+            color: root.dim
+            wrapMode: Text.Wrap
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+          Row {
+            anchors.right: parent.right
+            spacing: Style.space(8)
+            Repeater {
+              model: [
+                { label: "Cancel", confirm: false },
+                { label: "Remove", confirm: true }
+              ]
+              delegate: Rectangle {
+                required property var modelData
+                width: Style.space(78)
+                height: Style.space(34)
+                radius: Style.cornerRadius
+                color: modelData.confirm ? root.urgent
+                  : Style.normalFillFor(root.foreground, root.accent)
+                Text {
+                  textFormat: Text.PlainText
+                  anchors.centerIn: parent
+                  text: modelData.label
+                  color: modelData.confirm ? root.background : root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                TapHandler {
+                  onTapped: {
+                    if (modelData.confirm) root.confirmRemoveLocalChat()
+                    else root.dismissRemoveLocalChat()
                   }
                 }
               }
