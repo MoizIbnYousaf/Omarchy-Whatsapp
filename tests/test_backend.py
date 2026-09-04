@@ -909,6 +909,17 @@ class BackendTests(unittest.TestCase):
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not supported"):
             self.backend.chat_action("team@g.us", "leave")
 
+    def test_chat_action_remove_local(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true,"data":{"deleted":true}}', "")
+        with mock.patch.object(self.backend, "_mutate", return_value=completed) as mutate:
+            result = self.backend.chat_action("team@g.us", "remove-local")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["action"], "remove-local")
+        self.assertEqual(mutate.call_args.args[0], [
+            "--json", "chats", "cleanup", "--jid", "team@g.us", "--confirm"
+        ])
+        self.assertFalse(mutate.call_args.kwargs.get("require_online", True))
+
     def test_mark_read_is_an_explicit_exact_receipt_command(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
         with mock.patch.object(self.backend, "_write", return_value=completed) as write:
