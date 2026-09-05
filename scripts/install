@@ -150,6 +150,7 @@ staged_assets_helper="$staging_root/omawhatsapp_assets.py"
 staged_service="$staging_root/wacli-sync.service"
 staged_template="$staging_root/wacli-sync@.service"
 install -d "$staged_plugin"
+printf 'standalone\n' > "$staged_plugin/install-mode"
 while IFS= read -r -d '' source_file; do
   relative=${source_file#"$repo_root/plugins/$source_plugin_dir/"}
   install -Dm644 "$source_file" "$staged_plugin/$relative"

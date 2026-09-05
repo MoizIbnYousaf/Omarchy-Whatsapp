@@ -169,7 +169,7 @@ TestCase {
     tryCompare(bubble, "album", true)
     compare(bubble.albumItems.length, 2)
     verify(bubble.implicitHeight > 0)
-    compare(String(bubble.localUrlFor(bubble.albumItems[1])).indexOf("demo-photo.svg") >= 0,
+    compare(String(bubble.localUrlFor(bubble.albumItems[1])).indexOf("demo-photo.png") >= 0,
             true)
   }
 

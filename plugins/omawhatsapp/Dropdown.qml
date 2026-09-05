@@ -824,16 +824,12 @@ Panel {
             statusMessage: root.service
               ? root.service.accountOperations.statusMessage : ""
             allowAccountLink: !root.demoMode && !!root.service
-            allowAvatarRefresh: !root.demoMode && !!root.service
             onScopeSelected: function(scope) {
               root.accountScope = scope
               root.selectedIndex = 0
             }
             onLinkRequested: function(name) {
               if (root.service) root.service.accountOperations.linkAccount(name)
-            }
-            onAvatarRefreshRequested: {
-              if (root.service) root.service.accountOperations.refreshAvatars()
             }
           }
 

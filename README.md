@@ -192,6 +192,22 @@ git clone https://github.com/MoizIbnYousaf/Omarchy-Whatsapp.git && \
 
 ### Upgrading
 
+Open **Settings → Check for updates** to look for a stable GitHub release.
+Optionally enable **Check for updates when opening the app** (off by default).
+Checks send no WhatsApp data, do not run in demo/offline mode, and never install
+anything automatically.
+
+For standalone installations made with 0.12.0 or newer, **Update in terminal…**
+shows the exact release and commit and asks you to type `INSTALL`. Finish voice
+recording and save drafts first: the full installer restarts the Omarchy shell.
+It updates the helper, plugin, skill, and services together, retaining the
+existing crash-recovery behavior. This installs upstream release code; it does
+not claim that the release has marketplace verification.
+
+**Coming from an older version?** Run the full installer once to enable this
+upgrade flow. Managed copies must continue using their plugin manager; the app
+will not overwrite them. A failed check means “could not check,” not “up to date.”
+
 After pulling a newer release, always re-run `./scripts/install`. Do not copy
 only the plugin directory: the installer stages the QML, the
 `~/.local/bin/omawhatsapp` helper, the agent skill, and the user-service
@@ -272,7 +288,7 @@ Add the `Super+Shift+W` binding from
 | Header `󰀄` account name | The account the open chat, composer, and header pills belong to |
 | Header `quiet` / `notify` pill | Left click toggles desktop popups; right click drops the message preview |
 | Header `online` / `offline` pill | Toggle background sync; local history stays available |
-| Header settings button | Private reading, badge, sync, and dropdown-size controls |
+| Header settings button | Private reading, badge, sync, dropdown size, chat photos, and updates |
 | Chat menu `Mark read · send receipt` | Explicitly mark the chat read on WhatsApp |
 
 Click the notification count in the dropdown header to clear every local badge

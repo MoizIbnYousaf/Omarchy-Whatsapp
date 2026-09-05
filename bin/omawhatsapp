@@ -1094,6 +1094,7 @@ class Backend:
         return {
             "version": PREFERENCES_VERSION,
             "show_unread_count": value.get("show_unread_count") is not False,
+            "check_updates_on_launch": value.get("check_updates_on_launch") is True,
             "dropdown_rows": dropdown_rows,
             # The desktop popup is a separate surface from the bar badge, so it
             # keeps its own settings. Its watermark is per account, next to the
@@ -1151,13 +1152,15 @@ class Backend:
         else:
             if not isinstance(update, dict):
                 raise OmaWhatsAppError("Settings must be a JSON object.")
-            allowed = {"send_read_receipts", "show_unread_count", "dropdown_rows"}
+            allowed = {"send_read_receipts", "show_unread_count", "dropdown_rows", "check_updates_on_launch"}
             if any(key not in allowed for key in update):
                 raise OmaWhatsAppError("That OmaWhatsApp setting is not supported.")
             if "send_read_receipts" in update and not isinstance(update["send_read_receipts"], bool):
                 raise OmaWhatsAppError("Read receipts must be on or off.")
             if "show_unread_count" in update and not isinstance(update["show_unread_count"], bool):
                 raise OmaWhatsAppError("The unread badge must be on or off.")
+            if "check_updates_on_launch" in update and not isinstance(update["check_updates_on_launch"], bool):
+                raise OmaWhatsAppError("Update checks must be on or off.")
             if "dropdown_rows" in update and update["dropdown_rows"] not in {5, 7, 9}:
                 raise OmaWhatsAppError("Dropdown size must be 5, 7, or 9 chats.")
 
@@ -1182,6 +1185,7 @@ class Backend:
             "account": self.active.name,
             "send_read_receipts": state.get("send_read_receipts") is True,
             "show_unread_count": value.get("show_unread_count") is not False,
+            "check_updates_on_launch": value.get("check_updates_on_launch") is True,
             "dropdown_rows": value.get("dropdown_rows", 7),
         }
 
@@ -1749,6 +1753,7 @@ class Backend:
             "notify_available": self._notify_send_ready(),
             "send_read_receipts": current["send_read_receipts"],
             "show_unread_count": preferences.get("show_unread_count") is not False,
+            "check_updates_on_launch": preferences.get("check_updates_on_launch") is True,
             "dropdown_rows": preferences.get("dropdown_rows", 7),
             "fts_enabled": current["fts_enabled"],
             "error": current["error"],

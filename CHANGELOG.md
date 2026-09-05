@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.12.0 — 2026-09-05
+
+- Move chat-photo refresh from the account rail into settings, keeping its
+  progress/error feedback and explicit remote-read action (#8).
+- Add manual update checks and an opt-in check when opening the full app.
+  Checks contact GitHub only, stay off in demo/offline mode, and never install
+  automatically (#9). A newer release is announced with a settings prompt.
+- Standalone installs made with this version can launch a confirmation terminal
+  and upgrade the complete app through the existing transactional installer.
+  Downloads are commit-pinned, bounded, and reject redirects and unsafe archive
+  paths. Managed and older installations retain their existing upgrade route.
+- Thanks to FoxesRCool1 for both suggestions.
+- Fix demo image references to use the bundled PNG in timeline and viewer.
+
 ## 0.11.2 — 2026-08-31
 
 - Make the aggregate notification count in the dropdown header actionable.

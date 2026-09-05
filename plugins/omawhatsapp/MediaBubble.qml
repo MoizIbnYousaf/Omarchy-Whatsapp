@@ -74,7 +74,7 @@ Item {
   function localUrlFor(item) {
     var path = String(item && item.local_path || "")
     if (path === "__demo__") return Qt.resolvedUrl("assets/demo-capture.svg")
-    if (path === "__demo_photo__") return Qt.resolvedUrl("assets/demo-photo.svg")
+    if (path === "__demo_photo__") return Qt.resolvedUrl("assets/demo-photo.png")
     if (path === "__demo_video__") return ""
     if (path === "") return ""
     return MediaModel.encodedFileUrl(path)

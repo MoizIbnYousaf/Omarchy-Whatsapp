@@ -1,4 +1,5 @@
 module qs.Ui
+Button 1.0 Button.qml
 ConfirmDialog 1.0 ConfirmDialog.qml
 KeyboardPanel 1.0 KeyboardPanel.qml
 Panel 1.0 Panel.qml

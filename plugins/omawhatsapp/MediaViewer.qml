@@ -46,7 +46,7 @@ FocusScope {
   function localUrl(path) {
     var value = String(path || "")
     if (value === "__demo__") return Qt.resolvedUrl("assets/demo-capture.svg")
-    if (value === "__demo_photo__") return Qt.resolvedUrl("assets/demo-photo.svg")
+    if (value === "__demo_photo__") return Qt.resolvedUrl("assets/demo-photo.png")
     return MediaModel.encodedFileUrl(value)
   }
 

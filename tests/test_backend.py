@@ -939,6 +939,11 @@ class BackendTests(unittest.TestCase):
         self.assertFalse(defaults["send_read_receipts"])
         self.assertTrue(defaults["show_unread_count"])
         self.assertEqual(defaults["dropdown_rows"], 7)
+        self.assertFalse(defaults["check_updates_on_launch"])
+        self.backend.settings({"check_updates_on_launch": True})
+        self.assertTrue(self.backend.settings()["check_updates_on_launch"])
+        with self.assertRaises(backend_module.OmaWhatsAppError):
+            self.backend.settings({"check_updates_on_launch": "yes"})
 
         updated = self.backend.settings({
             "send_read_receipts": True,

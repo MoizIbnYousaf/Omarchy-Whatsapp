@@ -28,6 +28,7 @@ Item {
   property bool settingsWriting: false
   property bool sendReadReceipts: false
   property bool showUnreadCount: true
+  property bool checkUpdatesOnLaunch: false
   property int dropdownRows: 7
   property bool appOpen: false
   property bool dropdownOpen: false
@@ -703,6 +704,7 @@ Item {
         root.accounts = Array.isArray(payload.accounts) ? payload.accounts : []
         root.sendReadReceipts = payload.send_read_receipts === true
         root.showUnreadCount = payload.show_unread_count !== false
+        root.checkUpdatesOnLaunch = payload.check_updates_on_launch === true
         root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
           ? Number(payload.dropdown_rows) : 7
         root.ready = readiness.accountReady
@@ -836,6 +838,7 @@ Item {
       if (account === String(root.selectedChatAccount || ""))
         root.sendReadReceipts = payload.send_read_receipts === true
       root.showUnreadCount = payload.show_unread_count !== false
+      root.checkUpdatesOnLaunch = payload.check_updates_on_launch === true
       root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
         ? Number(payload.dropdown_rows) : 7
       root.errorText = ""

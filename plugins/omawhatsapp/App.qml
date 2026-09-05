@@ -20,6 +20,15 @@ Item {
   property bool opened: false
   property bool closingFromHost: false
   property bool demoMode: false
+  UpdateController {
+    id: appUpdates
+    active: root.opened && !root.demoMode
+    online: !!root.service && root.service.statusReady && !root.service.offlineMode
+    checkOnLaunch: !!root.service && root.service.checkUpdatesOnLaunch === true
+    onUpdateAvailable: function(version) {
+      root.showToast("OmaWhatsApp " + version + " available · open settings to update")
+    }
+  }
   property string contentFilter: "all"
   property alias cursorIndex: keyboardNavigation.messageIndex
   property alias chatCursorIndex: keyboardNavigation.chatIndex
@@ -244,14 +253,14 @@ Item {
     try { payload = JSON.parse(String(payloadJson || "{}")) || ({}) } catch (error) {}
     var previousDemo = demoMode
     closingFromHost = false
-    opened = true
     demoMode = payload.demo === true
+    opened = true
     demoVoiceState = demoMode && payload.voice === true ? "review" : "idle"
     pendingOpenChatAccount = String(payload.account || "")
     pendingOpenChatJid = String(payload.jid || "")
     narrowConversation = payload.conversation === true
     narrowSearchOpen = false
-    settingsOpen = false
+    settingsOpen = demoMode && payload.settings === true
     replyTarget = null
     editTarget = null
     keyboardNavigation.enterComposer()
@@ -941,7 +950,7 @@ Item {
   function localMediaUrl(path) {
     var value = String(path || "")
     if (value === "__demo__") return Qt.resolvedUrl("assets/demo-capture.svg")
-    if (value === "__demo_photo__") return Qt.resolvedUrl("assets/demo-photo.svg")
+    if (value === "__demo_photo__") return Qt.resolvedUrl("assets/demo-photo.png")
     return value === "" ? "" : encodeURI("file://" + value)
   }
 
@@ -1828,6 +1837,15 @@ Item {
               }
             }
 
+              MaintenanceSettings {
+                width: parent.width
+                service: root.service
+                updates: appUpdates
+                demoMode: root.demoMode
+                foreground: root.foreground
+                accent: root.accent
+                fontFamily: root.fontFamily
+              }
               Text {
                 textFormat: Text.PlainText
                 width: parent.width
@@ -1935,16 +1953,12 @@ Item {
             statusMessage: root.service
               ? root.service.accountOperations.statusMessage : ""
             allowAccountLink: !root.demoMode && !!root.service
-            allowAvatarRefresh: !root.demoMode && !!root.service
             onScopeSelected: function(scope) {
               root.accountScope = scope
               root.chatCursorIndex = 0
             }
             onLinkRequested: function(name) {
               if (root.service) root.service.accountOperations.linkAccount(name)
-            }
-            onAvatarRefreshRequested: {
-              if (root.service) root.service.accountOperations.refreshAvatars()
             }
           }
 

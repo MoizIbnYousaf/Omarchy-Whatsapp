@@ -119,6 +119,11 @@ never calls it.
 
 Inspect private app settings without changing them:
 
+`check_updates_on_launch` is a global Boolean preference, off by default.
+Changing it needs permission for a local preference write. Release checks
+contact GitHub, never WhatsApp, and do not install software. Application
+upgrades are a separate repository/deployment task, not a WhatsApp operation.
+
 ```bash
 printf '{}\n' | "$oma" settings
 ```

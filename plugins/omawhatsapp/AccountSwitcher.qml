@@ -18,12 +18,10 @@ Item {
   property bool linkBusy: false
   property bool avatarBusy: false
   property bool allowAccountLink: true
-  property bool allowAvatarRefresh: true
   property string statusMessage: ""
 
   signal scopeSelected(string scope)
   signal linkRequested(string name)
-  signal avatarRefreshRequested()
 
   readonly property var options: AccountModel.accountOptions(accounts)
   readonly property string normalizedScope:
@@ -39,7 +37,7 @@ Item {
   ListView {
     id: accountList
     anchors.left: parent.left
-    anchors.right: avatarButton.left
+    anchors.right: addButton.left
     anchors.rightMargin: Style.space(6)
     anchors.top: parent.top
     height: root.controlHeight
@@ -77,35 +75,6 @@ Item {
         onTapped: root.scopeSelected(String(accountChip.modelData.scope || ""))
       }
     }
-  }
-
-  Rectangle {
-    id: avatarButton
-    anchors.right: addButton.left
-    anchors.rightMargin: Style.space(5)
-    anchors.top: parent.top
-    width: root.controlHeight
-    height: width
-    radius: width / 2
-    color: avatarHover.hovered
-      ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-    opacity: root.allowAvatarRefresh ? 1 : 0.45
-    Text {
-      textFormat: Text.PlainText
-      anchors.centerIn: parent
-      text: root.avatarBusy ? "…" : "󰄄"
-      color: root.accent
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.body
-    }
-    HoverHandler { id: avatarHover }
-    TapHandler {
-      enabled: root.allowAvatarRefresh && !root.avatarBusy && !root.linkBusy
-      onTapped: root.avatarRefreshRequested()
-    }
-    Controls.ToolTip.visible: avatarHover.hovered
-    Controls.ToolTip.text: root.avatarBusy ? root.statusMessage
-      : "Refresh recent chat photos from WhatsApp"
   }
 
   Rectangle {

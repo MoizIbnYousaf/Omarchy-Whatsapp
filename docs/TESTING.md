@@ -74,11 +74,16 @@ durable boundaries and prove the next run restores one coherent version.
    linked account. Exercise `All` and each account chip and confirm filtering
    never retargets the selected chat. Only with explicit permission, exercise
    `+` and complete or cancel its terminal QR flow.
-11. Click profile-photo refresh only with explicit remote-read permission.
+11. In settings, click profile-photo refresh only with explicit remote-read permission.
    Confirm recent photos appear, fallbacks remain clear where no photo exists,
    and opening/searching chats does not itself trigger network work.
 12. Only with explicit permission, send a meaningful text/image/voice note to a
    known chat. Never create a throwaway WhatsApp test message.
+13. In demo mode, open settings and verify maintenance actions are disabled.
+    The offline update harness covers version ordering, opt-in launch checks,
+    cancellation, managed-install refusal, malformed results, pinned full-app
+    installer handoff, and unsafe archives. Never run an actual downgrade or
+    install just to test the update button on a managed machine.
 
 ## Screenshot
 

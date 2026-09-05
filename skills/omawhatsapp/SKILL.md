@@ -19,6 +19,10 @@ invoking `wacli` directly.
   helper, plugin, or skill as source; use only synthetic/demo data for public
   evidence. Runtime authorization does not authorize repository writes,
   pushes, deployments, releases, or submissions.
+  In-app release checks are opt-in and contact GitHub, not WhatsApp. App settings
+  include `check_updates_on_launch`; changing it is a local preference write.
+  Standalone upgrades require separate installation approval and a confirmation
+  terminal. Managed copies must use their repository/plugin-manager workflow.
 
 ## Safety boundary
 
