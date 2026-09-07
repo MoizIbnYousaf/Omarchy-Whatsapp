@@ -104,4 +104,12 @@ BarWidget {
     function onFullAppRequested(payload) { root.openFullApp(payload || ({})) }
     function onRefreshRequested() { root.refresh() }
   }
+
+  Connections {
+    target: root.oma
+    function onOpenDropdownRequested(payload) {
+      if (payload && payload.demo) root.openDropdownDemo()
+      else root.open()
+    }
+  }
 }

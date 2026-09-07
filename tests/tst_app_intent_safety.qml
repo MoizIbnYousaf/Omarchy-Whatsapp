@@ -43,6 +43,7 @@ TestCase {
       property bool showUnreadCount: true
       property bool multiAccount: true
       property int dropdownRows: 7
+      property int composerMaxLines: 6
       property string statusAccount: "work"
       property string selectedChatAccount: "work"
       property string selectedChatJid: "shared@example"

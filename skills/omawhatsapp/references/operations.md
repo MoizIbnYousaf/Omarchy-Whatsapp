@@ -129,7 +129,8 @@ printf '{}\n' | "$oma" settings
 ```
 
 The supported setting keys are `send_read_receipts` (default `false`, per
-account), `show_unread_count`, and `dropdown_rows` (`5`, `7`, or `9`). Change them only
+account), `show_unread_count`, `dropdown_rows` (`5`, `7`, or `9`), and
+`composer_max_lines` (`4`, `6`, `8`, or `10`, default `6`). Change them only
 when the user explicitly asks; for example:
 
 ```bash
