@@ -112,8 +112,9 @@ jq -nc --arg jid "$resolved_jid" --arg action "$action" \
 ```
 
 Allowed actions are `read`, `unread`, `pin`, `unpin`, `archive`, `unarchive`,
-`mute`, and `unmute`. `read` sends the WhatsApp read receipt; local inspection
-never calls it.
+`mute`, `unmute`, and `remove-local` (`remove-local` purges the chat and its
+messages from local storage without modifying WhatsApp servers). `read` sends
+the WhatsApp read receipt; local inspection never calls it.
 
 ## Local app state
 

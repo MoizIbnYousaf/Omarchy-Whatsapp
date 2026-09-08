@@ -68,6 +68,8 @@ button must remain reachable at every supported size.
 | Pin/unpin | `chats pin/unpin` | building |
 | Mute/unmute | `chats mute/unmute` | building |
 | Archive/unarchive | `chats archive/unarchive` | building |
+| Remove local chat | `chats cleanup --jid ... --confirm` | done |
+| Remote chat deletion | transport gap in wacli | transport gap |
 | Per-chat text/reply/edit/attachment draft | local UI state | done |
 | Paginate local history | bounded SQLite cursor | planned |
 | Request older history | `history backfill` | planned |

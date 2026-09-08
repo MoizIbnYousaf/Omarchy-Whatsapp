@@ -317,7 +317,8 @@ Item {
       writeFailed(unavailable, targetRef, ({}), origin)
       return false
     }
-    if (offlineMode && kind !== "paste") {
+    var isLocalAction = (kind === "chat-action" && payload && payload.action === "remove-local")
+    if (offlineMode && kind !== "paste" && !isLocalAction) {
       var message = "Offline mode is on. Go online before sending or changing WhatsApp state."
       errorText = message
       writeFailed(message, targetRef, ({}), origin)
@@ -751,7 +752,16 @@ Item {
         return
       }
       root.chats = Array.isArray(payload.chats) ? payload.chats : []
-      if (root.chats.length === 0) return
+      if (root.chats.length === 0) {
+        root.selectedChatJid = ""
+        root.selectedChatAccount = ""
+        root.selectedChatName = ""
+        root.selectedChatKind = "unknown"
+        root.query = ""
+        root.messages = []
+        root.members = []
+        return
+      }
       var selected = null
       for (var i = 0; i < root.chats.length; i++)
         if (root.sameChat(root.chats[i], root.selectedChatAccount, root.selectedChatJid))
