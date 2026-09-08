@@ -6,6 +6,10 @@ import "../plugins/omawhatsapp/AccountModel.js" as AccountModel
 TestCase {
   id: testCase
   name: "AppIntentSafety"
+  width: 1080
+  height: 720
+  visible: true
+  when: windowShown
 
   readonly property var workChat: ({
     account: "work", jid: "shared@example", name: "Synthetic work",
@@ -43,6 +47,7 @@ TestCase {
       property bool showUnreadCount: true
       property bool multiAccount: true
       property int dropdownRows: 7
+      property int composerMaxLines: 6
       property string statusAccount: "work"
       property string selectedChatAccount: "work"
       property string selectedChatJid: "shared@example"
@@ -68,6 +73,7 @@ TestCase {
       property var accountOperations: ({
         linkBusy: false, avatarBusy: false, statusMessage: ""
       })
+      property var lastPreference: null
       property var lastDelete: null
       property var lastForward: null
       property var lastPoll: null
@@ -136,7 +142,10 @@ TestCase {
       function selectOption() { return false }
       function setNotifications() { return false }
       function setOnline() { return false }
-      function setPreference() { return false }
+      function setPreference(key, value) {
+        lastPreference = { key: key, value: value }
+        return true
+      }
     }
   }
 
@@ -291,5 +300,30 @@ TestCase {
     compare(app.replyTarget.id, selected.id)
     compare(app.editTarget, null)
     compare(app.keyboardContext, "composer")
+  }
+
+  function test_composer_setting_keeps_following_confirmed_service_preferences() {
+    var harness = createHarness()
+    var app = harness.app
+    var service = harness.service
+    app.opened = true
+    app.settingsOpen = true
+    wait(0)
+    var option = findChild(app, "composerLineLimit8")
+    verify(option !== null)
+    var scroller = option.parent
+    while (scroller && !("contentY" in scroller)) scroller = scroller.parent
+    verify(scroller !== null)
+    scroller.contentY = Math.min(option.mapToItem(scroller.contentItem, 0, 0).y,
+      scroller.contentHeight - scroller.height)
+    wait(0)
+    mouseClick(option, option.width / 2, option.height / 2)
+    compare(service.lastPreference.key, "composer_max_lines")
+    compare(service.lastPreference.value, 8)
+    compare(app.composerMaxLines, 6)
+    service.composerMaxLines = 8
+    compare(app.composerMaxLines, 8)
+    service.composerMaxLines = 4
+    compare(app.composerMaxLines, 4)
   }
 }

@@ -35,6 +35,13 @@ Panel {
   property bool clearConfirmOpen: false
   property bool demoNotificationsCleared: false
   property string demoPlaybackId: ""
+  property int composerMaxLines: service ? service.composerMaxLines : 6
+
+  FontMetrics {
+    id: composerMetrics
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.body
+  }
   property var demoItems: [
     { id: "demo-message-1", text: "The bar dropdown can send now.", sender: "Alex", timestamp: 1787540400, from_me: false, media_type: "", mime_type: "", local_path: "", reactions: [] },
     { id: "demo-message-2", text: "Fast, local, and keyboard-first.", sender: "You", timestamp: 1787540100, from_me: true, media_type: "", mime_type: "", local_path: "", reactions: [{ emoji: "⚡", from_me: false }] },
@@ -1287,12 +1294,22 @@ Panel {
                   }
                 }
               }
-              Row {
+              Item {
+                id: composerRowItem
+                objectName: "composerRowItem"
                 visible: !root.voiceForCurrentChat
                 width: parent.width
-                height: visible ? implicitHeight : 0
-                spacing: Style.space(7)
+                readonly property int singleLineHeight: Math.max(1, Math.ceil(composerMetrics.lineSpacing))
+                readonly property int visibleLines: Math.max(1, Math.min(composer.lineCount, root.composerMaxLines))
+                readonly property int baseHeight: Style.space(44)
+                height: !root.voiceForCurrentChat
+                  ? Math.max(baseHeight, Math.ceil(visibleLines * singleLineHeight) + Style.space(20)) : 0
+
                 Rectangle {
+                  id: filePickerButton
+                  anchors.left: parent.left
+                  anchors.bottom: parent.bottom
+                  anchors.bottomMargin: Style.space(5)
                   width: Style.space(34)
                   height: width
                   radius: width / 2
@@ -1309,6 +1326,11 @@ Panel {
                   TapHandler { onTapped: root.openFilePicker() }
                 }
                 Rectangle {
+                  id: clipboardButton
+                  anchors.left: filePickerButton.right
+                  anchors.leftMargin: Style.space(7)
+                  anchors.bottom: parent.bottom
+                  anchors.bottomMargin: Style.space(5)
                   width: Style.space(34)
                   height: width
                   radius: width / 2
@@ -1324,48 +1346,11 @@ Panel {
                   HoverHandler { id: clipboardHover }
                   TapHandler { onTapped: root.pasteClipboard() }
                 }
-                TextArea {
-                  id: composer
-                  width: parent.width - Style.space(123)
-                  height: Math.max(Style.space(44), Math.min(implicitHeight, Style.space(96)))
-                  placeholderText: root.offline ? "Offline archive is read-only" : "Message"
-                  readOnly: root.offline || root.sending
-                  color: root.foreground
-                  placeholderTextColor: root.muted
-                  selectionColor: root.accent
-                  selectedTextColor: root.background
-                  wrapMode: TextEdit.Wrap
-                  selectByMouse: true
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  background: null
-                  Keys.onPressed: function(event) {
-                    if ((event.modifiers & Qt.ControlModifier)
-                        && (event.modifiers & Qt.ShiftModifier)
-                        && event.key === Qt.Key_V) {
-                      root.toggleVoiceRecording()
-                      event.accepted = true
-                    } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V) {
-                      root.pasteClipboard()
-                      event.accepted = true
-                    } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_O) {
-                      root.openFilePicker()
-                      event.accepted = true
-                    } else if (event.key === Qt.Key_Escape) {
-                      if (root.replyTarget) root.replyTarget = null
-                      else {
-                        focus = false
-                        keyCatcher.forceActiveFocus()
-                      }
-                      event.accepted = true
-                    } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
-                               && !(event.modifiers & Qt.ShiftModifier)) {
-                      root.sendDraft()
-                      event.accepted = true
-                    }
-                  }
-                }
                 Rectangle {
+                  id: sendButton
+                  anchors.right: parent.right
+                  anchors.bottom: parent.bottom
+                  anchors.bottomMargin: Style.space(5)
                   width: Style.space(34)
                   height: width
                   radius: width / 2
@@ -1387,6 +1372,99 @@ Panel {
                       if (String(composer.text || "").trim() !== ""
                           || root.pendingAttachments.length > 0) root.sendDraft()
                       else root.toggleVoiceRecording()
+                    }
+                  }
+                }
+                Flickable {
+                  id: composerFlickable
+                  objectName: "composerFlickable"
+                  anchors.left: clipboardButton.right
+                  anchors.leftMargin: Style.space(7)
+                  anchors.right: sendButton.left
+                  anchors.rightMargin: Style.space(7)
+                  anchors.top: parent.top
+                  anchors.bottom: parent.bottom
+                  anchors.topMargin: Style.space(10)
+                  anchors.bottomMargin: Style.space(10)
+                  contentWidth: width
+                  contentHeight: Math.max(height, composer.contentHeight)
+                  clip: true
+                  boundsBehavior: Flickable.StopAtBounds
+                  onHeightChanged: Qt.callLater(function() {
+                    composerFlickable.ensureVisible(composer.cursorRectangle)
+                  })
+
+                  ScrollBar.vertical: ScrollBar {
+                    id: composerScrollBar
+                    objectName: "composerScrollBar"
+                    policy: composerFlickable.contentHeight > composerFlickable.height + 0.5
+                      ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                    width: Style.space(8)
+                    contentItem: Rectangle {
+                      implicitWidth: Style.space(4)
+                      radius: width / 2
+                      color: composerScrollBar.pressed ? root.accent
+                        : (composerScrollBar.hovered ? root.accent
+                           : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35))
+                    }
+                  }
+
+                  function ensureVisible(r) {
+                    if (contentY >= r.y)
+                      contentY = r.y
+                    else if (contentY + height <= r.y + r.height)
+                      contentY = r.y + r.height - height
+                  }
+
+                  TextEdit {
+                    id: composer
+                    objectName: "composerInput"
+                    width: composerFlickable.width - Style.space(12)
+                    height: Math.max(contentHeight, composerFlickable.height)
+                    color: root.foreground
+                    selectionColor: root.accent
+                    selectedTextColor: root.background
+                    wrapMode: TextEdit.Wrap
+                    textFormat: TextEdit.PlainText
+                    selectByMouse: true
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                    readOnly: root.offline || root.sending
+                    onCursorRectangleChanged: composerFlickable.ensureVisible(cursorRectangle)
+                    Text {
+                      textFormat: Text.PlainText
+                      visible: !composer.text && !composer.inputMethodComposing
+                      anchors.left: parent.left
+                      anchors.top: parent.top
+                      text: root.offline ? "Offline archive is read-only" : "Message"
+                      color: root.muted
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                    }
+                    Keys.onPressed: function(event) {
+                      if ((event.modifiers & Qt.ControlModifier)
+                          && (event.modifiers & Qt.ShiftModifier)
+                          && event.key === Qt.Key_V) {
+                        root.toggleVoiceRecording()
+                        event.accepted = true
+                      } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V) {
+                        root.pasteClipboard()
+                        event.accepted = true
+                      } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_O) {
+                        root.openFilePicker()
+                        event.accepted = true
+                      } else if (event.key === Qt.Key_Escape) {
+                        if (root.replyTarget) root.replyTarget = null
+                        else {
+                          focus = false
+                          keyCatcher.forceActiveFocus()
+                        }
+                        event.accepted = true
+                      } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                                 && !(event.modifiers & Qt.ShiftModifier)) {
+                        root.sendDraft()
+                        event.accepted = true
+                      }
                     }
                   }
                 }

@@ -39,6 +39,7 @@ Item {
   property bool narrowSearchOpen: false
   property bool sidebarCollapsed: false
   property bool settingsOpen: false
+  property int composerMaxLines: service ? service.composerMaxLines : 6
   property var replyTarget: null
   property var editTarget: null
   property var deleteTarget: null
@@ -1875,6 +1876,68 @@ Item {
               }
             }
 
+            Rectangle {
+              width: parent.width
+              height: composerLinesColumn.implicitHeight + Style.space(22)
+              radius: Style.cornerRadius
+              color: Style.normalFillFor(root.foreground, root.accent)
+              Column {
+                id: composerLinesColumn
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.margins: Style.space(11)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(8)
+                Text {
+                  textFormat: Text.PlainText
+                  text: "Chat input expansion limit before scrolling"
+                  width: parent.width
+                  wrapMode: Text.Wrap
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+                Row {
+                  width: parent.width
+                  spacing: Style.space(7)
+                  Repeater {
+                    model: [4, 6, 8, 10]
+                    delegate: Rectangle {
+                      required property int modelData
+                      objectName: "composerLineLimit" + modelData
+                      width: (composerLinesColumn.width - Style.space(21)) / 4
+                      height: Style.space(32)
+                      radius: Style.cornerRadius
+                      color: ((root.service ? root.service.composerMaxLines : root.composerMaxLines) === modelData)
+                        ? Style.selectedFillFor(root.foreground, root.accent)
+                        : Style.normalFillFor(root.foreground, root.accent)
+                      border.width: 1
+                      border.color: ((root.service ? root.service.composerMaxLines : root.composerMaxLines) === modelData)
+                        ? root.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+                      Text {
+                        textFormat: Text.PlainText
+                        anchors.centerIn: parent
+                        text: String(modelData) + " lines"
+                        color: root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        font.weight: Font.DemiBold
+                      }
+                      TapHandler {
+                        enabled: !root.service || !root.service.settingsWriting
+                        onTapped: {
+                          if (root.service)
+                            root.service.setPreference("composer_max_lines", modelData)
+                          else
+                            root.composerMaxLines = modelData
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
               MaintenanceSettings {
                 width: parent.width
                 service: root.service
@@ -2604,15 +2667,28 @@ Item {
           }
         }
 
+        FontMetrics {
+          id: composerMetrics
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+        }
+
         Rectangle {
           id: composerBar
+          objectName: "composerBar"
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.bottom: parent.bottom
           property real replyContextHeight: root.replyTarget || root.editTarget ? Style.space(48) : 0
           property real attachmentContextHeight: root.pendingAttachments.length > 0 ? Style.space(68) : 0
           property real contextHeight: replyContextHeight + attachmentContextHeight
-          height: Style.space(78) + contextHeight
+          readonly property int singleLineHeight: Math.max(1, Math.ceil(composerMetrics.lineSpacing))
+          readonly property int maxLines: root.composerMaxLines
+          readonly property int visibleLines: Math.max(1, Math.min(composer.lineCount, maxLines))
+          // The 78px base leaves 38px for text after the surface/editor insets.
+          readonly property real composerExtraHeight:
+            Math.max(0, Math.ceil(visibleLines * singleLineHeight) - Style.space(38))
+          height: Math.min(Style.space(78) + composerExtraHeight + contextHeight, parent.height - Style.space(120))
           color: Style.normalFillFor(root.foreground, root.accent)
 
           Rectangle {
@@ -2831,8 +2907,8 @@ Item {
             visible: !root.voiceForCurrentChat
             anchors.left: parent.left
             anchors.leftMargin: Style.space(12)
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.verticalCenterOffset: composerBar.contextHeight / 2
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: Style.space(22)
             width: Style.space(34)
             height: width
             radius: Style.cornerRadius
@@ -2935,6 +3011,7 @@ Item {
 
           Rectangle {
             id: composerSurface
+            objectName: "composerSurface"
             visible: !root.voiceForCurrentChat
             anchors.left: pasteButton.right
             anchors.leftMargin: Style.space(8)
@@ -2949,52 +3026,101 @@ Item {
             border.width: composer.activeFocus ? 1 : 0
             border.color: root.accent
 
-            TextEdit {
-              id: composer
+            MouseArea {
               anchors.fill: parent
-              anchors.margins: Style.space(10)
-              color: root.foreground
-              selectionColor: root.accent
-              selectedTextColor: root.background
-              wrapMode: TextEdit.Wrap
-              textFormat: TextEdit.PlainText
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              onActiveFocusChanged: if (activeFocus) keyboardNavigation.enterComposer()
-              onTextChanged: root.updateMentionCompletion()
-              onCursorPositionChanged: root.updateMentionCompletion()
-              Keys.priority: Keys.BeforeItem
-              Keys.onPressed: function(event) {
-                if (root.mentionCompletionVisible
-                    && (event.key === Qt.Key_Down || event.key === Qt.Key_Up)) {
-                  var delta = event.key === Qt.Key_Down ? 1 : -1
-                  root.mentionSelection = (root.mentionSelection + delta
-                    + root.mentionCandidates.length) % root.mentionCandidates.length
-                  mentionList.positionViewAtIndex(root.mentionSelection, ListView.Contain)
-                  event.accepted = true
-                } else if (root.mentionCompletionVisible
-                           && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                               || event.key === Qt.Key_Tab)) {
-                  root.chooseMention(root.mentionSelection)
-                  event.accepted = true
-                } else if (root.mentionStart >= 0 && event.key === Qt.Key_Escape) {
-                  root.closeMentionCompletion()
-                  event.accepted = true
-                } else if ((event.modifiers & Qt.ControlModifier)
-                           && (event.modifiers & Qt.ShiftModifier)
-                           && event.key === Qt.Key_V) {
-                  root.toggleVoiceRecording()
-                  event.accepted = true
-                } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V) {
-                  root.pasteDraft()
-                  event.accepted = true
-                } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
-                           && !(event.modifiers & Qt.ShiftModifier)) {
-                  root.sendDraft()
-                  event.accepted = true
-                } else if (event.key === Qt.Key_Up && composer.text === "") {
-                  root.focusMessages()
-                  event.accepted = true
+              onClicked: composer.forceActiveFocus()
+            }
+
+            Flickable {
+              id: composerFlickable
+              objectName: "composerFlickable"
+              anchors.fill: parent
+              anchors.leftMargin: Style.space(10)
+              anchors.rightMargin: Style.space(6)
+              anchors.topMargin: Style.space(10)
+              anchors.bottomMargin: Style.space(10)
+              contentWidth: width
+              contentHeight: Math.max(height, composer.contentHeight)
+              clip: true
+              boundsBehavior: Flickable.StopAtBounds
+              onHeightChanged: Qt.callLater(function() {
+                composerFlickable.ensureVisible(composer.cursorRectangle)
+              })
+
+              ScrollBar.vertical: ScrollBar {
+                id: composerScrollBar
+                objectName: "composerScrollBar"
+                policy: composerFlickable.contentHeight > composerFlickable.height + 0.5
+                  ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                width: Style.space(8)
+                contentItem: Rectangle {
+                  implicitWidth: Style.space(4)
+                  radius: width / 2
+                  color: composerScrollBar.pressed ? root.accent
+                    : (composerScrollBar.hovered ? root.accent
+                       : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35))
+                }
+              }
+
+              function ensureVisible(r) {
+                if (contentY >= r.y)
+                  contentY = r.y
+                else if (contentY + height <= r.y + r.height)
+                  contentY = r.y + r.height - height
+              }
+
+              TextEdit {
+                id: composer
+                objectName: "composerInput"
+                width: composerFlickable.width - Style.space(12)
+                height: Math.max(contentHeight, composerFlickable.height)
+                color: root.foreground
+                selectionColor: root.accent
+                selectedTextColor: root.background
+                wrapMode: TextEdit.Wrap
+                textFormat: TextEdit.PlainText
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                onActiveFocusChanged: if (activeFocus) keyboardNavigation.enterComposer()
+                onTextChanged: {
+                  root.updateMentionCompletion()
+                  if (text === "") composerFlickable.contentY = 0
+                }
+                onCursorPositionChanged: root.updateMentionCompletion()
+                onCursorRectangleChanged: composerFlickable.ensureVisible(cursorRectangle)
+                Keys.priority: Keys.BeforeItem
+                Keys.onPressed: function(event) {
+                  if (root.mentionCompletionVisible
+                      && (event.key === Qt.Key_Down || event.key === Qt.Key_Up)) {
+                    var delta = event.key === Qt.Key_Down ? 1 : -1
+                    root.mentionSelection = (root.mentionSelection + delta
+                      + root.mentionCandidates.length) % root.mentionCandidates.length
+                    mentionList.positionViewAtIndex(root.mentionSelection, ListView.Contain)
+                    event.accepted = true
+                  } else if (root.mentionCompletionVisible
+                             && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                                 || event.key === Qt.Key_Tab)) {
+                    root.chooseMention(root.mentionSelection)
+                    event.accepted = true
+                  } else if (root.mentionStart >= 0 && event.key === Qt.Key_Escape) {
+                    root.closeMentionCompletion()
+                    event.accepted = true
+                  } else if ((event.modifiers & Qt.ControlModifier)
+                             && (event.modifiers & Qt.ShiftModifier)
+                             && event.key === Qt.Key_V) {
+                    root.toggleVoiceRecording()
+                    event.accepted = true
+                  } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V) {
+                    root.pasteDraft()
+                    event.accepted = true
+                  } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                             && !(event.modifiers & Qt.ShiftModifier)) {
+                    root.sendDraft()
+                    event.accepted = true
+                  } else if (event.key === Qt.Key_Up && composer.text === "") {
+                    root.focusMessages()
+                    event.accepted = true
+                  }
                 }
               }
             }
@@ -3019,8 +3145,8 @@ Item {
             visible: !root.voiceForCurrentChat
             anchors.right: parent.right
             anchors.rightMargin: Style.space(12)
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.verticalCenterOffset: composerBar.contextHeight / 2
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: Style.space(20)
             width: Style.space(38)
             height: width
             radius: width / 2
@@ -3051,8 +3177,8 @@ Item {
             anchors.leftMargin: Style.space(12)
             anchors.right: parent.right
             anchors.rightMargin: Style.space(12)
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.verticalCenterOffset: composerBar.contextHeight / 2
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: Style.space(18)
             service: root.demoMode ? null : root.service
             owner: "app"
             account: root.selectedAccount

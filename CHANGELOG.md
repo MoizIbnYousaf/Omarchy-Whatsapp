@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Add a confirmed **Remove local chat** action that deletes a conversation
+  from the local mirror, including while offline, without deleting it from
+  WhatsApp's servers ([PR #11](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/pull/11)).
+- Expand the message composer in the full app and bar dropdown, with a
+  configurable line limit and scrolling for longer drafts
+  ([PR #12](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/pull/12)).
+- Both features were contributed by
+  [Pedro Barbosa (@petebarbosa)](https://github.com/petebarbosa).
+- Harden the reviewed changes: keep the cursor visible after the composer
+  shrinks, preserve saved preference updates, and handle demo chat removal
+  across accounts and an empty chat list.
+
 ## 0.12.0 — 2026-09-05
 
 - Move chat-photo refresh from the account rail into settings, keeping its

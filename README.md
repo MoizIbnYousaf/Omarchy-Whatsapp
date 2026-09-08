@@ -288,14 +288,14 @@ Add the `Super+Shift+W` binding from
 | Header `󰀄` account name | The account the open chat, composer, and header pills belong to |
 | Header `quiet` / `notify` pill | Left click toggles desktop popups; right click drops the message preview |
 | Header `online` / `offline` pill | Toggle background sync; local history stays available |
-| Header settings button | Private reading, badge, sync, dropdown size, chat photos, and updates |
+| Header settings button | Private reading, badge, sync, dropdown size, composer expansion, chat photos, and updates |
 | Chat menu `Mark read · send receipt` | Explicitly mark the chat read on WhatsApp |
 
 Click the notification count in the dropdown header to clear every local badge
 after a confirmation. Middle-clicking the bar item does the same immediately;
 right-click refreshes. None of these actions marks messages read or sends a read
 receipt. The in-app settings card controls automatic receipts, the badge,
-background sync, and dropdown size.
+background sync, dropdown size, and the composer expansion limit.
 
 Desktop popups are a separate surface from the bar badge and are off until you
 turn them on. They need `notify-send` from libnotify, stay quiet for muted and

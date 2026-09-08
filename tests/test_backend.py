@@ -950,6 +950,7 @@ class BackendTests(unittest.TestCase):
         self.assertFalse(defaults["send_read_receipts"])
         self.assertTrue(defaults["show_unread_count"])
         self.assertEqual(defaults["dropdown_rows"], 7)
+        self.assertEqual(defaults["composer_max_lines"], 6)
         self.assertFalse(defaults["check_updates_on_launch"])
         self.backend.settings({"check_updates_on_launch": True})
         self.assertTrue(self.backend.settings()["check_updates_on_launch"])
@@ -960,10 +961,12 @@ class BackendTests(unittest.TestCase):
             "send_read_receipts": True,
             "show_unread_count": False,
             "dropdown_rows": 9,
+            "composer_max_lines": 8,
         })
         self.assertTrue(updated["send_read_receipts"])
         self.assertFalse(updated["show_unread_count"])
         self.assertEqual(updated["dropdown_rows"], 9)
+        self.assertEqual(updated["composer_max_lines"], 8)
         self.assertTrue(self.backend.settings()["send_read_receipts"])
         preferences = self.root / "state" / "preferences.json"
         self.assertEqual(preferences.stat().st_mode & 0o777, 0o600)
@@ -975,9 +978,12 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(persisted["send_read_receipts"])
         self.assertFalse(persisted["show_unread_count"])
         self.assertEqual(persisted["dropdown_rows"], 9)
+        self.assertEqual(persisted["composer_max_lines"], 8)
 
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "5, 7, or 9"):
             self.backend.settings({"dropdown_rows": 8})
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "4, 6, 8, or 10"):
+            self.backend.settings({"composer_max_lines": 7})
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not supported"):
             self.backend.settings({"surprise": True})
 

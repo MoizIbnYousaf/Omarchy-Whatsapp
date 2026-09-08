@@ -30,6 +30,7 @@ Item {
   property bool showUnreadCount: true
   property bool checkUpdatesOnLaunch: false
   property int dropdownRows: 7
+  property int composerMaxLines: 6
   property bool appOpen: false
   property bool dropdownOpen: false
   property bool messagesPending: false
@@ -83,6 +84,7 @@ Item {
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
   property string pendingAppPayload: ""
+  signal openDropdownRequested(var payload)
   PlaybackCoordinator { id: playbackCoordinator }
   AccountOperations {
     id: accountOperations
@@ -590,6 +592,13 @@ Item {
       root.toggleApp(payload)
       return "ok"
     }
+
+    function openDropdown(payload: string): string {
+      var data = {}
+      try { data = JSON.parse(payload || "{}") } catch (e) {}
+      root.openDropdownRequested(data)
+      return "ok"
+    }
   }
 
   // One watcher per account store; they share the debounce below.
@@ -708,6 +717,8 @@ Item {
         root.checkUpdatesOnLaunch = payload.check_updates_on_launch === true
         root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
           ? Number(payload.dropdown_rows) : 7
+        root.composerMaxLines = [4, 6, 8, 10].indexOf(Number(payload.composer_max_lines)) >= 0
+          ? Number(payload.composer_max_lines) : 6
         root.ready = readiness.accountReady
         if (root.ready) root.errorText = ""
         root.maybeSendAutomaticReceipt()
@@ -851,6 +862,8 @@ Item {
       root.checkUpdatesOnLaunch = payload.check_updates_on_launch === true
       root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
         ? Number(payload.dropdown_rows) : 7
+      root.composerMaxLines = [4, 6, 8, 10].indexOf(Number(payload.composer_max_lines)) >= 0
+        ? Number(payload.composer_max_lines) : 6
       root.errorText = ""
       root.settingsCompleted()
       root.refreshStatus()
