@@ -124,10 +124,10 @@ Item {
     : (root.service && Array.isArray(root.service.accounts)
       ? root.service.accounts : [])
   readonly property string displayGroupName: root.demoMode
-    ? (root.demoChats.find(function(chat) { return chat.jid === root.demoSelectedJid }) || root.demoChats[0]).name
+    ? (root.selectedChat ? root.selectedChat.name : "WhatsApp")
     : (root.service ? root.service.selectedChatName : "WhatsApp")
   readonly property string displayKind: root.demoMode
-    ? (root.demoChats.find(function(chat) { return chat.jid === root.demoSelectedJid }) || root.demoChats[0]).kind
+    ? (root.selectedChat ? root.selectedChat.kind : "chat")
     : (root.service ? root.service.selectedChatKind : "chat")
   readonly property string selectedAccount: root.demoMode
     ? String(root.demoSelectedAccount || "")
@@ -905,16 +905,25 @@ Item {
   function confirmRemoveLocalChat() {
     var targetRef = removeLocalTargetRef
     dismissRemoveLocalChat()
+    if (String(targetRef.jid || "") === "") return false
     if (demoMode) {
       demoChats = demoChats.filter(function(chat) {
         return !AccountModel.sameRef(AccountModel.refOf(chat), targetRef)
       })
-      if (demoChats.length > 0)
-        demoSelectedJid = demoChats[0].jid
+      if (!root.selectedChat) {
+        if (demoChats.length > 0) {
+          root.selectChat(demoChats[0])
+        } else {
+          root.saveComposerState()
+          demoSelectedAccount = ""
+          demoSelectedJid = ""
+          demoItems = []
+          root.restoreComposerState("")
+        }
+      }
       return true
     }
-    if (!service || String(targetRef.jid || "") === "")
-      return false
+    if (!service) return false
     return service.chatAction(targetRef, "remove-local", "app")
   }
 

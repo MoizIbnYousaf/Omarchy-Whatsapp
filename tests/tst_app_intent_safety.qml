@@ -71,6 +71,7 @@ TestCase {
       property var lastDelete: null
       property var lastForward: null
       property var lastPoll: null
+      property var lastChatAction: null
       property var discarded: []
 
       Oma.PlaybackCoordinator { id: playbackCoordinator }
@@ -126,7 +127,10 @@ TestCase {
       function search() {}
       function closeApp() {}
       function selectItem() {}
-      function chatAction() { return false }
+      function chatAction(ref, action, owner) {
+        lastChatAction = { ref: ref, action: action, owner: owner }
+        return true
+      }
       function downloadMedia() { return false }
       function reactTo() { return false }
       function selectOption() { return false }
@@ -225,6 +229,47 @@ TestCase {
     compare(service.lastPoll.ref.account, "work")
     compare(service.lastPoll.ref.jid, "shared@example")
     compare(service.lastPoll.selectable, 1)
+  }
+
+  function test_local_removal_keeps_the_confirmed_account_and_cancel_is_inert() {
+    var harness = createHarness()
+    var app = harness.app
+    var service = harness.service
+    service.selectChat(workChat)
+    app.requestRemoveLocalChat()
+    service.selectChat(homeChat)
+    verify(app.confirmRemoveLocalChat())
+    compare(service.lastChatAction.ref.account, "work")
+    compare(service.lastChatAction.ref.jid, "shared@example")
+    compare(service.lastChatAction.action, "remove-local")
+    compare(service.lastChatAction.owner, "app")
+
+    service.lastChatAction = null
+    app.requestRemoveLocalChat()
+    app.dismissRemoveLocalChat()
+    verify(!app.confirmRemoveLocalChat())
+    compare(service.lastChatAction, null)
+  }
+
+  function test_demo_local_removal_selects_the_remaining_account_and_handles_empty_rail() {
+    var app = createTemporaryObject(appComponent, testCase, { demoMode: true })
+    verify(app !== null)
+    app.demoChats = [workChat, homeTarget]
+    app.selectChat(workChat)
+    app.requestRemoveLocalChat()
+    verify(app.confirmRemoveLocalChat())
+    compare(app.demoChats.length, 1)
+    compare(app.selectedAccount, "home")
+    verify(AccountModel.sameRef(app.currentChatRef(), AccountModel.refOf(homeTarget)))
+    verify(app.selectedChat !== null)
+
+    app.requestRemoveLocalChat()
+    verify(app.confirmRemoveLocalChat())
+    compare(app.demoChats.length, 0)
+    compare(app.selectedChat, null)
+    compare(app.currentChatRef().jid, "")
+    compare(app.displayGroupName, "WhatsApp")
+    compare(app.displayKind, "chat")
   }
 
   function test_keyboard_reply_targets_the_selected_message() {
