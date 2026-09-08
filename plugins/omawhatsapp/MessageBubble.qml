@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import qs.Commons
 import "MediaModel.js" as MediaModel
+import "TimeFormat.js" as TimeFormat
 
 // One WhatsApp-style timeline item: quote, content, interactive options,
 // reactions, delivery metadata, and the hover action surface stay together so
@@ -22,6 +23,7 @@ Item {
   property bool busyMedia: false
   property bool surfaceActive: true
   property string activePlaybackId: ""
+  property string timeFormat: "auto"
 
   signal selectedRequested()
   signal openMediaRequested(string path)
@@ -40,7 +42,8 @@ Item {
     return String(message["text"])
   }
   readonly property string timestampText: Qt.formatDateTime(
-    new Date(Number(message.timestamp || 0) * 1000), "h:mm AP")
+    new Date(Number(message.timestamp || 0) * 1000),
+    TimeFormat.clockPattern(timeFormat, Qt.locale().timeFormat(Locale.ShortFormat)))
   readonly property real maximumWidth: width * (narrow ? 0.92 : 0.76)
   readonly property real metadataWidth: timestampMetrics.advanceWidth
     + (message.edited === true ? editedMetrics.advanceWidth + Style.space(6) : 0)

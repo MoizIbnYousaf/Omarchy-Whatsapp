@@ -987,6 +987,33 @@ class BackendTests(unittest.TestCase):
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not supported"):
             self.backend.settings({"surprise": True})
 
+    def test_time_format_is_global_persisted_and_survives_other_settings(self) -> None:
+        self.assertEqual(self.backend.settings()["time_format"], "auto")
+        for choice in ("12h", "24h", "auto"):
+            self.assertEqual(self.backend.settings({"time_format": choice})["time_format"], choice)
+            self.backend.settings({"show_unread_count": False})
+            reloaded = backend_module.Backend(
+                store_dir=self.store, state_dir=self.root / "state", wacli=self.wacli
+            )
+            self.assertEqual(reloaded.settings()["time_format"], choice)
+        preferences = json.loads((self.root / "state" / "preferences.json").read_text())
+        self.assertEqual(preferences["time_format"], "auto")
+        self.assertFalse(any("time_format" in state for state in preferences["stores"].values()))
+
+    def test_time_format_rejects_invalid_values_without_changing_preferences(self) -> None:
+        self.backend.settings({"time_format": "24h"})
+        for choice in ("13h", "", 12, False, None, [], {}):
+            with self.subTest(choice=choice):
+                with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "auto, 12h, or 24h"):
+                    self.backend.settings({"time_format": choice})
+                self.assertEqual(self.backend.settings()["time_format"], "24h")
+
+    def test_missing_or_invalid_stored_time_format_defaults_to_system(self) -> None:
+        for preferences in ({}, {"time_format": "invalid"}, {"time_format": []}):
+            with self.subTest(preferences=preferences):
+                self.backend._write_preferences(preferences)
+                self.assertEqual(self.backend.settings()["time_format"], "auto")
+
     def test_selectable_option_is_bounded(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
         with mock.patch.object(self.backend, "_write", return_value=completed) as write:
@@ -1749,6 +1776,7 @@ sys.exit(0)
 
     def test_status_separates_what_is_aggregated_from_what_is_selected(self) -> None:
         probes = threading.Barrier(2)
+        self.backend.settings({"time_format": "24h"})
 
         def unit_active(unit: str) -> bool:
             return unit == "wacli-sync@work.service"
@@ -1765,6 +1793,7 @@ sys.exit(0)
         # The rail is ready when one complete account can serve it, but the
         # selected account cannot borrow that readiness for writes/receipts.
         self.assertTrue(status["rail_ready"])
+        self.assertEqual(status["time_format"], "24h")
         self.assertTrue(status["any_authenticated"])
         self.assertTrue(status["any_database_ready"])
         self.assertFalse(status["authenticated"])

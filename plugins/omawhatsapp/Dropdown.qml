@@ -6,6 +6,7 @@ import qs.Commons
 import qs.Ui
 import "DropdownModel.js" as DropdownModel
 import "AccountModel.js" as AccountModel
+import "TimeFormat.js" as TimeFormat
 import "ComposerModel.js" as ComposerModel
 
 // A complete, bar-anchored mini client. The resident service stays the single
@@ -36,6 +37,9 @@ Panel {
   property bool demoNotificationsCleared: false
   property string demoPlaybackId: ""
   property int composerMaxLines: service ? service.composerMaxLines : 6
+  property string demoTimeFormat: "auto"
+  readonly property string timeFormat: demoMode ? demoTimeFormat
+    : (service ? service.timeFormat : "auto")
 
   FontMetrics {
     id: composerMetrics
@@ -471,7 +475,8 @@ Panel {
     if (!isFinite(seconds) || seconds <= 0) return ""
     var date = new Date(seconds * 1000)
     var today = new Date()
-    if (date.toDateString() === today.toDateString()) return Qt.formatTime(date, "h:mm AP")
+    if (date.toDateString() === today.toDateString()) return Qt.formatTime(date,
+      TimeFormat.clockPattern(root.timeFormat, Qt.locale().timeFormat(Locale.ShortFormat)))
     var yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1)
     if (date.toDateString() === yesterday.toDateString()) return "Yesterday"
     return Qt.formatDate(date, "MMM d")
@@ -1142,6 +1147,7 @@ Panel {
               height: compactMessage.height
               MessageBubble {
                 id: compactMessage
+                timeFormat: root.timeFormat
                 width: parent.width
                 message: modelData
                 foreground: root.foreground
