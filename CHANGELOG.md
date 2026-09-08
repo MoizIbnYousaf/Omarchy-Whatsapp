@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.13.1 — 2026-09-08
+
+- Stop a background refresh loop caused by SQLite closing write-open WAL
+  sidecars after read-only queries. Watch actual database changes instead.
+- Preserve prompt chat updates for committed WAL writes, checkpoints, database
+  replacement/removal, and rollback-journal commits. Keep the existing
+  debounce, per-account watchers, and periodic refresh fallback.
+- Add regression coverage for repeated write/read cycles and reading while
+  sync has no persistent database writer. No changes to WhatsApp permissions,
+  receipts, or sending behavior.
+
 ## 0.13.0 — 2026-09-08
 
 - Add a saved **System / 12-hour / 24-hour** timestamp preference across chat

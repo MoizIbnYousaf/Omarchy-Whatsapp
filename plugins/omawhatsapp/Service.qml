@@ -602,7 +602,10 @@ Item {
     }
   }
 
-  // One watcher per account store; they share the debounce below.
+  // One watcher per account store; they share the debounce below. SQLite can
+  // open WAL sidecars writable even for read-only queries, so CLOSE_WRITE does
+  // not mean chat data changed. Keep writes, checkpoints, replacement and removal
+  // events; a read completing must not schedule another read of itself.
   Instantiator {
     id: storeWatchers
     model: root.storeDirectories
@@ -612,7 +615,7 @@ Item {
       command: [
         "setpriv", "--pdeathsig", "TERM",
         "inotifywait", "-m", "-q",
-        "-e", "close_write,create,delete,move,modify",
+        "-e", "create,delete,move,modify",
         "--format", "%f", modelData
       ]
       stdout: SplitParser {
