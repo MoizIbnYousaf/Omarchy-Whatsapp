@@ -84,4 +84,27 @@ TestCase {
     keyClick(Qt.Key_A)
     compare(h.input.text, "a")
   }
+
+  function test_line_limit_bounds_the_actual_viewport_data() {
+    var cases = []
+    ;[false, true].forEach(function(dropdown) {
+      ;[4, 6, 8, 10].forEach(function(limit) {
+        cases.push({ tag: (dropdown ? "dropdown-" : "app-") + limit,
+          dropdown: dropdown, limit: limit })
+      })
+    })
+    return cases
+  }
+  function test_line_limit_bounds_the_actual_viewport(data) {
+    var h = harness(data.dropdown)
+    h.view.composerMaxLines = data.limit
+    h.input.text = "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12"
+    h.input.cursorPosition = h.input.length
+    wait(10)
+    var lineHeight = h.input.positionToRectangle(2).y - h.input.positionToRectangle(0).y
+    verify(lineHeight > 0)
+    verify(h.flick.height <= data.limit * lineHeight + 1,
+      "The viewport exceeds its configured line limit")
+    assertCursorVisible(h)
+  }
 }

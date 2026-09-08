@@ -37,11 +37,10 @@ Panel {
   property string demoPlaybackId: ""
   property int composerMaxLines: service ? service.composerMaxLines : 6
 
-  TextMetrics {
+  FontMetrics {
     id: composerMetrics
     font.family: root.fontFamily
     font.pixelSize: Style.font.body
-    text: "Ag"
   }
   property var demoItems: [
     { id: "demo-message-1", text: "The bar dropdown can send now.", sender: "Alex", timestamp: 1787540400, from_me: false, media_type: "", mime_type: "", local_path: "", reactions: [] },
@@ -1300,10 +1299,11 @@ Panel {
                 objectName: "composerRowItem"
                 visible: !root.voiceForCurrentChat
                 width: parent.width
-                readonly property int singleLineHeight: Math.max(Style.space(20), Math.ceil(composerMetrics.height))
+                readonly property int singleLineHeight: Math.max(1, Math.ceil(composerMetrics.lineSpacing))
                 readonly property int visibleLines: Math.max(1, Math.min(composer.lineCount, root.composerMaxLines))
                 readonly property int baseHeight: Style.space(44)
-                height: !root.voiceForCurrentChat ? (baseHeight + (visibleLines - 1) * singleLineHeight) : 0
+                height: !root.voiceForCurrentChat
+                  ? Math.max(baseHeight, Math.ceil(visibleLines * singleLineHeight) + Style.space(20)) : 0
 
                 Rectangle {
                   id: filePickerButton
@@ -1397,7 +1397,8 @@ Panel {
                   ScrollBar.vertical: ScrollBar {
                     id: composerScrollBar
                     objectName: "composerScrollBar"
-                    policy: composer.lineCount > root.composerMaxLines ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                    policy: composerFlickable.contentHeight > composerFlickable.height + 0.5
+                      ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
                     width: Style.space(8)
                     contentItem: Rectangle {
                       implicitWidth: Style.space(4)

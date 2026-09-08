@@ -73,10 +73,10 @@ TestCase {
       property var accountOperations: ({
         linkBusy: false, avatarBusy: false, statusMessage: ""
       })
+      property var lastPreference: null
       property var lastDelete: null
       property var lastForward: null
       property var lastPoll: null
-      property var lastPreference: null
       property var discarded: []
 
       Oma.PlaybackCoordinator { id: playbackCoordinator }
@@ -236,6 +236,27 @@ TestCase {
     compare(service.lastPoll.selectable, 1)
   }
 
+  function test_keyboard_reply_targets_the_selected_message() {
+    var harness = createHarness()
+    var app = harness.app
+    var first = {
+      id: "synthetic-first", text: "First synthetic message",
+      from_me: false, media_type: ""
+    }
+    var selected = {
+      id: "synthetic-selected", text: "Selected synthetic message",
+      from_me: false, media_type: ""
+    }
+    harness.service.messages = [first, selected]
+    app.focusMessages()
+    app.cursorIndex = 1
+
+    verify(app.replyToCursor())
+    compare(app.replyTarget.id, selected.id)
+    compare(app.editTarget, null)
+    compare(app.keyboardContext, "composer")
+  }
+
   function test_composer_setting_keeps_following_confirmed_service_preferences() {
     var harness = createHarness()
     var app = harness.app
@@ -259,26 +280,5 @@ TestCase {
     compare(app.composerMaxLines, 8)
     service.composerMaxLines = 4
     compare(app.composerMaxLines, 4)
-  }
-
-  function test_keyboard_reply_targets_the_selected_message() {
-    var harness = createHarness()
-    var app = harness.app
-    var first = {
-      id: "synthetic-first", text: "First synthetic message",
-      from_me: false, media_type: ""
-    }
-    var selected = {
-      id: "synthetic-selected", text: "Selected synthetic message",
-      from_me: false, media_type: ""
-    }
-    harness.service.messages = [first, selected]
-    app.focusMessages()
-    app.cursorIndex = 1
-
-    verify(app.replyToCursor())
-    compare(app.replyTarget.id, selected.id)
-    compare(app.editTarget, null)
-    compare(app.keyboardContext, "composer")
   }
 }

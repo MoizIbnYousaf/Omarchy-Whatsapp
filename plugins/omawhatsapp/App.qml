@@ -1853,6 +1853,8 @@ Item {
                 Text {
                   textFormat: Text.PlainText
                   text: "Chat input expansion limit before scrolling"
+                  width: parent.width
+                  wrapMode: Text.Wrap
                   color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
@@ -2623,11 +2625,10 @@ Item {
           }
         }
 
-        TextMetrics {
+        FontMetrics {
           id: composerMetrics
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
-          text: "Ag"
         }
 
         Rectangle {
@@ -2639,10 +2640,12 @@ Item {
           property real replyContextHeight: root.replyTarget || root.editTarget ? Style.space(48) : 0
           property real attachmentContextHeight: root.pendingAttachments.length > 0 ? Style.space(68) : 0
           property real contextHeight: replyContextHeight + attachmentContextHeight
-          readonly property real singleLineHeight: Math.max(1, composerMetrics.height)
+          readonly property int singleLineHeight: Math.max(1, Math.ceil(composerMetrics.lineSpacing))
           readonly property int maxLines: root.composerMaxLines
           readonly property int visibleLines: Math.max(1, Math.min(composer.lineCount, maxLines))
-          readonly property real composerExtraHeight: (visibleLines - 1) * singleLineHeight
+          // The 78px base leaves 38px for text after the surface/editor insets.
+          readonly property real composerExtraHeight:
+            Math.max(0, Math.ceil(visibleLines * singleLineHeight) - Style.space(38))
           height: Math.min(Style.space(78) + composerExtraHeight + contextHeight, parent.height - Style.space(120))
           color: Style.normalFillFor(root.foreground, root.accent)
 
@@ -3005,7 +3008,8 @@ Item {
               ScrollBar.vertical: ScrollBar {
                 id: composerScrollBar
                 objectName: "composerScrollBar"
-                policy: composer.lineCount > root.composerMaxLines ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                policy: composerFlickable.contentHeight > composerFlickable.height + 0.5
+                  ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
                 width: Style.space(8)
                 contentItem: Rectangle {
                   implicitWidth: Style.space(4)
