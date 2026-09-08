@@ -1864,6 +1864,7 @@ Item {
                     model: [4, 6, 8, 10]
                     delegate: Rectangle {
                       required property int modelData
+                      objectName: "composerLineLimit" + modelData
                       width: (composerLinesColumn.width - Style.space(21)) / 4
                       height: Style.space(32)
                       radius: Style.cornerRadius
@@ -1887,7 +1888,8 @@ Item {
                         onTapped: {
                           if (root.service)
                             root.service.setPreference("composer_max_lines", modelData)
-                          root.composerMaxLines = modelData
+                          else
+                            root.composerMaxLines = modelData
                         }
                       }
                     }
@@ -2981,7 +2983,6 @@ Item {
 
             MouseArea {
               anchors.fill: parent
-              z: -1
               onClicked: composer.forceActiveFocus()
             }
 
@@ -2997,6 +2998,9 @@ Item {
               contentHeight: Math.max(height, composer.contentHeight)
               clip: true
               boundsBehavior: Flickable.StopAtBounds
+              onHeightChanged: Qt.callLater(function() {
+                composerFlickable.ensureVisible(composer.cursorRectangle)
+              })
 
               ScrollBar.vertical: ScrollBar {
                 id: composerScrollBar
@@ -3023,6 +3027,7 @@ Item {
                 id: composer
                 objectName: "composerInput"
                 width: composerFlickable.width - Style.space(12)
+                height: Math.max(contentHeight, composerFlickable.height)
                 color: root.foreground
                 selectionColor: root.accent
                 selectedTextColor: root.background

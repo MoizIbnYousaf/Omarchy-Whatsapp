@@ -1390,6 +1390,9 @@ Panel {
                   contentHeight: Math.max(height, composer.contentHeight)
                   clip: true
                   boundsBehavior: Flickable.StopAtBounds
+                  onHeightChanged: Qt.callLater(function() {
+                    composerFlickable.ensureVisible(composer.cursorRectangle)
+                  })
 
                   ScrollBar.vertical: ScrollBar {
                     id: composerScrollBar
@@ -1416,6 +1419,7 @@ Panel {
                     id: composer
                     objectName: "composerInput"
                     width: composerFlickable.width - Style.space(12)
+                    height: Math.max(contentHeight, composerFlickable.height)
                     color: root.foreground
                     selectionColor: root.accent
                     selectedTextColor: root.background
