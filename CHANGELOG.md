@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 — 2026-09-08
 
 - Add a saved **System / 12-hour / 24-hour** timestamp preference across chat
   previews, message bubbles, and the media viewer. System follows the locale
