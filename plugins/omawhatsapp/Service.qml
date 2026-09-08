@@ -31,6 +31,7 @@ Item {
   property bool checkUpdatesOnLaunch: false
   property int dropdownRows: 7
   property int composerMaxLines: 6
+  property string timeFormat: "auto"
   property bool appOpen: false
   property bool dropdownOpen: false
   property bool messagesPending: false
@@ -719,6 +720,8 @@ Item {
           ? Number(payload.dropdown_rows) : 7
         root.composerMaxLines = [4, 6, 8, 10].indexOf(Number(payload.composer_max_lines)) >= 0
           ? Number(payload.composer_max_lines) : 6
+        root.timeFormat = ["auto", "12h", "24h"].indexOf(payload.time_format) >= 0
+          ? payload.time_format : "auto"
         root.ready = readiness.accountReady
         if (root.ready) root.errorText = ""
         root.maybeSendAutomaticReceipt()
@@ -864,6 +867,8 @@ Item {
         ? Number(payload.dropdown_rows) : 7
       root.composerMaxLines = [4, 6, 8, 10].indexOf(Number(payload.composer_max_lines)) >= 0
         ? Number(payload.composer_max_lines) : 6
+      root.timeFormat = ["auto", "12h", "24h"].indexOf(payload.time_format) >= 0
+        ? payload.time_format : "auto"
       root.errorText = ""
       root.settingsCompleted()
       root.refreshStatus()

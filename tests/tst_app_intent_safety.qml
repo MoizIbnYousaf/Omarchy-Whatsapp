@@ -48,6 +48,7 @@ TestCase {
       property bool multiAccount: true
       property int dropdownRows: 7
       property int composerMaxLines: 6
+      property string timeFormat: "auto"
       property string statusAccount: "work"
       property string selectedChatAccount: "work"
       property string selectedChatJid: "shared@example"
@@ -325,5 +326,39 @@ TestCase {
     compare(app.composerMaxLines, 8)
     service.composerMaxLines = 4
     compare(app.composerMaxLines, 4)
+  }
+
+  function test_time_format_setting_follows_service_and_demo_changes_stay_local() {
+    var harness = createHarness()
+    var app = harness.app
+    var service = harness.service
+    app.opened = true
+    app.settingsOpen = true
+    wait(0)
+    var option = findChild(app, "timeFormatChoice24h")
+    verify(option !== null)
+    var scroller = option.parent
+    while (scroller && !("contentY" in scroller)) scroller = scroller.parent
+    verify(scroller !== null)
+    scroller.contentY = Math.min(option.mapToItem(scroller.contentItem, 0, 0).y,
+      scroller.contentHeight - scroller.height)
+    wait(0)
+    mouseClick(option, option.width / 2, option.height / 2)
+    compare(service.lastPreference.key, "time_format")
+    compare(service.lastPreference.value, "24h")
+    compare(app.timeFormat, "auto")
+    service.timeFormat = "24h"
+    compare(app.timeFormat, "24h")
+    service.timeFormat = "12h"
+    compare(app.timeFormat, "12h")
+
+    app.demoMode = true
+    service.lastPreference = null
+    mouseClick(option, option.width / 2, option.height / 2)
+    compare(app.timeFormat, "24h")
+    compare(service.lastPreference, null)
+    compare(service.timeFormat, "12h")
+    app.demoMode = false
+    compare(app.timeFormat, "12h")
   }
 }

@@ -3,6 +3,7 @@ import QtQuick.Controls
 import qs.Commons
 import "MediaViewerLogic.js" as MediaLogic
 import "MediaModel.js" as MediaModel
+import "TimeFormat.js" as TimeFormat
 
 // Native, full-window media viewing keeps photos, GIFs, and videos inside the
 // client. The chat timeline stays mounted underneath, so closing is instant.
@@ -22,11 +23,16 @@ FocusScope {
   property var playback: null
   property var chatRef: ({ account: "", jid: "", key: "" })
   property string playbackSurface: "app-viewer"
+  property string timeFormat: "auto"
 
   signal openExternalRequested(string path)
 
   readonly property var currentItem: currentIndex >= 0 && currentIndex < items.length
     ? items[currentIndex] : null
+  readonly property string timestampText: currentItem && currentItem.timestamp
+    ? Qt.formatDateTime(new Date(Number(currentItem.timestamp) * 1000),
+        "ddd, MMM d · " + TimeFormat.clockPattern(timeFormat,
+          Qt.locale().timeFormat(Locale.ShortFormat))) : ""
   readonly property string mediaType: MediaModel.mediaType(currentItem)
   readonly property string mimeType: MediaModel.mimeType(currentItem)
   readonly property string localPath: currentItem
@@ -185,8 +191,7 @@ FocusScope {
       Text {
         textFormat: Text.PlainText
         width: parent.width
-        text: root.currentItem && root.currentItem.timestamp
-          ? Qt.formatDateTime(new Date(Number(root.currentItem.timestamp) * 1000), "ddd, MMM d · h:mm AP") : ""
+        text: root.timestampText
         color: root.dim
         elide: Text.ElideRight
         font.family: root.fontFamily

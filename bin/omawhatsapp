@@ -1094,12 +1094,16 @@ class Backend:
         composer_max_lines = bounded_int(value.get("composer_max_lines"), 6, 4, 10)
         if composer_max_lines not in {4, 6, 8, 10}:
             composer_max_lines = 6
+        time_format = value.get("time_format", "auto")
+        if not isinstance(time_format, str) or time_format not in {"auto", "12h", "24h"}:
+            time_format = "auto"
         return {
             "version": PREFERENCES_VERSION,
             "show_unread_count": value.get("show_unread_count") is not False,
             "check_updates_on_launch": value.get("check_updates_on_launch") is True,
             "dropdown_rows": dropdown_rows,
             "composer_max_lines": composer_max_lines,
+            "time_format": time_format,
             # The desktop popup is a separate surface from the bar badge, so it
             # keeps its own settings. Its watermark is per account, next to the
             # badge acknowledgements it must never read.
@@ -1162,6 +1166,7 @@ class Backend:
                 "dropdown_rows",
                 "check_updates_on_launch",
                 "composer_max_lines",
+                "time_format",
             }
             if any(key not in allowed for key in update):
                 raise OmaWhatsAppError("That OmaWhatsApp setting is not supported.")
@@ -1175,6 +1180,11 @@ class Backend:
                 raise OmaWhatsAppError("Dropdown size must be 5, 7, or 9 chats.")
             if "composer_max_lines" in update and update["composer_max_lines"] not in {4, 6, 8, 10}:
                 raise OmaWhatsAppError("Composer expansion limit must be 4, 6, 8, or 10 lines.")
+            if "time_format" in update and (
+                not isinstance(update["time_format"], str)
+                or update["time_format"] not in {"auto", "12h", "24h"}
+            ):
+                raise OmaWhatsAppError("Time format must be auto, 12h, or 24h.")
 
             key = self.active.key
 
@@ -1200,6 +1210,7 @@ class Backend:
             "check_updates_on_launch": value.get("check_updates_on_launch") is True,
             "dropdown_rows": value.get("dropdown_rows", 7),
             "composer_max_lines": value.get("composer_max_lines", 6),
+            "time_format": value.get("time_format", "auto"),
         }
 
     def _sent_hint_key(self, jid: str, message_id: str) -> str:
@@ -1769,6 +1780,7 @@ class Backend:
             "check_updates_on_launch": preferences.get("check_updates_on_launch") is True,
             "dropdown_rows": preferences.get("dropdown_rows", 7),
             "composer_max_lines": preferences.get("composer_max_lines", 6),
+            "time_format": preferences.get("time_format", "auto"),
             "fts_enabled": current["fts_enabled"],
             "error": current["error"],
         }

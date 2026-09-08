@@ -87,6 +87,9 @@ native, and visually at home in Omarchy.
 - Open the native settings card to keep private reading on or opt into read
   receipts, pause background sync, show/hide the local bar badge, and choose a
   5/7/9-chat dropdown—all persisted privately on this device.
+- Choose System, 12-hour, or 24-hour timestamps in settings. System follows
+  your locale by default; one saved preference covers chat previews, message
+  bubbles, and the media viewer for every account.
 
 The graphical client remains deliberately focused on direct chats and
 standalone groups. Channels/newsletters, calls, Community parents, and
@@ -307,7 +310,7 @@ archived chats, and never send a read receipt.
 ./scripts/test
 ```
 
-The release gate runs 161 backend and transaction tests, every offscreen QML
+The release gate runs 179 backend and transaction tests, every offscreen QML
 suite, an isolated installer preflight, manifest validation, QML lint, shell
 syntax checks, a diff check, and a heavyweight-runtime dependency guard.
 Installed verification and screenshot rules live in [testing](docs/TESTING.md);

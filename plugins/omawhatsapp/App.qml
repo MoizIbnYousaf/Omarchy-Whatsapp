@@ -8,6 +8,7 @@ import qs.Ui
 import "SettingsPolicy.js" as SettingsPolicy
 import "AccountModel.js" as AccountModel
 import "ComposerModel.js" as ComposerModel
+import "TimeFormat.js" as TimeFormat
 
 // OmaWhatsApp keeps chat state resident, renders a responsive native timeline,
 // and follows Omarchy's semantic theme. All chats come from wacli's local mirror.
@@ -40,6 +41,9 @@ Item {
   property bool sidebarCollapsed: false
   property bool settingsOpen: false
   property int composerMaxLines: service ? service.composerMaxLines : 6
+  property string demoTimeFormat: "auto"
+  readonly property string timeFormat: demoMode ? demoTimeFormat
+    : (service ? service.timeFormat : "auto")
   property var replyTarget: null
   property var editTarget: null
   property var deleteTarget: null
@@ -983,7 +987,9 @@ Item {
 
   function formatTime(seconds) {
     if (!seconds) return ""
-    return Qt.formatDateTime(new Date(Number(seconds) * 1000), "ddd h:mm AP")
+    return Qt.formatDateTime(new Date(Number(seconds) * 1000),
+      "ddd " + TimeFormat.clockPattern(root.timeFormat,
+        Qt.locale().timeFormat(Locale.ShortFormat)))
   }
 
   function localMediaUrl(path) {
@@ -1938,6 +1944,77 @@ Item {
               }
             }
 
+            Rectangle {
+              width: parent.width
+              height: timeFormatColumn.implicitHeight + Style.space(22)
+              radius: Style.cornerRadius
+              color: Style.normalFillFor(root.foreground, root.accent)
+              Column {
+                id: timeFormatColumn
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.margins: Style.space(11)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.space(8)
+                Text {
+                  textFormat: Text.PlainText
+                  text: "Time format"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  width: parent.width
+                  wrapMode: Text.Wrap
+                  text: "System follows your locale. Applies to all chats and media."
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                Row {
+                  width: parent.width
+                  spacing: Style.space(7)
+                  Repeater {
+                    model: [
+                      { value: "auto", label: "System" },
+                      { value: "12h", label: "12-hour" },
+                      { value: "24h", label: "24-hour" }
+                    ]
+                    delegate: Rectangle {
+                      required property var modelData
+                      objectName: "timeFormatChoice" + modelData.value
+                      width: (timeFormatColumn.width - Style.space(14)) / 3
+                      height: Style.space(32)
+                      radius: Style.cornerRadius
+                      color: root.timeFormat === modelData.value
+                        ? Style.selectedFillFor(root.foreground, root.accent)
+                        : Style.normalFillFor(root.foreground, root.accent)
+                      border.width: 1
+                      border.color: root.timeFormat === modelData.value
+                        ? root.accent : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+                      Text {
+                        textFormat: Text.PlainText
+                        anchors.centerIn: parent
+                        text: modelData.label
+                        color: root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        font.weight: Font.DemiBold
+                      }
+                      TapHandler {
+                        enabled: root.demoMode || (root.service && !root.service.settingsWriting)
+                        onTapped: {
+                          if (root.demoMode) root.demoTimeFormat = modelData.value
+                          else if (root.service) root.service.setPreference("time_format", modelData.value)
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
               MaintenanceSettings {
                 width: parent.width
                 service: root.service
@@ -2506,6 +2583,7 @@ Item {
 
             MessageBubble {
               id: renderedMessage
+              timeFormat: root.timeFormat
               width: parent.width
               message: modelData
               foreground: root.foreground
@@ -3629,6 +3707,8 @@ Item {
 
       MediaViewer {
         id: mediaViewer
+        objectName: "mediaViewer"
+        timeFormat: root.timeFormat
         anchors.fill: parent
         items: root.mediaGallery
         surfaceActive: root.opened

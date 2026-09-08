@@ -2,13 +2,17 @@
 
 ## Unreleased
 
+- Add a saved **System / 12-hour / 24-hour** timestamp preference across chat
+  previews, message bubbles, and the media viewer. System follows the locale
+  by default. Requested by [Henning Weiss (@hdweiss)](https://github.com/hdweiss)
+  in [#10](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/issues/10).
 - Add a confirmed **Remove local chat** action that deletes a conversation
   from the local mirror, including while offline, without deleting it from
   WhatsApp's servers ([PR #11](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/pull/11)).
 - Expand the message composer in the full app and bar dropdown, with a
   configurable line limit and scrolling for longer drafts
   ([PR #12](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/pull/12)).
-- Both features were contributed by
+- Local chat removal and the expanding composer were contributed by
   [Pedro Barbosa (@petebarbosa)](https://github.com/petebarbosa).
 - Harden the reviewed changes: keep the cursor visible after the composer
   shrinks, preserve saved preference updates, and handle demo chat removal
