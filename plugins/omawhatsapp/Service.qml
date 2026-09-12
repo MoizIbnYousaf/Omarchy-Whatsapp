@@ -86,6 +86,7 @@ Item {
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
   property string pendingAppPayload: ""
   signal openDropdownRequested(var payload)
+  signal toggleDropdownRequested(var payload)
   PlaybackCoordinator { id: playbackCoordinator }
   AccountOperations {
     id: accountOperations
@@ -598,6 +599,13 @@ Item {
       var data = {}
       try { data = JSON.parse(payload || "{}") } catch (e) {}
       root.openDropdownRequested(data)
+      return "ok"
+    }
+
+    function toggleDropdown(payload: string): string {
+      var data = {}
+      try { data = JSON.parse(payload || "{}") } catch (e) {}
+      root.toggleDropdownRequested(data)
       return "ok"
     }
   }
