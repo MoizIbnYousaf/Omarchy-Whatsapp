@@ -470,6 +470,7 @@ class UninstallEnvironmentTests(unittest.TestCase):
             textwrap.dedent(
                 """\
                 #!/usr/bin/env python3
+                import fnmatch
                 import os
                 from pathlib import Path
                 import sys
@@ -479,10 +480,26 @@ class UninstallEnvironmentTests(unittest.TestCase):
                     args = args[1:]
                 command = args[0]
                 state = Path(os.environ["FAKE_SYSTEMCTL_STATE"])
+                instances = os.environ.get("FAKE_SYSTEMCTL_NO_INSTANCES") != "1"
+                patterns = [arg for arg in args[1:] if not arg.startswith("-")]
                 if command == "list-unit-files":
-                    print("wacli-sync@work.service enabled")
+                    listed = ["dbus.service static"]
+                    if instances:
+                        listed.append("wacli-sync@work.service enabled")
+                    listed = [
+                        line for line in listed
+                        if not patterns or any(
+                            fnmatch.fnmatchcase(line.split()[0], pattern)
+                            for pattern in patterns
+                        )
+                    ]
+                    # Like systemd >= 246, exit 1 when no unit file matches.
+                    if not listed:
+                        raise SystemExit(1)
+                    print("\\n".join(listed))
                 elif command == "list-units":
-                    print("wacli-sync@work.service loaded active running")
+                    if instances:
+                        print("wacli-sync@work.service loaded active running")
                 elif command in {"is-enabled", "is-active"}:
                     unit = args[-1]
                     category = "enabled" if command == "is-enabled" else "active"
@@ -569,6 +586,7 @@ class UninstallEnvironmentTests(unittest.TestCase):
         *,
         xdg_config: str,
         xdg_state: str,
+        extra_environment: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         fake_bin, fake_state = self.make_fake_commands(root)
         self.populate_install(home, service_root, runtime)
@@ -585,6 +603,7 @@ class UninstallEnvironmentTests(unittest.TestCase):
                 "FAKE_SHELL_STATE": str(root / "fake-shell-state"),
             }
         )
+        environment.update(extra_environment or {})
         return subprocess.run(
             [str(UNINSTALL), "--purge-runtime"],
             cwd=work,
@@ -616,6 +635,29 @@ class UninstallEnvironmentTests(unittest.TestCase):
             self.assertFalse((service_root / "wacli-sync.service").exists())
             self.assertFalse((home / ".local" / "bin" / "omawhatsapp").exists())
             self.assertFalse((home / ".local" / "bin" / "omawhatsapp_assets.py").exists())
+
+    def test_unit_discovery_accepts_a_machine_without_sync_instances(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            service_root = home / ".config" / "systemd" / "user"
+            runtime = home / ".local" / "state" / "omawhatsapp"
+            result = self.run_uninstall(
+                root,
+                home,
+                service_root,
+                runtime,
+                xdg_config=str(home / ".config"),
+                xdg_state=str(home / ".local" / "state"),
+                extra_environment={"FAKE_SYSTEMCTL_NO_INSTANCES": "1"},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("Could not inspect", result.stderr)
+            self.assertFalse((service_root / "wacli-sync.service").exists())
+        self.assertNotRegex(
+            INSTALL.read_text(encoding="utf-8"),
+            r"list-unit-files \\\n\s*'wacli-sync@",
+        )
 
     def test_absolute_custom_xdg_and_cross_device_state_are_honored(self) -> None:
         shared_memory = Path("/dev/shm")
