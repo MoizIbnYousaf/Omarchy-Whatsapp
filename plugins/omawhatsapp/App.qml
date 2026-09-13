@@ -150,6 +150,10 @@ Item {
     var account = root.selectedAccount
     return AccountModel.findChat(root.sourceChats, AccountModel.chatRef(account, jid))
   }
+  // The rail row carries the cached photo. Until the selected chat is in the
+  // loaded rail, keep the neutral conversation glyph the header always showed.
+  readonly property var headerChat: root.selectedChat
+    || ({ name: "", kind: "group", avatar_path: "" })
   readonly property var forwardCandidates: AccountModel.forwardTargetsForRef(
     root.sourceChats, root.forwardOriginRef)
   readonly property var visibleChats: {
@@ -2348,19 +2352,16 @@ Item {
               ToolTip.text: (root.sidebarCollapsed ? "Show" : "Hide") + " chats · Ctrl+B"
             }
 
-            Rectangle {
+            ChatAvatar {
+              objectName: "conversationAvatar"
               width: Style.space(34)
               height: width
-              radius: width / 2
-              color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.16)
-              Text {
-                textFormat: Text.PlainText
-                anchors.centerIn: parent
-                text: "󰠮"
-                color: root.accent
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.icon
-              }
+              chat: root.headerChat
+              selected: true
+              foreground: root.foreground
+              background: root.background
+              accent: root.accent
+              fontFamily: root.fontFamily
             }
 
             Column {
