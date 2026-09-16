@@ -361,4 +361,24 @@ TestCase {
     app.demoMode = false
     compare(app.timeFormat, "12h")
   }
+
+  function test_conversation_header_photo_follows_the_service_selection_per_account() {
+    var harness = createHarness()
+    var app = harness.app
+    var service = harness.service
+    var workPhoto = Object.assign({}, workChat, { avatar_path: "__demo_avatar__" })
+    var homeNoPhoto = Object.assign({}, homeChat, { avatar_path: "" })
+    service.chats = [workPhoto, homeNoPhoto]
+    var header = findChild(app, "conversationAvatar")
+    verify(header !== null)
+
+    service.selectChat(workPhoto)
+    tryVerify(function() { return header.avatarReady }, 5000)
+    compare(findChild(header, "chatAvatarFallback").visible, false)
+
+    // Same JID on another linked phone: its own identity, never the work photo.
+    service.selectChat(homeNoPhoto)
+    compare(header.avatarReady, false)
+    compare(findChild(header, "chatAvatarFallback").text, "SH")
+  }
 }

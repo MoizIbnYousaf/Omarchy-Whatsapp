@@ -19,6 +19,40 @@ TestCase {
     }
   }
 
+  Component { id: appComponent; Oma.App { demoMode: true; opened: true } }
+
+  function test_conversation_header_follows_the_selected_chat_photo() {
+    var app = createTemporaryObject(appComponent, testCase)
+    verify(app !== null)
+    var photo = { jid: "synthetic-photo", name: "Synthetic Person", kind: "dm",
+      account: "personal", account_label: "personal", avatar_path: "__demo_avatar__",
+      preview: "", timestamp: 2, unread: 0, pinned: false }
+    var initials = { jid: "synthetic-initials", name: "Synthetic Friend", kind: "dm",
+      account: "personal", account_label: "personal", avatar_path: "",
+      preview: "", timestamp: 1, unread: 0, pinned: false }
+    var group = { jid: "synthetic-group", name: "Synthetic Group", kind: "group",
+      account: "work", account_label: "work", avatar_path: "",
+      preview: "", timestamp: 0, unread: 0, pinned: false }
+    app.demoChats = [photo, initials, group]
+    var header = findChild(app, "conversationAvatar")
+    verify(header !== null)
+
+    app.selectChat(photo)
+    tryVerify(function() { return header.avatarReady }, 5000)
+    compare(findChild(header, "chatAvatarFallback").visible, false)
+
+    app.selectChat(initials)
+    compare(header.avatarReady, false)
+    compare(findChild(header, "chatAvatarFallback").text, "SF")
+
+    app.selectChat(group)
+    compare(findChild(header, "chatAvatarFallback").text, "󰠮")
+
+    app.demoChats = []
+    compare(app.selectedChat, null)
+    compare(findChild(header, "chatAvatarFallback").text, "󰠮")
+  }
+
   function test_private_local_avatar_replaces_the_fallback() {
     var avatar = createTemporaryObject(avatarComponent, testCase, {
       chat: { name: "Synthetic Person", kind: "dm",
