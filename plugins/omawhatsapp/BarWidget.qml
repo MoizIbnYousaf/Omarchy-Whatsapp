@@ -111,5 +111,8 @@ BarWidget {
       if (payload && payload.demo) root.openDropdownDemo()
       else root.open()
     }
+    function onToggleDropdownRequested() {
+      root.toggleDropdown()
+    }
   }
 }
