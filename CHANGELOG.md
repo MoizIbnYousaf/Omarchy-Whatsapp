@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.14.0 — 2026-09-16
+
+- Add `toggleDropdown` IPC for hot corners and keybindings, contributed by
+  nagualcode (@ffloress) in PR #14. Existing open-only IPC remains available.
+- Fix fresh installs and uninstall when no sync instance unit files exist,
+  while still rejecting service-manager discovery failures (PR #15).
+  Resolves #17, reported by Josh Biddick (@sadsa).
+- Show the selected chat’s cached photo, initials, or group icon in the full
+  app conversation header, with account-specific identity (PR #16).
+- Thanks to Guilherme Casimiro (@gocasimiro) for the installer and avatar fixes
+  and their regression coverage. Add toggle and discovery-failure regressions.
+
 ## 0.13.1 — 2026-09-08
 
 - Stop a background refresh loop caused by SQLite closing write-open WAL

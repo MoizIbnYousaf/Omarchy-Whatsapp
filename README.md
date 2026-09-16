@@ -304,6 +304,17 @@ Desktop popups are a separate surface from the bar badge and are off until you
 turn them on. They need `notify-send` from libnotify, stay quiet for muted and
 archived chats, and never send a read receipt.
 
+### Dropdown IPC
+
+Hot corners and keybindings can toggle the bar dropdown with:
+
+```bash
+omarchy-shell io.github.moizibnyousaf.omawhatsapp toggleDropdown '{}'
+```
+
+`openDropdown '{}'` remains an open-only command. Both routes require the
+plugin’s bar widget, just like clicking its bar icon.
+
 ## Release quality
 
 ```bash

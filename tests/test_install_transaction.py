@@ -483,6 +483,8 @@ class UninstallEnvironmentTests(unittest.TestCase):
                 instances = os.environ.get("FAKE_SYSTEMCTL_NO_INSTANCES") != "1"
                 patterns = [arg for arg in args[1:] if not arg.startswith("-")]
                 if command == "list-unit-files":
+                    if os.environ.get("FAKE_SYSTEMCTL_DISCOVERY_FAIL") == "1":
+                        raise SystemExit(1)
                     listed = ["dbus.service static"]
                     if instances:
                         listed.append("wacli-sync@work.service enabled")
@@ -658,6 +660,25 @@ class UninstallEnvironmentTests(unittest.TestCase):
             INSTALL.read_text(encoding="utf-8"),
             r"list-unit-files \\\n\s*'wacli-sync@",
         )
+
+    def test_unit_discovery_failure_preserves_installed_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            service_root = home / ".config" / "systemd" / "user"
+            runtime = home / ".local" / "state" / "omawhatsapp"
+            result = self.run_uninstall(
+                root, home, service_root, runtime,
+                xdg_config=str(home / ".config"),
+                xdg_state=str(home / ".local" / "state"),
+                extra_environment={"FAKE_SYSTEMCTL_DISCOVERY_FAIL": "1"},
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Could not inspect installed", result.stderr)
+            self.assertTrue((home / ".local/bin/omawhatsapp").exists())
+            self.assertTrue((service_root / "wacli-sync.service").exists())
+            self.assertTrue((runtime / "synthetic-state").exists())
+            self.assertFalse((root / "fake-shell-state").exists())
 
     def test_absolute_custom_xdg_and_cross_device_state_are_honored(self) -> None:
         shared_memory = Path("/dev/shm")
