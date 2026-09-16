@@ -122,8 +122,10 @@ jq --arg plugin_id "$plugin_id" '
 ' "$shell_config" > "$temporary"
 chmod --reference="$shell_config" "$temporary"
 
+# List every unit file and filter below: since systemd 246, a pattern that
+# matches nothing exits 1, which would reject a machine with no instances yet.
 if ! listed_unit_files=$(LC_ALL=C systemctl --user list-unit-files \
-    'wacli-sync@*.service' --no-legend --no-pager --plain); then
+    --no-legend --no-pager --plain); then
   echo "Could not inspect installed OmaWhatsApp sync instances." >&2
   exit 1
 fi
