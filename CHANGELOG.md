@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.1...v0.16.2) (2026-09-27)
+
+
+### Fixes
+
+* **setup:** change only the files the app wrote, exactly as it wrote them ([b054af1](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/b054af1059ce1405a658eead3b64c6cd505d44bf))
+
 ## [0.16.1](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.0...v0.16.1) (2026-09-27)
 
 
