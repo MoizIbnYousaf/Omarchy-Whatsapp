@@ -116,7 +116,8 @@ omarchy plugin update io.github.atoslins.whatsapp && omarchy restart shell
 background sync and removes what the setup added; then **Remove the app too**
 runs `omarchy plugin remove io.github.atoslins.whatsapp`. Your linked device
 and wacli's message store stay, so adding the app again picks up where you
-left off.
+left off. The app only ever replaces or removes files exactly as it wrote
+them: anything you edited stays, and the app tells you which.
 
 ## wacli: official and richer builds
 
@@ -178,7 +179,7 @@ through. Details in the
 ./scripts/test
 ```
 
-The release gate runs 325 helper, setup and agent tests, 557 offscreen QML
+The release gate runs 338 helper, setup and agent tests, 561 offscreen QML
 tests in 60 suites, a simulated `omarchy plugin add` into an empty home,
 manifest validation, QML lint and shell checks. CI runs it against wacli
 0.17.1, 0.18.3 and 0.19.0.

@@ -268,7 +268,7 @@ Rectangle {
             visible: paths.length > 0
             width: parent.width
             wrapMode: Text.Wrap
-            text: "These paths belong to something else, so the setup leaves them as they are. Move them away, then set up:\n"
+            text: "These paths belong to something else, or were changed after the app wrote them, so the setup leaves them as they are. Move them away, then set up:\n"
               + paths.join("\n")
             color: root.foreground
             font.family: root.fontFamily

@@ -117,7 +117,8 @@ automatically downgraded to `local-read`. `messages export --output` requires
 the destination-bearing `private-export` token. Export paths inside a Git
 repository are rejected unless the request also supplies
 `repository_export_authorization:"allow-repository-export:<exact-path>"`;
-prefer a private non-repository directory. `doctor --connect` is
+prefer a private non-repository directory. An export never replaces a file
+that is already at its path; choose a new file name. `doctor --connect` is
 `remote-read`.
 
 ## Interactive linking and foreground sync

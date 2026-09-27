@@ -1470,6 +1470,8 @@ def export_chat(chat: str, path: str, after: str = "", before: str = "", limit: 
         raise ToolError("The folder for that file does not exist.")
     # The helper authorizes the resolved path, so a symlinked folder matches.
     destination = requested.parent.resolve() / requested.name
+    if os.path.lexists(destination):
+        raise ToolError("A file is already there; choose a new file name.")
     arguments = ["messages", "export", "--chat", target["jid"], "--output", str(destination),
                  "--limit", str(bounded(limit, 5000, 1, 100000))]
     if after:

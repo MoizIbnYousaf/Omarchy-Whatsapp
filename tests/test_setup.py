@@ -208,6 +208,9 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.backend._setup_state()["units"], "foreign")
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "belongs to something else"):
             self.backend.setup(True, False)
+        self.assertEqual((self.units / "wacli-sync.service").read_text(encoding="utf-8"),
+                         "[Service]\nExecStart=/bin/true\n")
+        self.assertFalse(self.home_bin.exists(), "it stops before changing anything")
 
     def test_the_original_omawhatsapp_is_replaced_only_when_allowed(self) -> None:
         (self.root / "plugins" / backend_module.ORIGINAL_PLUGIN_ID).mkdir(parents=True)
@@ -224,8 +227,7 @@ class SetupTests(unittest.TestCase):
 
     def test_teardown_undoes_the_setup_and_keeps_the_archive(self) -> None:
         self.backend.setup(True, False)
-        (self.units / "wacli-sync.service.d").mkdir()
-        (self.units / "wacli-sync.service.d" / backend_module.MEDIA_DROPIN).write_text("x", encoding="utf-8")
+        self.backend.media_mode(False)
         (self.root / "store" / "wacli.db").write_text("archive", encoding="utf-8")
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, 'Confirm by sending "remove"'):
             self.backend.teardown("yes")
@@ -234,8 +236,9 @@ class SetupTests(unittest.TestCase):
         self.assertIn("disable --now wacli-sync.service", self.verbs())
         for gone in (self.units / "wacli-sync.service", self.units / "wacli-sync@.service",
                      self.home_bin / "omawhatsapp", self.home_bin / "omawhatsapp-mcp", self.skill_link,
-                     self.units / "wacli-sync.service.d"):
+                     self.units / "wacli-sync.service.d", self.units / "wacli-sync@.service.d"):
             self.assertFalse(gone.exists() or gone.is_symlink(), gone)
+        self.assertEqual(result["kept"], [])
         self.assertTrue((self.root / "store" / "wacli.db").is_file(), "the archive stays")
         self.assertFalse(self.backend._preferences()["setup"]["consented"])
         self.assertEqual(result["remove_command"], "omarchy plugin remove io.github.atoslins.whatsapp")
@@ -315,6 +318,117 @@ class SetupTests(unittest.TestCase):
         (self.home_bin / "omawhatsapp").write_text("someone else's\n", encoding="utf-8")
         self.backend.teardown("remove")
         self.assertTrue((self.home_bin / "omawhatsapp").is_file())
+
+    # Store review, 2026-09-27 (second): a sync unit or media drop-in that
+    # someone edited, or wrote, is never replaced or removed. Only a file
+    # exactly as the app wrote it is the app's to change.
+    def dropin(self, unit: str = "wacli-sync.service") -> Path:
+        return self.units / f"{unit}.d" / backend_module.MEDIA_DROPIN
+
+    def test_an_edited_unit_stops_the_setup_and_stays_as_it_is(self) -> None:
+        self.backend.setup(True, False)
+        unit = self.units / "wacli-sync@.service"
+        edited = unit.read_text(encoding="utf-8") + "Environment=MINE=1\n"
+        unit.write_text(edited, encoding="utf-8")
+        (self.home_bin / "omawhatsapp-mcp").unlink()
+        state = self.backend._setup_state()
+        self.assertEqual(state["units"], "foreign")
+        self.assertIn(str(unit), state["conflicts"])
+        self.assertFalse(state["complete"])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError,
+                                    "was changed after the app wrote it.*systemctl --user edit"):
+            self.backend.setup(True, False)
+        self.assertEqual(unit.read_text(encoding="utf-8"), edited)
+        self.assertFalse(os.path.lexists(self.home_bin / "omawhatsapp-mcp"),
+                         "it stops before changing anything")
+
+    def test_units_an_earlier_version_wrote_are_still_its_own(self) -> None:
+        self.units.mkdir(parents=True)
+        earlier = "[Unit]\nDescription=OmaWhatsApp sync from an earlier version\n"
+        for name in backend_module.SETUP_UNITS:
+            (self.units / name).write_text(earlier, encoding="utf-8")
+        digest = backend_module.hashlib.sha256(earlier.encode("utf-8")).hexdigest()
+        with mock.patch.object(backend_module, "EARLIER_WRITTEN_SHA256", frozenset({digest})):
+            self.assertEqual(self.backend._setup_state()["units"], "stale")
+            self.assertTrue(self.backend.setup(True, False)["setup"]["complete"])
+        text = (self.units / "wacli-sync.service").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("# Written by WhatsApp for Omarchy (sha256 "), text[:80])
+        self.assertTrue(backend_module.written_unchanged(text.encode("utf-8")))
+
+    def test_the_media_setting_changes_only_its_own_dropins(self) -> None:
+        self.backend.setup(True, False)
+        self.backend.media_mode(False)
+        for unit in backend_module.MEDIA_UNITS:
+            self.assertTrue(backend_module.written_unchanged(self.dropin(unit).read_bytes()))
+        self.assertFalse(self.backend.auto_download_media())
+        self.backend.media_mode(False)
+        self.backend.media_mode(True)
+        self.assertFalse(any(self.dropin(unit).exists() for unit in backend_module.MEDIA_UNITS))
+        self.assertTrue(self.backend.auto_download_media())
+        self.backend.media_mode(False)
+        edited = self.dropin().read_text(encoding="utf-8") + "Environment=MINE=1\n"
+        self.dropin().write_text(edited, encoding="utf-8")
+        for enabled in (True, False):
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError,
+                                        "was changed after the app wrote it; it was left as it is"):
+                self.backend.media_mode(enabled)
+        self.assertEqual(self.dropin().read_text(encoding="utf-8"), edited)
+        self.assertTrue(self.dropin("wacli-sync@.service").exists(),
+                        "both are checked before either changes")
+
+    def test_a_dropin_that_is_not_the_apps_is_never_replaced(self) -> None:
+        for content in ("[Service]\nEnvironment=OMAW_MEDIA_FLAGS=--mine\n", ""):
+            self.dropin().parent.mkdir(parents=True, exist_ok=True)
+            self.dropin().write_text(content, encoding="utf-8")
+            for enabled in (True, False):
+                with self.assertRaisesRegex(backend_module.OmaWhatsAppError,
+                                            "belongs to something else; it was left as it is"):
+                    self.backend.media_mode(enabled)
+                self.assertEqual(self.dropin().read_text(encoding="utf-8"), content)
+            self.assertFalse(self.dropin("wacli-sync@.service").exists())
+
+    def test_a_dropin_an_earlier_version_wrote_is_still_its_own(self) -> None:
+        for earlier in (
+            "# Written by OmaWhatsApp: received media is downloaded only on request.\n"
+            "[Service]\nEnvironment=OMAW_MEDIA_FLAGS=\n",
+            "# Written by WhatsApp for Omarchy: received media is downloaded only on request.\n"
+            "[Service]\nEnvironment=OMAW_MEDIA_FLAGS=\n",
+        ):
+            self.dropin().parent.mkdir(parents=True, exist_ok=True)
+            self.dropin().write_text(earlier, encoding="utf-8")
+            self.backend.media_mode(True)
+            self.assertFalse(self.dropin().exists())
+
+    def test_teardown_keeps_what_was_edited_and_its_running_sync(self) -> None:
+        listing = subprocess.CompletedProcess(
+            [], 0, "wacli-sync@work.service loaded active running x\n", "")
+
+        def systemctl(arguments, require_success=True):
+            self.calls.append(list(arguments))
+            if arguments[:1] == ["list-units"]:
+                return listing
+            return subprocess.CompletedProcess(arguments, 0, "", "")
+
+        self.backend.setup(True, False)
+        self.backend.media_mode(False)
+        template = self.units / "wacli-sync@.service"
+        template.write_text(template.read_text(encoding="utf-8") + "Nice=5\n", encoding="utf-8")
+        self.dropin().write_text(self.dropin().read_text(encoding="utf-8") + "# mine\n",
+                                 encoding="utf-8")
+        override = self.units / "wacli-sync@.service.d" / "override.conf"
+        override.write_text("[Service]\nNice=5\n", encoding="utf-8")
+        self.calls.clear()
+        with mock.patch.object(self.backend, "_systemctl_user", side_effect=systemctl):
+            self.assertIn("wacli-sync@work.service", self.backend._sync_instances())
+            result = self.backend.teardown("remove")
+        self.assertEqual(sorted(result["kept"]), sorted([str(template), str(self.dropin())]))
+        self.assertIn(str(self.units / "wacli-sync.service"), result["removed"])
+        self.assertIn(str(self.dropin("wacli-sync@.service")), result["removed"])
+        self.assertTrue(template.is_file() and self.dropin().is_file())
+        self.assertEqual(override.read_text(encoding="utf-8"), "[Service]\nNice=5\n")
+        self.assertIn("disable --now wacli-sync.service", self.verbs())
+        self.assertNotIn("disable --now wacli-sync@work.service", self.verbs(),
+                         "a unit it keeps keeps running")
 
     def test_linking_before_setup_does_not_touch_missing_units(self) -> None:
         self.assertEqual(self.backend._units_state(), "missing")

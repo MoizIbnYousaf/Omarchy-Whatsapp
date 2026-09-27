@@ -138,9 +138,8 @@ after the user agrees (`omawhatsapp setup`, idempotent):
 1. **Sync units.** `systemd/user/*.service` are written to
    `~/.config/systemd/user` with the same sandbox, pointing at the wacli the
    helper found (`~/.local/bin/wacli` first, then `/usr/local/bin` and
-   `/usr/bin`, never `PATH`). A unit that does not carry this app's marker is
-   never replaced. The units are enabled and started per account as its
-   settings say; an unchanged setup restarts nothing.
+   `/usr/bin`, never `PATH`). The units are enabled and started per account
+   as its settings say; an unchanged setup restarts nothing.
 2. **Links, not copies.** `~/.local/bin/omawhatsapp` links to the checkout's
    helper, which the units and the command line use; when agents are allowed,
    `~/.local/bin/omawhatsapp-mcp` and `~/.agents/skills/omawhatsapp` link to
@@ -157,6 +156,21 @@ after the user agrees (`omawhatsapp setup`, idempotent):
 
 `omawhatsapp teardown` undoes it (Settings → Sync & storage → Remove from this
 computer) and keeps the linked device, the archive and the settings.
+
+**Files the app writes, and only those.** The sync units and the media drop-in
+(`10-omawhatsapp-media.conf`, which Settings → Media writes to turn automatic
+downloads off) start with a line holding the sha256 of the rest of the file.
+The setup, the media setting and teardown replace or remove such a file only
+while that checksum matches, or when it is byte for byte a text an earlier
+version wrote (`EARLIER_WRITTEN_SHA256`). A file someone edited, or wrote, is
+left as it is: the setup and the media setting stop before changing anything
+and name it, and teardown lists it as kept and leaves that unit's service
+running. `systemctl --user edit` is the way to change how sync runs; it keeps
+the change in a separate drop-in the app never touches.
+
+Files the user asks for follow the same rule: saving an attachment or
+exporting a chat replaces an existing file only after the save dialog asked,
+and an export an agent requests never replaces one.
 
 After `omarchy plugin update` the shell keeps the QML it loaded until it
 restarts, while the helper is already new: the app compares the helper's

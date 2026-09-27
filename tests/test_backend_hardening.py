@@ -404,6 +404,13 @@ class BackendHardeningTests(unittest.TestCase):
             self.assertEqual(result["policy"], "private-export")
             self.assertFalse(mutate.call_args.kwargs["require_online"])
 
+            destination.write_text("mine", encoding="utf-8")
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "already at that export path"):
+                self.backend.transport({"args": args,
+                                        "authorization": f"private-export:{destination}"})
+            self.assertEqual(destination.read_text(encoding="utf-8"), "mine")
+            destination.unlink()
+
             repository = self.root / "repository"
             (repository / ".git").mkdir(parents=True)
             repository_destination = repository / "messages.json"

@@ -216,7 +216,11 @@ Rectangle {
           button: settings.removeConfirming ? "Remove" : "Remove…",
           available: live && !value("setupWriting", false) }
       ]
-      if (live && value("lastTeardown", null))
+      var teardown = live ? value("lastTeardown", null) : null
+      if (teardown && Array.isArray(teardown.kept) && teardown.kept.length > 0)
+        rows.push({ kind: "note", text: "Left as they were, because they were changed after the app wrote them or are not the app's: "
+          + teardown.kept.join(", ") })
+      if (teardown)
         rows.push({ kind: "action", key: "remove_plugin", title: "Remove the app too",
           subtitle: "Runs omarchy plugin remove " + value("pluginId", "") + " in a terminal, which asks first.",
           button: "Remove the app…", available: true })

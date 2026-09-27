@@ -45,6 +45,8 @@ TestCase {
     verify(service.exportChat(target, "/home/me/Documents/chat.txt", "app"), "an export is local")
     compare(service.activeWriteKind, "export-chat")
     compare(JSON.parse(findChild(service, "writeProcess").payload).destination, "/home/me/Documents/chat.txt")
+    compare(JSON.parse(findChild(service, "writeProcess").payload).replace, true,
+      "the save dialog already asked before replacing a file")
     findChild(service, "writeProcess").running = false
     service.writing = false
     verify(service.setContactTag(target, "1@s.whatsapp.net", "clients", false, "app"), "tags are local")

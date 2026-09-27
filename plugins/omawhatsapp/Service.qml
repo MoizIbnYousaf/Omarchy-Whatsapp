@@ -1092,8 +1092,9 @@ Item {
   }
   function saveMedia(chatRef, item, destination, owner) {
     if (!item || !item.id || String(destination || "") === "") return false
+    // The save dialog already asked before replacing a file.
     return runWriteForChat("save-media", {
-      id: String(item.id), destination: String(destination)
+      id: String(item.id), destination: String(destination), replace: true
     }, chatRef, owner)
   }
   onChatDetailsWantedChanged: if (chatDetailsWanted) refreshChatDetails()
@@ -1355,7 +1356,7 @@ Item {
   }
   property var lastWriteResult: ({})
   function exportChat(chatRef, destination, owner) {
-    return runWriteForChat("export-chat", { destination: String(destination || "") }, chatRef, owner)
+    return runWriteForChat("export-chat", { destination: String(destination || ""), replace: true }, chatRef, owner)
   }
   function downloadPending(chatRef, owner) {
     return runWriteForChat("download-pending", { limit: 50 }, chatRef, owner)

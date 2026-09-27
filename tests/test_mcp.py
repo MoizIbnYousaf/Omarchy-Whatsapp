@@ -757,6 +757,11 @@ class SecondWaveTests(ToolCase):
         self.assertEqual(arguments[arguments.index("--output") + 1], real)
         self.assertEqual(recorder.token(), f"private-export:{real}")
         self.assertIn("absolute", self.tool_error("export_chat", chat="Ana", path="ana.json"))
+        with tempfile.TemporaryDirectory() as folder:
+            existing = Path(folder) / "ana.json"
+            existing.write_text("mine", encoding="utf-8")
+            self.assertIn("already there", self.tool_error("export_chat", chat="Ana", path=str(existing)))
+            self.assertEqual(existing.read_text(encoding="utf-8"), "mine")
 
     def test_a_file_expired_on_the_server_suggests_asking_the_phone(self) -> None:
         self.use(attachments={"attachments": [{"chat_jid": "a@s.whatsapp.net", "id": "m1",

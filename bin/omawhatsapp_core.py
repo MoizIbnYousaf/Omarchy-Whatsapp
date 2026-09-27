@@ -124,6 +124,47 @@ MEDIA_DROPIN_OFF = (
     "# Written by WhatsApp for Omarchy: received media is downloaded only on request.\n"
     "[Service]\nEnvironment=OMAW_MEDIA_FLAGS=\n"
 )
+# Every file the app writes outside its plugin folder (the sync units and the
+# media drop-in) starts with this line, holding the sha256 of the rest. The
+# app replaces or removes such a file only while that checksum still matches,
+# so a file someone edited, or wrote, is left as it is.
+WRITTEN_STAMP = re.compile(
+    rb"# Written by WhatsApp for Omarchy \(sha256 ([0-9a-f]{64}) of the lines below\)\.[^\n]*\n")
+MAX_WRITTEN_FILE = 64 * 1024
+# The exact texts that versions before the stamp wrote at those paths, the
+# original OmaWhatsApp's included; unchanged, they are the app's own too.
+EARLIER_WRITTEN_SHA256 = frozenset({
+    "2eeedb0520b5028e524a9ef9c5544667a20e4d0a9de02f0529915e12e4e24fc2",  # wacli-sync.service
+    "2fe91f485643e9647a51b221d64f6b9446c9797648b0b57f767a6f69d0c5d144",
+    "b46ddc584cbd50b6a881d21d902b29f0aa4a34e7ae027d009a8ef85cc00531ea",
+    "cc37bde81c110e40aa57325d1a7a5754c75ebe62a990185365ef147dddb0c9bb",
+    "dc6f6c09d2b69aaba800b3695806375f840de7d28ef0b1cb704c1fec9cb75278",
+    "a074a2d36287a39f57cceedfddc92d11fb803681294bc5f922a4b0f1dd743be0",  # 0.16, /usr/local/bin/wacli
+    "2b4827dc04774b0f2a6b31c56710a87beca293300cab20c86702d3217d50fd0f",  # 0.16, /usr/bin/wacli
+    "26453a707470e7b67a4532d88051641762a5afb11fde012192daa30d249ef537",  # wacli-sync@.service
+    "6c92d7997e99a832b50a419ea5fcb92690cef1327f9398363b5a7c8f66fbeb5f",
+    "974006e3f7f15ed0de47fc0a3c32e386c4b0fd58ed54f7c53e67915f0bc8a4e6",
+    "e077e74b384fa729229ecaf779d254b2bcce23e4769c2bd380526fd5a4d93ad8",
+    "d747a639a0b16f42a287df0ce55501fba40894e39e48f8e446fc4308151fb660",  # 0.16, /usr/local/bin/wacli
+    "a8bfdc333df6b88577b15f9c4d232be8cd954dde1a9471518848663d7fa3bc87",  # 0.16, /usr/bin/wacli
+    "ab14985bb533a59151e513958bc9dca2686b4815694d0de053db332423e955a5",  # media drop-in, OmaWhatsApp
+    "3e108b9e74b49994c15f355af938ad98c1d7e102b9a5c2701861caca308743f3",  # media drop-in, 0.16
+})
+
+
+def stamped(body: str) -> str:
+    """A file the app writes, led by the line that lets it recognize the file later."""
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    return (f"# Written by WhatsApp for Omarchy (sha256 {digest} of the lines below). "
+            "Once edited, the app leaves it as it is.\n" + body)
+
+
+def written_unchanged(data: bytes) -> bool:
+    """Whether a file is exactly what this app, or the original OmaWhatsApp, wrote."""
+    match = WRITTEN_STAMP.match(data)
+    if match:
+        return hashlib.sha256(data[match.end():]).hexdigest() == match.group(1).decode("ascii")
+    return hashlib.sha256(data).hexdigest() in EARLIER_WRITTEN_SHA256
 WL_PASTE = Path("/usr/bin/wl-paste")
 XDG_OPEN = Path("/usr/bin/xdg-open")
 NOTIFY_SEND = Path("/usr/bin/notify-send")
@@ -1817,21 +1858,35 @@ class Backend:
         """Turn automatic download of received media on or off for every account."""
         if not isinstance(enabled, bool):
             raise OmaWhatsAppError("Automatic media download must be on or off.")
+        text = stamped(MEDIA_DROPIN_OFF)
+        # Both drop-ins are checked before either changes: one that someone
+        # edited, or wrote, stops the change and stays as it is.
+        dropins = []
         for unit in MEDIA_UNITS:
             folder = self.unit_dir / f"{unit}.d"
             target = folder / MEDIA_DROPIN
-            if folder.is_symlink() or target.is_symlink():
-                raise OmaWhatsAppError("The sync unit drop-in path is a symlink; refusing to write it.")
+            if folder.is_symlink() or (os.path.lexists(folder) and not folder.is_dir()):
+                raise OmaWhatsAppError(
+                    f"{folder} is not a plain folder; nothing was changed.")
+            owner = self._written_file_owner(target, text.encode("utf-8"))
+            if owner in {"edited", "foreign"}:
+                raise OmaWhatsAppError(
+                    f"{self._describe_written(target, owner)}; it was left as it is and "
+                    "nothing was changed. Move it away to use this setting.")
+            dropins.append((folder, target, owner))
+        for folder, target, owner in dropins:
             if enabled:
-                if target.exists():
+                if owner != "missing":
                     target.unlink()
+                continue
+            if owner == "ok":
                 continue
             folder.mkdir(parents=True, exist_ok=True, mode=0o700)
             temporary = folder / f".{MEDIA_DROPIN}.{secrets.token_hex(8)}.tmp"
             descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL
                                  | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644)
             try:
-                os.write(descriptor, MEDIA_DROPIN_OFF.encode("utf-8"))
+                os.write(descriptor, text.encode("utf-8"))
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
@@ -1973,6 +2028,44 @@ class Backend:
                 and self._identifies_as_this_app(path))
 
     @staticmethod
+    def _written_file_owner(path: Path, expected: bytes | None = None) -> str:
+        """Who owns a file the app writes outside its folder (a sync unit or
+        the media drop-in), and so whether the app may replace or remove it.
+
+        missing: nothing is there. ok: exactly `expected`. ours: what the app
+        wrote, unchanged since. edited: the app's, changed after it wrote it.
+        foreign: anything else. Only missing, ok and ours are ever touched.
+        """
+        if path.is_symlink():
+            return "foreign"
+        if not os.path.lexists(path):
+            return "missing"
+        if not path.is_file():
+            return "foreign"
+        try:
+            with path.open("rb") as handle:
+                data = handle.read(MAX_WRITTEN_FILE + 1)
+        except OSError:
+            return "foreign"
+        if expected is not None and data == expected:
+            return "ok"
+        if len(data) <= MAX_WRITTEN_FILE and written_unchanged(data):
+            return "ours"
+        text = data.decode("utf-8", errors="replace")
+        return "edited" if any(marker in text for marker in UNIT_MARKERS) else "foreign"
+
+    @staticmethod
+    def _describe_written(path: Path, owner: str) -> str:
+        if owner == "edited":
+            return f"{path} was changed after the app wrote it"
+        return f"{path} belongs to something else"
+
+    def _unit_conflicts(self) -> list[Path]:
+        """Sync unit paths the setup may not write: edited, or not the app's."""
+        return [self.unit_dir / name for name in SETUP_UNITS
+                if self._written_file_owner(self.unit_dir / name) in {"edited", "foreign"}]
+
+    @staticmethod
     def _describe(path: Path) -> str:
         if path.is_symlink():
             try:
@@ -2012,30 +2105,20 @@ class Backend:
             if not re.fullmatch(r"/[A-Za-z0-9._/+-]+", path):
                 raise OmaWhatsAppError("The wacli path cannot be used in a service unit.")
             text = text.replace(UNIT_WACLI, path)
-        return text
+        return stamped(text)
 
     def _units_state(self) -> str:
-        """ok, missing, stale (ours, but not this version), or foreign."""
+        """ok, missing, stale (the app's own, from another version), or
+        foreign (changed after the app wrote it, or not the app's)."""
         states = []
         for name in SETUP_UNITS:
-            installed = self.unit_dir / name
-            if installed.is_symlink():
-                return "foreign"
-            if not installed.is_file():
-                states.append("missing")
-                continue
             try:
-                current = installed.read_text(encoding="utf-8", errors="replace")
-                rendered = self._render_unit(name)
+                expected: bytes | None = self._render_unit(name).encode("utf-8")
             except (OSError, OmaWhatsAppError):
-                states.append("stale")
-                continue
-            if current == rendered:
-                states.append("ok")
-            elif any(marker in current for marker in UNIT_MARKERS):
-                states.append("stale")
-            else:
-                return "foreign"
+                expected = None
+            states.append(self._written_file_owner(self.unit_dir / name, expected))
+        if any(state in {"edited", "foreign"} for state in states):
+            return "foreign"
         if all(state == "ok" for state in states):
             return "ok"
         return "missing" if "missing" in states else "stale"
@@ -2043,12 +2126,10 @@ class Backend:
     def _write_unit(self, name: str, text: str) -> None:
         self.unit_dir.mkdir(parents=True, exist_ok=True)
         target = self.unit_dir / name
-        if target.is_symlink():
-            raise OmaWhatsAppError("A sync unit path is a symlink; refusing to write it.")
-        if target.is_file():
-            current = target.read_text(encoding="utf-8", errors="replace")
-            if not any(marker in current for marker in UNIT_MARKERS):
-                raise OmaWhatsAppError(f"{name} belongs to something else; refusing to replace it.")
+        owner = self._written_file_owner(target, text.encode("utf-8"))
+        if owner not in {"missing", "ok", "ours"}:
+            raise OmaWhatsAppError(
+                f"{self._describe_written(target, owner)}; it was left as it is.")
         temporary = self.unit_dir / f".{name}.{secrets.token_hex(8)}.tmp"
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL
                              | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644)
@@ -2088,6 +2169,7 @@ class Backend:
         # Paths the setup needs that belong to something else: it stops
         # before changing anything until they are moved away.
         conflicts = [path for path, owner in links.items() if owner == "foreign"]
+        conflicts += [str(path) for path in self._unit_conflicts()]
         units = self._units_state()
         wacli_found = self.wacli.is_file() and os.access(self.wacli, os.X_OK)
         legacy = any(self._is_own_copy(self.local_bin / name) for name in LEGACY_HELPER_COPIES)
@@ -2174,13 +2256,18 @@ class Backend:
                 raise OmaWhatsAppError(
                     "OmaWhatsApp is still turned on. Let this app replace it, then try again.")
             links = self._setup_links(want_agents)
-            foreign = [link for link, target in links.items()
+            blocked = [self._describe(link) + " belongs to something else"
+                       for link, target in links.items()
                        if self._path_owner(link, target) == "foreign"]
-            if foreign:
+            units = [self._describe_written(path, self._written_file_owner(path))
+                     for path in self._unit_conflicts()]
+            if blocked or units:
                 raise OmaWhatsAppError(
-                    "Setup stopped before changing anything: "
-                    + "; ".join(self._describe(link) for link in foreign)
-                    + " belongs to something else. Move it away, then set up again.")
+                    "Setup stopped before changing anything: " + "; ".join(blocked + units)
+                    + ". Move it away, then set up again."
+                    + (" To change how background sync runs, use systemctl --user edit, "
+                       "which keeps your changes in a separate file the app never touches."
+                       if units else ""))
             for link, target in links.items():
                 self._place_link(link, target)
             if not want_agents:
@@ -2223,25 +2310,37 @@ class Backend:
         if confirm != "remove":
             raise OmaWhatsAppError('Confirm by sending "remove".')
         removed: list[str] = []
+        # Files it left because they were edited after the app wrote them, or
+        # are not the app's; a unit left here keeps running as it is.
+        kept: list[str] = []
         with self._state_lock("setup.lock"):
+            owners = {name: self._written_file_owner(self.unit_dir / name)
+                      for name in SETUP_UNITS}
             units = {account.unit for account in self.accounts() if account.unit}
             units |= self._sync_instances() | {SYNC_UNIT}
             for unit in sorted(units):
-                self._systemctl_user(["disable", "--now", unit], require_success=False)
+                template = re.sub(r"@.+\.service$", "@.service", unit)
+                if owners.get(template) in {"ours", "missing"}:
+                    self._systemctl_user(["disable", "--now", unit], require_success=False)
             for name in SETUP_UNITS:
                 installed = self.unit_dir / name
-                if installed.is_file() and not installed.is_symlink() and any(
-                        marker in installed.read_text(encoding="utf-8", errors="replace")
-                        for marker in UNIT_MARKERS):
+                if owners[name] == "ours":
                     installed.unlink()
                     removed.append(str(installed))
+                elif owners[name] != "missing":
+                    kept.append(str(installed))
                 folder = self.unit_dir / f"{name}.d"
+                if folder.is_symlink() or not folder.is_dir():
+                    continue
                 dropin = folder / MEDIA_DROPIN
-                if dropin.is_file() and not dropin.is_symlink():
+                owner = self._written_file_owner(dropin)
+                if owner == "ours":
                     dropin.unlink()
                     removed.append(str(dropin))
-                if folder.is_dir() and not folder.is_symlink() and not any(folder.iterdir()):
-                    folder.rmdir()
+                    if not any(folder.iterdir()):
+                        folder.rmdir()
+                elif owner != "missing":
+                    kept.append(str(dropin))
             self._systemctl_user(["daemon-reload"], require_success=False)
             for link, target in self._setup_links(True).items():
                 # Only a link into this app's folder; never a copy, a link
@@ -2254,7 +2353,7 @@ class Backend:
                 value["setup"] = dict(value["setup"], consented=False)
 
             self._update_preferences(withdraw)
-        return {"ok": True, "kind": "teardown", "removed": removed,
+        return {"ok": True, "kind": "teardown", "removed": removed, "kept": kept,
                 "remove_command": f"omarchy plugin remove {PLUGIN_ID}"}
 
     def _run_omarchy(self, arguments: list[str]) -> None:
@@ -4695,8 +4794,12 @@ class Backend:
             raise
         return {"ok": True, "kind": "media", "local_path": str(saved)}
 
-    def save_media(self, jid: str, message_id: str, destination: Any) -> dict[str, Any]:
-        """Copy one attachment to a path the user chose in a save dialog."""
+    def save_media(self, jid: str, message_id: str, destination: Any,
+                   replace: bool = False) -> dict[str, Any]:
+        """Copy one attachment to a path the user chose in a save dialog.
+
+        A file already there is replaced only with `replace`, which the app
+        sends once the save dialog has asked the user."""
         if not isinstance(destination, str) or not destination.strip():
             raise OmaWhatsAppError("Choose where to save the attachment.")
         target_path = Path(destination).expanduser()
@@ -4704,6 +4807,8 @@ class Backend:
             raise OmaWhatsAppError("That folder does not exist.")
         if target_path.is_symlink() or target_path.is_dir():
             raise OmaWhatsAppError("Choose a file name, not a folder or a link.")
+        if os.path.lexists(target_path) and replace is not True:
+            raise OmaWhatsAppError("A file with that name is already there; choose another name.")
         source = Path(self.download_media(jid, message_id)["local_path"])
         temporary = target_path.with_name(f".{target_path.name}.{secrets.token_hex(6)}.part")
         try:
@@ -5341,8 +5446,10 @@ class Backend:
         self._remember_sent_media_best_effort(
             target_jid, forwarded_id, path, mime, str(message["media_type"]))
 
-    def export_chat(self, jid: str, destination: Any) -> dict[str, Any]:
-        """Write one chat as readable text, like the phone's Export chat."""
+    def export_chat(self, jid: str, destination: Any, replace: bool = False) -> dict[str, Any]:
+        """Write one chat as readable text, like the phone's Export chat.
+
+        A file already there is replaced only with `replace`, as in save_media."""
         chat = self._chat(jid)
         target = Path(str(destination or "")).expanduser()
         if not target.is_absolute() or target.name in {"", ".", ".."}:
@@ -5360,6 +5467,8 @@ class Backend:
         destination_path = parent / target.name
         if destination_path.is_symlink() or destination_path.is_dir():
             raise OmaWhatsAppError("Choose a file name, not a folder or a link.")
+        if os.path.lexists(destination_path) and replace is not True:
+            raise OmaWhatsAppError("A file with that name is already there; choose another name.")
         rows: list[dict[str, Any]] = []
         cursor: Any = None
         while True:
@@ -6397,13 +6506,13 @@ class Backend:
             metadata = None
         except OSError as exc:
             raise OmaWhatsAppError("The private export path could not be inspected safely.") from exc
-        regular = metadata is not None and stat.S_ISREG(metadata.st_mode) \
-            and metadata.st_nlink == 1
         directory = metadata is not None and allow_directory \
             and stat.S_ISDIR(metadata.st_mode)
-        if metadata is not None and (
-            (not regular and not directory) or metadata.st_uid != os.getuid()
-        ):
+        if metadata is not None and not directory:
+            # An agent names the path; an export never replaces what is there.
+            raise OmaWhatsAppError(
+                "Something is already at that export path; choose a new file name.")
+        if metadata is not None and metadata.st_uid != os.getuid():
             raise OmaWhatsAppError("WhatsApp for Omarchy refused an unsafe private export path.")
         repository_start = destination if directory else parent
         repository = next((
@@ -7095,7 +7204,8 @@ def main() -> int:
                                                 str(payload.get("to_jid") or ""),
                                                 str(payload.get("to_phone") or "")))
         if args.command == "export-chat":
-            return emit(backend.export_chat(str(payload.get("jid") or ""), payload.get("destination")))
+            return emit(backend.export_chat(str(payload.get("jid") or ""), payload.get("destination"),
+                                            payload.get("replace") is True))
         if args.command == "download-pending":
             return emit(backend.download_pending(str(payload.get("jid") or ""), payload.get("limit", 50)))
         if args.command == "contact-alias":
@@ -7138,7 +7248,8 @@ def main() -> int:
         if args.command == "save-media":
             return emit(backend.save_media(str(payload.get("jid") or ""),
                                            str(payload.get("id") or ""),
-                                           payload.get("destination")))
+                                           payload.get("destination"),
+                                           payload.get("replace") is True))
         if args.command == "about":
             return emit(backend.about())
         if args.command == "media-mode":

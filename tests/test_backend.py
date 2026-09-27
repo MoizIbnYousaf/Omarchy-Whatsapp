@@ -34,7 +34,8 @@ def installed_units(root: Path) -> Path:
     units = root / "units"
     units.mkdir(exist_ok=True)
     for name in backend_module.SETUP_UNITS:
-        (units / name).write_text("# WhatsApp for Omarchy test unit\n", encoding="utf-8")
+        (units / name).write_text(backend_module.stamped("[Unit]\nDescription=test unit\n"),
+                                  encoding="utf-8")
     return units
 
 
@@ -1509,6 +1510,16 @@ class BackendTests(unittest.TestCase):
             with self.assertRaises(backend_module.OmaWhatsAppError):
                 self.backend.save_media("team@g.us", "t2", bad)
 
+    def test_save_media_replaces_a_file_only_when_the_dialog_asked(self) -> None:
+        destination = self.root / "Downloads" / "saved.png"
+        destination.parent.mkdir()
+        destination.write_text("mine", encoding="utf-8")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "already there"):
+            self.backend.save_media("team@g.us", "t2", str(destination))
+        self.assertEqual(destination.read_text(encoding="utf-8"), "mine")
+        self.backend.save_media("team@g.us", "t2", str(destination), replace=True)
+        self.assertEqual(destination.read_bytes(), self.preview.read_bytes())
+
     def test_unavailable_media_is_not_retried_forever(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.execute(
@@ -2404,7 +2415,7 @@ class BackendTests(unittest.TestCase):
         for unit in ("wacli-sync.service", "wacli-sync@.service"):
             dropin = units / f"{unit}.d" / "10-omawhatsapp-media.conf"
             self.assertEqual(dropin.read_text(encoding="utf-8"),
-                             backend_module.MEDIA_DROPIN_OFF)
+                             backend_module.stamped(backend_module.MEDIA_DROPIN_OFF))
             self.assertIn("Environment=OMAW_MEDIA_FLAGS=\n", dropin.read_text(encoding="utf-8"))
         verbs = [call[2] for call in calls]
         self.assertIn("daemon-reload", verbs)
@@ -2999,6 +3010,12 @@ class BackendTests(unittest.TestCase):
                 self.backend.export_chat("alex@s.whatsapp.net", str(home / "code" / "x.txt"))
             with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "home folder"):
                 self.backend.export_chat("alex@s.whatsapp.net", str(self.root / "outside.txt"))
+            destination.write_text("mine", encoding="utf-8")
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "already there"):
+                self.backend.export_chat("alex@s.whatsapp.net", str(destination))
+            self.assertEqual(destination.read_text(encoding="utf-8"), "mine")
+            self.backend.export_chat("alex@s.whatsapp.net", str(destination), replace=True)
+            self.assertTrue(destination.read_text(encoding="utf-8").startswith("WhatsApp chat with"))
 
     def test_pending_attachments_download_beside_sync_and_count_expired(self) -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:

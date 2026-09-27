@@ -336,6 +336,19 @@ TestCase {
     compare(last(h.service).name, "removePlugin")
   }
 
+  function test_files_the_removal_left_are_named() {
+    var h = create()
+    function notes() {
+      return h.view.rowsFor("sync").filter(function(row) { return row.kind === "note" })
+        .map(function(row) { return row.text }).join("\n")
+    }
+    h.service.lastTeardown = { ok: true, kept: [] }
+    verify(notes().indexOf("Left as they were") < 0, "nothing is named when nothing was left")
+    h.service.lastTeardown = { ok: true, kept: ["/home/u/.config/systemd/user/wacli-sync@.service"] }
+    verify(notes().indexOf("Left as they were") >= 0, notes())
+    verify(notes().indexOf("/home/u/.config/systemd/user/wacli-sync@.service") >= 0, notes())
+  }
+
   function test_a_pending_removal_is_dropped_when_leaving() {
     var h = create()
     h.view.openSection("sync")

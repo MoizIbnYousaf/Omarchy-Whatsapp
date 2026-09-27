@@ -217,6 +217,8 @@ TestCase {
       "saving a copy is allowed offline; the helper refuses only a download")
     compare(service.activeWriteKind, "save-media")
     compare(service.activeWriteChatJid, target.jid)
+    compare(JSON.parse(findChild(service, "writeProcess").payload).replace, true,
+      "the save dialog already asked before replacing a file")
   }
 
   function test_dropdown_showing_only_the_list_reads_nothing() {
