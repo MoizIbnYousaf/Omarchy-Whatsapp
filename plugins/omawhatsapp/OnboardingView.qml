@@ -260,13 +260,29 @@ Rectangle {
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
           }
+          Text {
+            textFormat: Text.PlainText
+            objectName: "onboardingConflicts"
+            readonly property var paths: root.service && Array.isArray(root.service.setupConflicts)
+              ? root.service.setupConflicts : []
+            visible: paths.length > 0
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: "These paths belong to something else, so the setup leaves them as they are. Move them away, then set up:\n"
+              + paths.join("\n")
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
           Rectangle {
             objectName: "onboardingSetUp"
             width: setUpLabel.implicitWidth + Style.space(36)
             height: Style.space(40)
             radius: Style.cornerRadius + 2
+            readonly property bool blocked: !!root.service && Array.isArray(root.service.setupConflicts)
+              && root.service.setupConflicts.length > 0
             readonly property bool busy: !!root.service && root.service.setupWriting === true
-            opacity: busy ? 0.6 : 1
+            opacity: busy || blocked ? 0.6 : 1
             color: setUpHover.hovered && !busy ? Qt.lighter(root.accent, 1.1) : root.accent
             Text {
               textFormat: Text.PlainText
@@ -280,7 +296,7 @@ Rectangle {
             }
             HoverHandler { id: setUpHover; cursorShape: Qt.PointingHandCursor }
             TapHandler {
-              enabled: !parent.busy
+              enabled: !parent.busy && !parent.blocked
               onTapped: if (root.service)
                 root.service.runSetup(root.allowAgents, root.service.originalPluginEnabled === true)
             }

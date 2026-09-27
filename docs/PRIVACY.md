@@ -26,8 +26,10 @@ wacli's database.
 
 The first-run setup writes only in your home folder and only after you agree:
 the sync units in `~/.config/systemd/user`, links in `~/.local/bin` and, when
-agents are allowed, `~/.agents/skills`. Files it replaces there are moved to
-`~/.local/state/omawhatsapp/setup-backup`, never deleted. Checking for updates
+agents are allowed, `~/.agents/skills`. It replaces only what is provably
+this app's, moving earlier copies to `~/.local/state/omawhatsapp/setup-backup`
+instead of deleting them, and never touches a path that belongs to anything
+else. Checking for updates
 asks the repository's git remote for its latest commit; no chat data is sent.
 
 Marking a chat read, automatically or from the chat list, sends WhatsApp an

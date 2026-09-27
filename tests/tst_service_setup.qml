@@ -121,4 +121,13 @@ TestCase {
     verify(!service.wacliTooOld)
     verify(!service.needsOnboarding)
   }
+
+  function test_a_path_of_something_else_is_never_set_up_by_itself() {
+    var service = createTemporaryObject(serviceComponent, testCase)
+    status(service, setup({ consented: true, units: "ok",
+      conflicts: ["/home/u/.local/bin/omawhatsapp"] }))
+    compare(service.setupConflicts, ["/home/u/.local/bin/omawhatsapp"])
+    verify(!findChild(service, "setupProcess").running, "no automatic try while it is there")
+    verify(service.needsSetup, "the welcome says what to move")
+  }
 }

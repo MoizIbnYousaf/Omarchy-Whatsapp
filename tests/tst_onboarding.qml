@@ -31,6 +31,7 @@ TestCase {
       property string defaultAccountName: "primary"
       property var accountOperations: null
       property bool needsSetup: false
+      property var setupConflicts: []
       property bool wacliTooOld: false
       property string wacliVersion: ""
       property bool setupAgents: true
@@ -103,6 +104,23 @@ TestCase {
     var button = findChild(view, "onboardingSetUp")
     mouseClick(button, button.width / 2, button.height / 2)
     compare(service.setupCalls, [[false, false]])
+  }
+
+  function test_paths_of_something_else_are_shown_and_block_the_setup() {
+    var service = createTemporaryObject(serviceStub, testCase)
+    service.needsSetup = true
+    service.setupConflicts = ["/home/u/.local/bin/omawhatsapp"]
+    var view = createTemporaryObject(viewComponent, testCase, { service: service })
+    var conflicts = findChild(view, "onboardingConflicts")
+    verify(conflicts.visible)
+    verify(conflicts.text.indexOf("/home/u/.local/bin/omawhatsapp") >= 0)
+    var button = findChild(view, "onboardingSetUp")
+    verify(button.blocked)
+    mouseClick(button, button.width / 2, button.height / 2)
+    compare(service.setupCalls, [], "nothing runs until they are moved away")
+    service.setupConflicts = []
+    mouseClick(button, button.width / 2, button.height / 2)
+    compare(service.setupCalls.length, 1)
   }
 
   function test_the_original_omawhatsapp_is_turned_off_only_with_the_setup() {

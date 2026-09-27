@@ -1902,32 +1902,84 @@ class Backend:
         return links
 
     @staticmethod
-    def _link_state(link: Path, target: Path) -> str:
-        """ok, missing, copy (a regular file or folder to replace), or other."""
-        if link.is_symlink():
-            try:
-                return "ok" if link.resolve(strict=True) == target.resolve(strict=True) else "other"
-            except OSError:
-                return "other"
-        if link.is_file():
-            return "copy"
-        if link.is_dir():
-            return "copy" if (link / "SKILL.md").is_file() else "blocked"
-        return "missing"
+    def _within(path: Path, folder: Path) -> bool:
+        # Both as written and resolved, so a home reached through a link matches.
+        roots = {os.path.normpath(str(folder)), os.path.normpath(str(folder.resolve(strict=False)))}
+        paths = {os.path.normpath(str(path)), os.path.normpath(str(path.resolve(strict=False)))}
+        for root in roots:
+            for candidate in paths:
+                try:
+                    if os.path.commonpath([root, candidate]) == root:
+                        return True
+                except ValueError:
+                    continue
+        return False
 
-    def _points_into_checkout(self, link: Path) -> bool:
-        if not link.is_symlink():
-            return False
+    @staticmethod
+    def _link_pointee(link: Path) -> Path | None:
         try:
-            target = Path(os.readlink(link))
+            pointee = Path(os.readlink(link))
+        except OSError:
+            return None
+        return pointee if pointee.is_absolute() else link.parent / pointee
+
+    @staticmethod
+    def _identifies_as_this_app(path: Path) -> bool:
+        """A helper, MCP server, module or skill of this app says so in its content."""
+        if path.is_dir():
+            skill = path / "SKILL.md"
+            try:
+                text = skill.read_text(encoding="utf-8", errors="replace")[:65536]
+            except OSError:
+                return False
+            return re.search(r"^name:\s*omawhatsapp\s*$", text, re.MULTILINE) is not None
+        try:
+            with path.open("rb") as handle:
+                data = handle.read(1024 * 1024).lower()
         except OSError:
             return False
-        target = target if target.is_absolute() else link.parent / target
-        root = self.plugin_root.resolve(strict=False)
-        try:
-            return os.path.commonpath([str(root), os.path.normpath(target)]) == str(root)
-        except ValueError:
-            return False
+        return (b"omawhatsapp" in data and b"wacli" in data) or b"avatarcacheerror" in data
+
+    def _path_owner(self, link: Path, target: Path) -> str:
+        """Who owns a path the setup links, and so what the setup may do there.
+
+        ok: it already links to target. missing: nothing is there. ours: a
+        link into this app's own plugin folder, or a file or folder that an
+        earlier install of this app (or the original OmaWhatsApp, which uses
+        the same names) left and that says so; the setup replaces a link and
+        moves a copy aside. foreign: anything else, which is never touched.
+        """
+        if link.is_symlink():
+            pointee = self._link_pointee(link)
+            if pointee is None:
+                return "foreign"
+            if self._within(pointee, self.plugin_root) or self._within(
+                    pointee, self.plugins_dir / PLUGIN_ID):
+                try:
+                    if link.resolve(strict=True) == target.resolve(strict=True):
+                        return "ok"
+                except OSError:
+                    pass
+                return "ours"
+            return "foreign"
+        if link.is_file() or link.is_dir():
+            return "ours" if self._identifies_as_this_app(link) else "foreign"
+        if os.path.lexists(link):
+            return "foreign"
+        return "missing"
+
+    def _is_own_copy(self, path: Path) -> bool:
+        return (path.is_file() and not path.is_symlink()
+                and self._identifies_as_this_app(path))
+
+    @staticmethod
+    def _describe(path: Path) -> str:
+        if path.is_symlink():
+            try:
+                return f"{path} (a link to {os.readlink(path)})"
+            except OSError:
+                return f"{path} (a link)"
+        return f"{path} (a {'folder' if path.is_dir() else 'file'})"
 
     def _back_up(self, path: Path) -> None:
         """Move something a link replaces aside instead of deleting it."""
@@ -1937,15 +1989,16 @@ class Backend:
         shutil.move(str(path), str(folder / f"{path.name}.{stamp}.{secrets.token_hex(3)}"))
 
     def _place_link(self, link: Path, target: Path) -> bool:
-        state = self._link_state(link, target)
+        state = self._path_owner(link, target)
         if state == "ok":
             return False
-        if state == "blocked":
-            raise OmaWhatsAppError(f"{link} is a folder this app did not create; move it away first.")
+        if state == "foreign":
+            raise OmaWhatsAppError(
+                f"{self._describe(link)} belongs to something else; it was left as it is.")
         if not target.exists():
             raise OmaWhatsAppError(f"This copy of the app is missing {target.name}; reinstall it.")
         link.parent.mkdir(parents=True, exist_ok=True)
-        if state == "copy":
+        if state == "ours" and not link.is_symlink():
             self._back_up(link)
         temporary = link.with_name(f".{link.name}.{secrets.token_hex(6)}.tmp")
         os.symlink(target, temporary)
@@ -2029,19 +2082,22 @@ class Backend:
         consent = value.get("setup") or {}
         agents = consent.get("agents") is not False
         links = {
-            str(link): self._link_state(link, target)
+            str(link): self._path_owner(link, target)
             for link, target in self._setup_links(agents).items()
         }
+        # Paths the setup needs that belong to something else: it stops
+        # before changing anything until they are moved away.
+        conflicts = [path for path, owner in links.items() if owner == "foreign"]
         units = self._units_state()
         wacli_found = self.wacli.is_file() and os.access(self.wacli, os.X_OK)
-        legacy = any((self.local_bin / name).is_file() and not (self.local_bin / name).is_symlink()
-                     for name in LEGACY_HELPER_COPIES)
+        legacy = any(self._is_own_copy(self.local_bin / name) for name in LEGACY_HELPER_COPIES)
         original = self._original_plugin()
         consented = consent.get("consented") is True
+        helper = self.local_bin / "omawhatsapp"
         # An install made with the old script already had the user's consent;
         # it moves to links without asking again.
-        previous_install = not consented and units in {"ok", "stale"} and (
-            legacy or links.get(str(self.local_bin / "omawhatsapp")) == "copy")
+        previous_install = not consented and units in {"ok", "stale"} and not conflicts and (
+            legacy or self._is_own_copy(helper))
         return {
             "consented": consented,
             "agents": agents,
@@ -2050,6 +2106,7 @@ class Backend:
             and all(state == "ok" for state in links.values()) and not original["enabled"],
             "units": units,
             "links": links,
+            "conflicts": conflicts,
             "legacy_copies": legacy,
             "wacli": {"path": str(self.wacli), "found": wacli_found},
             "zenity": ZENITY.is_file(),
@@ -2116,18 +2173,29 @@ class Backend:
             if original["enabled"] and not replace_original:
                 raise OmaWhatsAppError(
                     "OmaWhatsApp is still turned on. Let this app replace it, then try again.")
-            for link, target in self._setup_links(want_agents).items():
+            links = self._setup_links(want_agents)
+            foreign = [link for link, target in links.items()
+                       if self._path_owner(link, target) == "foreign"]
+            if foreign:
+                raise OmaWhatsAppError(
+                    "Setup stopped before changing anything: "
+                    + "; ".join(self._describe(link) for link in foreign)
+                    + " belongs to something else. Move it away, then set up again.")
+            for link, target in links.items():
                 self._place_link(link, target)
             if not want_agents:
-                for link in (self.local_bin / "omawhatsapp-mcp", self.skill_link):
-                    if self._points_into_checkout(link) or self._link_state(link, link) == "copy":
-                        if link.is_symlink():
-                            link.unlink()
-                        else:
-                            self._back_up(link)
+                for link, target in ((self.local_bin / "omawhatsapp-mcp",
+                                      self.plugin_root / "bin" / "omawhatsapp-mcp"),
+                                     (self.skill_link, self.plugin_root / "skills" / "omawhatsapp")):
+                    if self._path_owner(link, target) not in {"ok", "ours"}:
+                        continue
+                    if link.is_symlink():
+                        link.unlink()
+                    else:
+                        self._back_up(link)
             for name in LEGACY_HELPER_COPIES:
                 copy = self.local_bin / name
-                if copy.is_file() and not copy.is_symlink():
+                if self._is_own_copy(copy):
                     self._back_up(copy)
             changed = False
             for name in SETUP_UNITS:
@@ -2175,10 +2243,10 @@ class Backend:
                 if folder.is_dir() and not folder.is_symlink() and not any(folder.iterdir()):
                     folder.rmdir()
             self._systemctl_user(["daemon-reload"], require_success=False)
-            for link in (self.local_bin / "omawhatsapp", self.local_bin / "omawhatsapp-mcp",
-                         self.skill_link):
-                if self._points_into_checkout(link) or (
-                        link.is_symlink() and not link.exists()):
+            for link, target in self._setup_links(True).items():
+                # Only a link into this app's folder; never a copy, a link
+                # owned by something else, or a broken link that is not ours.
+                if link.is_symlink() and self._path_owner(link, target) in {"ok", "ours"}:
                     link.unlink()
                     removed.append(str(link))
 

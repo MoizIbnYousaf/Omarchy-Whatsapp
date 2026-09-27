@@ -1623,10 +1623,14 @@ Item {
   readonly property bool zenityAvailable: setupState.zenity !== false
   readonly property bool originalPluginEnabled: !!setupState.original_plugin
     && setupState.original_plugin.enabled === true
+  // Paths the setup needs that belong to something else; it never touches
+  // them, and waits until they are moved away.
+  readonly property var setupConflicts: Array.isArray(setupState.conflicts) ? setupState.conflicts : []
   // Consent already given (or an install by the old script) is applied without
   // asking again; replacing the original OmaWhatsApp always asks.
   readonly property bool setupAutomatic: (setupState.consented === true
     || setupState.previous_install === true) && !originalPluginEnabled
+    && setupConflicts.length === 0
   readonly property bool needsSetup: setupKnown && !setupComplete && !setupAutomatic
   // wacli is installed but older than the helper's minimum.
   property bool wacliTooOld: false

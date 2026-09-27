@@ -159,12 +159,22 @@ class SetupTests(unittest.TestCase):
             self.backend.setup(True, False)
         self.assertFalse(self.home_bin.exists(), "nothing is written without wacli")
 
+    def write_old_copies(self) -> None:
+        """What the old installer left: each file says whose it is."""
+        self.home_bin.mkdir(parents=True, exist_ok=True)
+        copies = {
+            "omawhatsapp": "#!/usr/bin/python3\n\"\"\"Local bridge to wacli.\"\"\"\nfrom omawhatsapp_core import main\n",
+            "omawhatsapp-mcp": "#!/usr/bin/python3\n# omawhatsapp MCP server; the helper talks to wacli\n",
+            "omawhatsapp_core.py": "# omawhatsapp helper core over wacli\n",
+            "omawhatsapp_assets.py": "class AvatarCacheError(RuntimeError):\n    pass\n",
+        }
+        for name, text in copies.items():
+            (self.home_bin / name).write_text(text, encoding="utf-8")
+        self.skill_link.mkdir(parents=True, exist_ok=True)
+        (self.skill_link / "SKILL.md").write_text("---\nname: omawhatsapp\n---\n", encoding="utf-8")
+
     def test_old_installer_copies_move_aside_for_links(self) -> None:
-        self.home_bin.mkdir(parents=True)
-        for name in ("omawhatsapp", "omawhatsapp-mcp", "omawhatsapp_core.py", "omawhatsapp_assets.py"):
-            (self.home_bin / name).write_text("old copy\n", encoding="utf-8")
-        self.skill_link.mkdir(parents=True)
-        (self.skill_link / "SKILL.md").write_text("old skill\n", encoding="utf-8")
+        self.write_old_copies()
         state = self.backend._setup_state()
         self.assertTrue(state["legacy_copies"])
         self.backend.setup(True, False)
@@ -179,7 +189,8 @@ class SetupTests(unittest.TestCase):
         self.backend._update_preferences(lambda value: value.__setitem__(
             "setup", {"consented": False, "agents": True}))
         (self.home_bin / "omawhatsapp").unlink()
-        (self.home_bin / "omawhatsapp").write_text("old copy\n", encoding="utf-8")
+        (self.home_bin / "omawhatsapp").write_text(
+            "#!/usr/bin/python3\nfrom omawhatsapp_core import main  # wacli\n", encoding="utf-8")
         self.assertTrue(self.backend._setup_state()["previous_install"])
 
     def test_turning_agents_off_removes_their_links_only(self) -> None:
@@ -228,6 +239,76 @@ class SetupTests(unittest.TestCase):
         self.assertTrue((self.root / "store" / "wacli.db").is_file(), "the archive stays")
         self.assertFalse(self.backend._preferences()["setup"]["consented"])
         self.assertEqual(result["remove_command"], "omarchy plugin remove io.github.atoslins.whatsapp")
+
+    # Store review, 2026-09-27: the setup must never replace a path that
+    # belongs to something else, and neither may teardown or turning agents off.
+    def test_a_link_owned_by_something_else_stops_the_setup_untouched(self) -> None:
+        other = self.root / "other-tool"
+        other.write_text("#!/bin/sh\n", encoding="utf-8")
+        self.home_bin.mkdir(parents=True)
+        (self.home_bin / "omawhatsapp").symlink_to(other)
+        state = self.backend._setup_state()
+        self.assertEqual(state["conflicts"], [str(self.home_bin / "omawhatsapp")])
+        self.assertFalse(state["previous_install"])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError,
+                                    "Setup stopped before changing anything: .*a link to .*other-tool"):
+            self.backend.setup(True, False)
+        self.assertEqual(os.readlink(self.home_bin / "omawhatsapp"), str(other))
+        self.assertFalse((self.home_bin / "omawhatsapp-mcp").exists())
+        self.assertFalse(os.path.lexists(self.skill_link))
+        self.assertFalse(self.units.exists(), "no unit is written either")
+        self.assertFalse(self.backend._preferences()["setup"]["consented"])
+
+    def test_a_broken_link_owned_by_something_else_is_left_alone(self) -> None:
+        self.home_bin.mkdir(parents=True)
+        (self.home_bin / "omawhatsapp-mcp").symlink_to("/nonexistent/elsewhere/mcp")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "belongs to something else"):
+            self.backend.setup(True, False)
+        self.backend.teardown("remove")
+        self.assertTrue(os.path.lexists(self.home_bin / "omawhatsapp-mcp"),
+                        "teardown never removes a broken link that is not this app's")
+
+    def test_a_file_that_is_not_this_apps_stops_the_setup(self) -> None:
+        self.home_bin.mkdir(parents=True)
+        (self.home_bin / "omawhatsapp").write_text("#!/bin/sh\necho another tool\n", encoding="utf-8")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, r"omawhatsapp \(a file\) belongs"):
+            self.backend.setup(True, False)
+        self.assertEqual((self.home_bin / "omawhatsapp").read_text(encoding="utf-8"),
+                         "#!/bin/sh\necho another tool\n")
+        self.assertFalse((self.root / "state" / "setup-backup").exists(), "not even moved aside")
+
+    def test_a_skill_folder_of_something_else_is_left_alone(self) -> None:
+        self.skill_link.mkdir(parents=True)
+        (self.skill_link / "SKILL.md").write_text("---\nname: another-skill\n---\n", encoding="utf-8")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "belongs to something else"):
+            self.backend.setup(True, False)
+        # Without agents the skill path is not needed, so the setup goes on
+        # and still leaves that folder as it is.
+        self.backend.setup(False, False)
+        self.assertTrue((self.home_bin / "omawhatsapp").is_symlink())
+        self.assertEqual((self.skill_link / "SKILL.md").read_text(encoding="utf-8"),
+                         "---\nname: another-skill\n---\n")
+
+    def test_a_link_into_this_apps_folder_is_its_own(self) -> None:
+        self.home_bin.mkdir(parents=True)
+        (self.home_bin / "omawhatsapp").symlink_to(self.checkout / "bin" / "old-name")
+        self.assertEqual(self.backend._setup_state()["links"][str(self.home_bin / "omawhatsapp")], "ours")
+        self.backend.setup(True, False)
+        self.assertEqual((self.home_bin / "omawhatsapp").resolve(),
+                         (self.checkout / "bin" / "omawhatsapp").resolve())
+
+    def test_turning_agents_off_and_teardown_leave_links_of_something_else(self) -> None:
+        self.backend.setup(True, False)
+        other = self.root / "other-mcp"
+        other.write_text("#!/bin/sh\n", encoding="utf-8")
+        (self.home_bin / "omawhatsapp-mcp").unlink()
+        (self.home_bin / "omawhatsapp-mcp").symlink_to(other)
+        self.backend.setup(False, False)
+        self.assertEqual(os.readlink(self.home_bin / "omawhatsapp-mcp"), str(other))
+        self.assertFalse(os.path.lexists(self.skill_link), "its own skill link goes")
+        self.backend.teardown("remove")
+        self.assertEqual(os.readlink(self.home_bin / "omawhatsapp-mcp"), str(other))
+        self.assertFalse(os.path.lexists(self.home_bin / "omawhatsapp"), "its own link goes")
 
     def test_teardown_leaves_what_it_did_not_create(self) -> None:
         self.home_bin.mkdir(parents=True)

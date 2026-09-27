@@ -145,8 +145,12 @@ after the user agrees (`omawhatsapp setup`, idempotent):
    helper, which the units and the command line use; when agents are allowed,
    `~/.local/bin/omawhatsapp-mcp` and `~/.agents/skills/omawhatsapp` link to
    the MCP server and the skill. `omarchy plugin update` moves them all at
-   once. Files the old installer copied there are moved to
-   `~/.local/state/omawhatsapp/setup-backup`, not deleted.
+   once. The setup only replaces what is provably this app's: a link into its
+   own plugin folder, or a copy an earlier install left that names itself
+   (such copies are moved to `~/.local/state/omawhatsapp/setup-backup`, not
+   deleted). A link, file or folder that belongs to anything else stops the
+   setup before it changes anything, and the app lists the paths to move away.
+   Teardown and turning agents off follow the same rule.
 3. **Consent.** Stored in the preferences; an install made by the old script
    counts as consent. Turning off the original OmaWhatsApp, which shares the
    helper name, units and state, always asks.
