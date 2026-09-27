@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.0...v0.16.1) (2026-09-27)
+
+
+### Fixes
+
+* **setup:** never replace a path that belongs to something else ([25f4c8e](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/25f4c8ecd75b0e2aff20c2e72b8e8258c013f302))
+
 ## [0.16.0](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.15.0...v0.16.0) (2026-09-26)
 
 
