@@ -1552,8 +1552,9 @@ class Backend:
             "setup": {
                 "consented": isinstance(value.get("setup"), dict)
                 and value["setup"].get("consented") is True,
-                "agents": not isinstance(value.get("setup"), dict)
-                or value["setup"].get("agents") is not False,
+                # Agent access is opt-in: only an explicit yes turns it on.
+                "agents": isinstance(value.get("setup"), dict)
+                and value["setup"].get("agents") is True,
             },
             "stores": stores,
         }
@@ -2224,7 +2225,7 @@ class Backend:
     def _setup_state(self, preferences: dict[str, Any] | None = None) -> dict[str, Any]:
         value = preferences if preferences is not None else self._preferences()
         consent = value.get("setup") or {}
-        agents = consent.get("agents") is not False
+        agents = consent.get("agents") is True
         links = {
             str(link): self._path_owner(link, target)
             for link, target in self._setup_links(agents).items()

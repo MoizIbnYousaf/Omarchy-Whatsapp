@@ -22,7 +22,7 @@ Rectangle {
   readonly property bool setupNeeded: !demoMode && !!service && !wacliMissing
     && service.needsSetup === true
   readonly property bool linking: !!operations && operations.linkBusy === true
-  property bool allowAgents: !service || service.setupAgents !== false
+  property bool allowAgents: !!service && service.setupAgents === true
 
   function startLink() {
     if (demoMode || !service || !operations) return false
@@ -232,7 +232,7 @@ Rectangle {
                 textFormat: Text.PlainText
                 width: parent.width
                 wrapMode: Text.Wrap
-                text: "Adds the agent skill and the MCP server. Agents ask before they change anything on WhatsApp. You can turn this off later in Settings."
+                text: "Off unless you turn it on. Adds the agent skill and the MCP server; agents ask before they change anything on WhatsApp. You can change this later in Settings."
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption

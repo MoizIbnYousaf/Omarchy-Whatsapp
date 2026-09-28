@@ -25,8 +25,8 @@ state-file symlink. They never leave the machine and are never written into
 wacli's database.
 
 The first-run setup writes only in your home folder and only after you agree:
-the sync units in `~/.config/systemd/user`, links in `~/.local/bin` and, when
-agents are allowed, `~/.agents/skills`. It replaces only what is provably
+the sync units in `~/.config/systemd/user`, links in `~/.local/bin` and, only
+when you turn agent access on (it is off until you do), `~/.agents/skills`. It replaces only what is provably
 this app's, moving copies an earlier install left unchanged to
 `~/.local/state/omawhatsapp/setup-backup` instead of deleting them, and never touches a path that belongs to anything
 else. Checking for updates

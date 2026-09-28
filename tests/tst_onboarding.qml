@@ -34,7 +34,7 @@ TestCase {
       property var setupConflicts: []
       property bool wacliTooOld: false
       property string wacliVersion: ""
-      property bool setupAgents: true
+      property bool setupAgents: false
       property bool originalPluginEnabled: false
       property bool setupWriting: false
       property var setupCalls: []
@@ -89,7 +89,7 @@ TestCase {
     compare(findChild(view, "onboardingWacliCommand").text, "omarchy pkg aur add wacli-bin")
   }
 
-  function test_setup_is_asked_once_with_agents_on_by_default() {
+  function test_setup_is_asked_once_with_agents_off_by_default() {
     var service = createTemporaryObject(serviceStub, testCase)
     service.needsSetup = true
     var view = createTemporaryObject(viewComponent, testCase, { service: service })
@@ -97,13 +97,22 @@ TestCase {
     verify(findChild(view, "onboardingSetup").visible)
     verify(!findChild(view, "onboardingSteps").visible, "linking waits for the setup")
     verify(!findChild(view, "onboardingReplaceOriginal").visible)
-    var agents = findChild(view, "onboardingAgents")
-    verify(agents.checked)
-    agents.toggled()
-    verify(!view.allowAgents)
+    verify(!findChild(view, "onboardingAgents").checked, "agent access needs a yes")
     var button = findChild(view, "onboardingSetUp")
     mouseClick(button, button.width / 2, button.height / 2)
-    compare(service.setupCalls, [[false, false]])
+    compare(service.setupCalls, [[false, false]], "Set up alone adds no agent instructions")
+  }
+
+  function test_turning_agents_on_before_setting_up_asks_for_them() {
+    var service = createTemporaryObject(serviceStub, testCase)
+    service.needsSetup = true
+    var view = createTemporaryObject(viewComponent, testCase, { service: service })
+    var agents = findChild(view, "onboardingAgents")
+    agents.toggled()
+    verify(view.allowAgents)
+    var button = findChild(view, "onboardingSetUp")
+    mouseClick(button, button.width / 2, button.height / 2)
+    compare(service.setupCalls, [[true, false]])
   }
 
   function test_paths_of_something_else_are_shown_and_block_the_setup() {
@@ -131,7 +140,7 @@ TestCase {
     verify(findChild(view, "onboardingReplaceOriginal").visible)
     var button = findChild(view, "onboardingSetUp")
     mouseClick(button, button.width / 2, button.height / 2)
-    compare(service.setupCalls, [[true, true]])
+    compare(service.setupCalls, [[false, true]])
   }
 
   function test_the_app_shows_it_until_something_is_linked() {

@@ -203,10 +203,10 @@ Rectangle {
           subtitle: "Stops receiving messages, popups and showing you online until you open it again. Ctrl+Q in the app.",
           button: "Quit", available: live },
         { kind: "toggle", key: "agents", title: "Let AI agents use WhatsApp",
-          subtitle: value("setupAgents", true)
+          subtitle: value("setupAgents", false)
             ? "The agent skill and the MCP server are installed; agents ask before they change anything on WhatsApp."
             : "No agent can use WhatsApp through this app.",
-          checked: value("setupAgents", true), available: live && value("setupKnown", false),
+          checked: value("setupAgents", false), available: live && value("setupKnown", false),
           busy: value("setupWriting", false) },
         { kind: "action", key: "remove_setup",
           title: settings.removeConfirming ? "Remove it from this computer?" : "Remove from this computer",

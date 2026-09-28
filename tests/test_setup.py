@@ -190,6 +190,11 @@ class SetupTests(unittest.TestCase):
             (self.skill_link / path).parent.mkdir(parents=True, exist_ok=True)
             (self.skill_link / path).write_text(text, encoding="utf-8")
 
+    def allow_agents(self) -> None:
+        """The user said yes to agent access; only then is the skill path set up."""
+        self.backend._update_preferences(lambda value: value.__setitem__(
+            "setup", {"consented": False, "agents": True}))
+
     def write_old_copies(self) -> None:
         """What the old installer left, byte for byte a version it shipped."""
         self.known_copies()
@@ -232,6 +237,7 @@ class SetupTests(unittest.TestCase):
             (self.home_bin / name).write_text(text, encoding="utf-8")
         own_skill = {"SKILL.md": "---\nname: omawhatsapp\n---\nMy own skill over wacli.\n"}
         self.write_skill(own_skill)
+        self.allow_agents()
         state = self.backend._setup_state()
         self.assertEqual(state["links"][str(self.home_bin / "omawhatsapp")], "foreign")
         self.assertEqual(state["links"][str(self.skill_link)], "foreign")
@@ -256,6 +262,7 @@ class SetupTests(unittest.TestCase):
 
     def test_a_shipped_skill_with_anything_added_is_not_the_apps(self) -> None:
         self.write_old_copies()
+        self.allow_agents()
         self.assertEqual(self.backend._setup_state()["links"][str(self.skill_link)], "ours")
         (self.skill_link / "notes.md").write_text("mine\n", encoding="utf-8")
         self.assertEqual(self.backend._setup_state()["links"][str(self.skill_link)], "foreign")
@@ -280,6 +287,38 @@ class SetupTests(unittest.TestCase):
         self.assertTrue((self.home_bin / "omawhatsapp").is_symlink(), "the command stays")
         self.assertFalse(result["setup"]["agents"])
         self.assertTrue(result["setup"]["complete"])
+
+    def test_agent_access_is_off_until_the_user_turns_it_on(self) -> None:
+        self.assertFalse(self.backend._setup_state()["agents"], "no answer is not a yes")
+        result = self.backend.setup(None, False)
+        self.assertTrue((self.home_bin / "omawhatsapp").is_symlink(), "the command is set up")
+        self.assertFalse(os.path.lexists(self.home_bin / "omawhatsapp-mcp"))
+        self.assertFalse(os.path.lexists(self.skill_link), "no agent instructions without a yes")
+        self.assertFalse(result["setup"]["agents"])
+        self.assertTrue(result["setup"]["complete"])
+        self.assertFalse(self.backend._preferences()["setup"]["agents"])
+        self.backend.setup(True, False)
+        self.assertTrue(self.skill_link.is_symlink())
+        self.assertTrue((self.home_bin / "omawhatsapp-mcp").is_symlink())
+
+    def test_a_yes_already_given_keeps_agent_access(self) -> None:
+        self.backend._update_preferences(lambda value: value.__setitem__(
+            "setup", {"consented": True, "agents": True}))
+        self.assertTrue(self.backend._setup_state()["agents"])
+        self.backend.setup(None, False)
+        self.assertTrue(self.skill_link.is_symlink())
+
+    def test_an_old_install_moves_on_without_agent_access(self) -> None:
+        # The old script placed the skill without asking; moving to links is
+        # not a yes, so its skill and MCP copies go aside until the user opts in.
+        self.write_old_copies()
+        self.backend.setup(None, False)
+        self.assertTrue((self.home_bin / "omawhatsapp").is_symlink())
+        self.assertFalse(os.path.lexists(self.skill_link))
+        self.assertFalse(os.path.lexists(self.home_bin / "omawhatsapp-mcp"))
+        self.assertEqual(len(list((self.root / "state" / "setup-backup").iterdir())), 5,
+                         "the copies are kept aside, not deleted")
+        self.assertFalse(self.backend._preferences()["setup"]["agents"])
 
     def test_a_unit_that_is_not_ours_is_never_replaced(self) -> None:
         self.units.mkdir(parents=True)

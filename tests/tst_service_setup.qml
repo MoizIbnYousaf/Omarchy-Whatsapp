@@ -59,6 +59,16 @@ TestCase {
     verify(!service.needsSetup)
   }
 
+  function test_agent_access_needs_an_explicit_yes() {
+    var service = createTemporaryObject(serviceComponent, testCase)
+    status(service, setup({ agents: undefined }))
+    verify(!service.setupAgents, "a missing answer is not a yes")
+    status(service, setup({ agents: false }))
+    verify(!service.setupAgents)
+    status(service, setup({ agents: true }))
+    verify(service.setupAgents)
+  }
+
   function test_given_consent_or_an_old_install_is_applied_by_itself() {
     var service = createTemporaryObject(serviceComponent, testCase)
     status(service, setup({ previous_install: true, units: "ok", legacy_copies: true }))

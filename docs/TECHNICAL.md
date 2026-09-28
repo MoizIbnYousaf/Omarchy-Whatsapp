@@ -156,8 +156,12 @@ after the user agrees (`omawhatsapp setup`, idempotent):
    lists the paths to move away.
    Teardown and turning agents off follow the same rule.
 3. **Consent.** Stored in the preferences; an install made by the old script
-   counts as consent. Turning off the original OmaWhatsApp, which shares the
-   helper name, units and state, always asks.
+   counts as consent to the sync units and the command link. Agent access is
+   opt-in: it stays off until the user turns it on, during the setup or later
+   in Settings, so an old install moves on without it and the skill and MCP
+   server copies the old script left go to `setup-backup`. Turning off the
+   original OmaWhatsApp, which shares the helper name, units and state, always
+   asks.
 
 `omawhatsapp teardown` undoes it (Settings → Sync & storage → Remove from this
 computer) and keeps the linked device, the archive and the settings.

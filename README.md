@@ -82,7 +82,7 @@ through the rest:
 
 1. **Set it up on this computer.** One click adds, in your home folder only,
    the background sync (a sandboxed user service), the `omawhatsapp` command,
-   and, if you allow it, the agent skill and the MCP server. No sudo or pkexec is required.
+   and, only if you turn it on, the agent skill and the MCP server. No sudo or pkexec is required.
 2. **Link your phone.** Show QR code opens the code in a terminal; scan it
    from WhatsApp → Linked devices on the phone.
 

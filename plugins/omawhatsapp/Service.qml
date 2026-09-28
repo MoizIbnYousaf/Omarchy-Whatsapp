@@ -1620,7 +1620,8 @@ Item {
   property var setupState: ({})
   readonly property bool setupKnown: setupState.units !== undefined
   readonly property bool setupComplete: setupState.complete === true
-  readonly property bool setupAgents: setupState.agents !== false
+  // Agent access is opt-in: off unless the user said yes.
+  readonly property bool setupAgents: setupState.agents === true
   readonly property bool zenityAvailable: setupState.zenity !== false
   readonly property bool originalPluginEnabled: !!setupState.original_plugin
     && setupState.original_plugin.enabled === true
