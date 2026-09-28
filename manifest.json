@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.atoslins.whatsapp",
   "name": "WhatsApp for Omarchy",
-  "version": "0.16.3",
+  "version": "0.16.4",
   "author": "Atos Lins",
   "license": "MIT",
   "description": "Native WhatsApp for the Omarchy shell, not a browser tab: local-first chats that open instantly, quick replies from the bar, voice notes, media, notifications and several accounts, all in your Omarchy theme. Powered by wacli.",

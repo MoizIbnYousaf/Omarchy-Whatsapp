@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.4](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.3...v0.16.4) (2026-09-28)
+
+
+### Fixes
+
+* **setup:** keep agent access off until the user turns it on ([6713871](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/6713871b4d09c6b42d9a2122237914990b8e80c5))
+
 ## [0.16.3](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.2...v0.16.3) (2026-09-28)
 
 
