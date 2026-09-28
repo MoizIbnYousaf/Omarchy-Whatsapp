@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.3](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.2...v0.16.3) (2026-09-28)
+
+
+### Fixes
+
+* **setup:** recognize an earlier copy only by its exact shipped content ([a4c6784](https://github.com/atoslins/Omarchy-WhatsApp-v2/commit/a4c67844191c51bf7e59f77dbbe060200c22687a))
+
 ## [0.16.2](https://github.com/atoslins/Omarchy-WhatsApp-v2/compare/v0.16.1...v0.16.2) (2026-09-27)
 
 
