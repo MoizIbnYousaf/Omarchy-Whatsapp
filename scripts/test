@@ -81,7 +81,7 @@ while IFS= read -r -d '' qml_test; do
 done < <(find tests -maxdepth 1 -type f -name 'tst_*.qml' -print0 | sort -z)
 
 bash -n scripts/test scripts/dev-sync
-python3 -m py_compile bin/omawhatsapp_assets.py scripts/check-wacli-parity
+python3 -m py_compile bin/omawhatsapp_assets.py scripts/check-wacli-parity scripts/earlier-copies
 python3 -m py_compile tests/write_media_fixtures.py
 git diff --check
 

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 from importlib.machinery import SourceFileLoader
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -159,19 +162,41 @@ class SetupTests(unittest.TestCase):
             self.backend.setup(True, False)
         self.assertFalse(self.home_bin.exists(), "nothing is written without wacli")
 
+    # Stand-ins for what the old installers copied; known_copies() makes them
+    # count as shipped versions the way bin/earlier-copies.json lists the real ones.
+    OLD_COPIES = {
+        "omawhatsapp": "#!/usr/bin/python3\n\"\"\"Local bridge to wacli.\"\"\"\nfrom omawhatsapp_core import main\n",
+        "omawhatsapp-mcp": "#!/usr/bin/python3\n# omawhatsapp MCP server; the helper talks to wacli\n",
+        "omawhatsapp_core.py": "# omawhatsapp helper core over wacli\n",
+        "omawhatsapp_assets.py": "class AvatarCacheError(RuntimeError):\n    pass\n",
+    }
+    OLD_SKILL = {
+        "SKILL.md": "---\nname: omawhatsapp\n---\nUse the helper over wacli.\n",
+        "references/wacli-parity.md": "# wacli parity\n",
+    }
+
+    def known_copies(self) -> None:
+        files = {name: frozenset({hashlib.sha256(text.encode("utf-8")).hexdigest()})
+                 for name, text in self.OLD_COPIES.items()}
+        skill = backend_module.tree_digest(
+            [(path, text.encode("utf-8")) for path, text in self.OLD_SKILL.items()])
+        patch = mock.patch.object(backend_module, "earlier_copies",
+                                  return_value=(files, frozenset({skill})))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def write_skill(self, files: dict[str, str]) -> None:
+        for path, text in files.items():
+            (self.skill_link / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.skill_link / path).write_text(text, encoding="utf-8")
+
     def write_old_copies(self) -> None:
-        """What the old installer left: each file says whose it is."""
+        """What the old installer left, byte for byte a version it shipped."""
+        self.known_copies()
         self.home_bin.mkdir(parents=True, exist_ok=True)
-        copies = {
-            "omawhatsapp": "#!/usr/bin/python3\n\"\"\"Local bridge to wacli.\"\"\"\nfrom omawhatsapp_core import main\n",
-            "omawhatsapp-mcp": "#!/usr/bin/python3\n# omawhatsapp MCP server; the helper talks to wacli\n",
-            "omawhatsapp_core.py": "# omawhatsapp helper core over wacli\n",
-            "omawhatsapp_assets.py": "class AvatarCacheError(RuntimeError):\n    pass\n",
-        }
-        for name, text in copies.items():
+        for name, text in self.OLD_COPIES.items():
             (self.home_bin / name).write_text(text, encoding="utf-8")
-        self.skill_link.mkdir(parents=True, exist_ok=True)
-        (self.skill_link / "SKILL.md").write_text("---\nname: omawhatsapp\n---\n", encoding="utf-8")
+        self.write_skill(self.OLD_SKILL)
 
     def test_old_installer_copies_move_aside_for_links(self) -> None:
         self.write_old_copies()
@@ -185,13 +210,67 @@ class SetupTests(unittest.TestCase):
                          "four copies and the skill folder are kept aside, not deleted")
 
     def test_an_install_by_the_old_script_counts_as_consent(self) -> None:
+        self.known_copies()
         self.backend.setup(True, False)
         self.backend._update_preferences(lambda value: value.__setitem__(
             "setup", {"consented": False, "agents": True}))
         (self.home_bin / "omawhatsapp").unlink()
-        (self.home_bin / "omawhatsapp").write_text(
-            "#!/usr/bin/python3\nfrom omawhatsapp_core import main  # wacli\n", encoding="utf-8")
+        (self.home_bin / "omawhatsapp").write_text(self.OLD_COPIES["omawhatsapp"], encoding="utf-8")
         self.assertTrue(self.backend._setup_state()["previous_install"])
+
+    def test_a_look_alike_wrapper_module_or_skill_is_left_alone(self) -> None:
+        # Someone's own wrapper around wacli, a module and a skill that use the
+        # app's names, but are not what the old installers shipped.
+        self.known_copies()
+        self.home_bin.mkdir(parents=True)
+        mine = {
+            "omawhatsapp": "#!/bin/sh\n# my omawhatsapp wrapper\nexec wacli \"$@\"\n",
+            "omawhatsapp-mcp": "#!/bin/sh\n# omawhatsapp MCP of my own, over wacli\n",
+            "omawhatsapp_core.py": "# notes: omawhatsapp, wacli, AvatarCacheError\n",
+        }
+        for name, text in mine.items():
+            (self.home_bin / name).write_text(text, encoding="utf-8")
+        own_skill = {"SKILL.md": "---\nname: omawhatsapp\n---\nMy own skill over wacli.\n"}
+        self.write_skill(own_skill)
+        state = self.backend._setup_state()
+        self.assertEqual(state["links"][str(self.home_bin / "omawhatsapp")], "foreign")
+        self.assertEqual(state["links"][str(self.skill_link)], "foreign")
+        self.assertFalse(state["legacy_copies"])
+        self.assertFalse(state["previous_install"])
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "belongs to something else"):
+            self.backend.setup(True, False)
+        for name, text in mine.items():
+            self.assertEqual((self.home_bin / name).read_text(encoding="utf-8"), text)
+        self.assertEqual((self.skill_link / "SKILL.md").read_text(encoding="utf-8"),
+                         own_skill["SKILL.md"])
+        self.assertFalse((self.root / "state" / "setup-backup").exists(), "not even moved aside")
+
+    def test_a_copy_changed_by_one_byte_is_not_the_apps(self) -> None:
+        self.write_old_copies()
+        helper = self.home_bin / "omawhatsapp"
+        helper.write_text(self.OLD_COPIES["omawhatsapp"] + "\n", encoding="utf-8")
+        self.assertEqual(self.backend._setup_state()["links"][str(helper)], "foreign")
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "belongs to something else"):
+            self.backend.setup(True, False)
+        self.assertEqual(helper.read_text(encoding="utf-8"), self.OLD_COPIES["omawhatsapp"] + "\n")
+
+    def test_a_shipped_skill_with_anything_added_is_not_the_apps(self) -> None:
+        self.write_old_copies()
+        self.assertEqual(self.backend._setup_state()["links"][str(self.skill_link)], "ours")
+        (self.skill_link / "notes.md").write_text("mine\n", encoding="utf-8")
+        self.assertEqual(self.backend._setup_state()["links"][str(self.skill_link)], "foreign")
+        (self.skill_link / "notes.md").unlink()
+        (self.skill_link / "linked.md").symlink_to(self.skill_link / "SKILL.md")
+        self.assertEqual(self.backend._setup_state()["links"][str(self.skill_link)], "foreign")
+
+    def test_a_copy_with_another_files_name_is_not_the_apps(self) -> None:
+        # The module's shipped text at the helper's path was never copied there.
+        self.known_copies()
+        self.home_bin.mkdir(parents=True)
+        (self.home_bin / "omawhatsapp").write_text(self.OLD_COPIES["omawhatsapp_core.py"],
+                                                    encoding="utf-8")
+        self.assertEqual(self.backend._setup_state()["links"][str(self.home_bin / "omawhatsapp")],
+                         "foreign")
 
     def test_turning_agents_off_removes_their_links_only(self) -> None:
         self.backend.setup(True, False)
@@ -506,6 +585,60 @@ class UpdateCheckTests(unittest.TestCase):
             backend = backend_module.Backend(store_dir=root / "store", state_dir=root / "state",
                                              wacli=root / "wacli", plugin_root=root / "copy")
             self.assertEqual(backend.update_check()["managed"], False)
+
+
+class EarlierCopiesTests(unittest.TestCase):
+    """bin/earlier-copies.json decides what the setup may take for a copy an
+    old install script left; it has to be exactly what those scripts shipped."""
+
+    SOURCE = "dd09400f17d293ccc40ee6ea7c602b1b9fac5796"
+    NAMES = ("omawhatsapp", "omawhatsapp-mcp", "omawhatsapp_core.py", "omawhatsapp_assets.py")
+
+    def git(self, *arguments: str) -> bytes:
+        return subprocess.run(["git", "-C", str(REPOSITORY), *arguments],
+                              check=True, capture_output=True).stdout
+
+    def needs_history(self) -> None:
+        found = subprocess.run(["git", "-C", str(REPOSITORY), "cat-file", "-e", self.SOURCE + "^{commit}"],
+                               capture_output=True)
+        if found.returncode != 0:
+            self.skipTest("needs the git history up to the last commit with the installer")
+
+    def test_the_shipped_list_is_well_formed(self) -> None:
+        data = json.loads((REPOSITORY / "bin" / "earlier-copies.json").read_text(encoding="utf-8"))
+        self.assertEqual(sorted(data["files"]), sorted(self.NAMES))
+        self.assertTrue(all(data["files"].values()) and data["skill"])
+        for digest in [d for digests in data["files"].values() for d in digests] + data["skill"]:
+            self.assertRegex(digest, r"^[0-9a-f]{64}$")
+        files, skills = backend_module.earlier_copies()
+        self.assertEqual(files["omawhatsapp"], frozenset(data["files"]["omawhatsapp"]))
+        self.assertEqual(skills, frozenset(data["skill"]))
+
+    def test_without_the_list_nothing_counts_as_a_copy(self) -> None:
+        with mock.patch.object(backend_module, "EARLIER_COPIES", Path("/nonexistent/earlier-copies.json")), \
+                mock.patch.object(backend_module, "_earlier_copies", None):
+            self.assertEqual(backend_module.earlier_copies(), ({}, frozenset()))
+
+    def test_the_list_is_exactly_what_the_history_shipped(self) -> None:
+        self.needs_history()
+        result = subprocess.run([sys.executable, "-B", str(REPOSITORY / "scripts" / "earlier-copies"),
+                                 "--check"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_copies_the_last_installer_made_are_the_apps(self) -> None:
+        self.needs_history()
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            for name in self.NAMES:
+                (home / name).write_bytes(self.git("show", f"{self.SOURCE}:bin/{name}"))
+                self.assertTrue(backend_module.Backend._is_earlier_copy(home / name), name)
+            skill = home / "skills" / "omawhatsapp"
+            listing = self.git("ls-tree", "-r", "--name-only", self.SOURCE, "skills/omawhatsapp/")
+            for path in listing.decode("utf-8").split():
+                copy = skill / path.removeprefix("skills/omawhatsapp/")
+                copy.parent.mkdir(parents=True, exist_ok=True)
+                copy.write_bytes(self.git("show", f"{self.SOURCE}:{path}"))
+            self.assertTrue(backend_module.Backend._is_earlier_copy(skill))
 
 
 if __name__ == "__main__":

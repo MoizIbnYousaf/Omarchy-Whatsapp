@@ -33,8 +33,11 @@ fixtures and exercises cross-window playback leasing, account-identical JIDs,
 account-filter purity, private local avatars, missing-video transitions, and
 file-picker/action interleavings. Setup tests run the first-run setup in an
 isolated home: links into the checkout, rendered units with the found wacli,
-copies from the old installer moved aside, units that are not this app's left
-alone, and the teardown. The gate also copies only the distributed files into
+exact copies from the old installer moved aside while a wrapper, module or
+skill that only uses the app's names is left alone, units that are not this
+app's left alone, and the teardown. With the git history at hand, they also
+check that `bin/earlier-copies.json` is exactly what `scripts/earlier-copies`
+derives from it. The gate also copies only the distributed files into
 an empty home's plugins folder, as `omarchy plugin add` would, validates it,
 and checks that its helper finds itself there.
 

@@ -145,10 +145,15 @@ after the user agrees (`omawhatsapp setup`, idempotent):
    `~/.local/bin/omawhatsapp-mcp` and `~/.agents/skills/omawhatsapp` link to
    the MCP server and the skill. `omarchy plugin update` moves them all at
    once. The setup only replaces what is provably this app's: a link into its
-   own plugin folder, or a copy an earlier install left that names itself
-   (such copies are moved to `~/.local/state/omawhatsapp/setup-backup`, not
-   deleted). A link, file or folder that belongs to anything else stops the
-   setup before it changes anything, and the app lists the paths to move away.
+   own plugin folder, or a copy an earlier install script left unchanged —
+   byte for byte a version of that file, or of the whole skill folder, that
+   the scripts before 0.16.0 (this app's and the original OmaWhatsApp's)
+   copied. `bin/earlier-copies.json` lists their sha256, generated from the
+   git history by `scripts/earlier-copies`. Such copies are moved to
+   `~/.local/state/omawhatsapp/setup-backup`, not deleted. A link, file or
+   folder that belongs to anything else, including one that only mentions
+   the app's name, stops the setup before it changes anything, and the app
+   lists the paths to move away.
    Teardown and turning agents off follow the same rule.
 3. **Consent.** Stored in the preferences; an install made by the old script
    counts as consent. Turning off the original OmaWhatsApp, which shares the

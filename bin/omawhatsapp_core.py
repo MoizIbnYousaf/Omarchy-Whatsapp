@@ -159,6 +159,62 @@ def stamped(body: str) -> str:
             "Once edited, the app leaves it as it is.\n" + body)
 
 
+# Until 0.16.0 an install script, this app's and the original OmaWhatsApp's,
+# copied the helper, the MCP server, their two modules and the agent skill
+# into ~/.local/bin and ~/.agents/skills. earlier-copies.json lists the sha256
+# of every version it could have copied, generated from the git history by
+# scripts/earlier-copies; only such an unchanged copy is the app's own.
+EARLIER_COPIES = Path(MODULE_DIRECTORY) / "earlier-copies.json"
+MAX_EARLIER_COPY = 4 * 1024 * 1024
+MAX_SKILL_FILES = 64
+
+
+def tree_digest(files: Sequence[tuple[str, bytes]]) -> str:
+    """One digest for a folder's files: the sha256 of their `sha256  path` lines."""
+    listing = "".join(f"{hashlib.sha256(data).hexdigest()}  {path}\n"
+                      for path, data in sorted(files))
+    return hashlib.sha256(listing.encode("utf-8")).hexdigest()
+
+
+def skill_folder_digest(folder: Path) -> str | None:
+    """tree_digest of a folder on disk, or None when it holds a link, a special
+    file, or more than a skill ever shipped."""
+    files: list[tuple[str, bytes]] = []
+    for root, directories, names in os.walk(folder):
+        for name in directories + names:
+            path = Path(root) / name
+            if path.is_symlink() or not (path.is_dir() or path.is_file()):
+                return None
+        for name in names:
+            path = Path(root) / name
+            try:
+                if len(files) >= MAX_SKILL_FILES or path.stat().st_size > MAX_EARLIER_COPY:
+                    return None
+                files.append((path.relative_to(folder).as_posix(), path.read_bytes()))
+            except OSError:
+                return None
+    return tree_digest(files) if files else None
+
+
+_earlier_copies: tuple[dict[str, frozenset[str]], frozenset[str]] | None = None
+
+
+def earlier_copies() -> tuple[dict[str, frozenset[str]], frozenset[str]]:
+    """File name -> digests, and the skill folder digests. Empty when the list
+    cannot be read, so that nothing counts as a copy."""
+    global _earlier_copies
+    if _earlier_copies is None:
+        try:
+            data = json.loads(EARLIER_COPIES.read_text(encoding="utf-8"))
+            files = {str(name): frozenset(map(str, digests))
+                     for name, digests in data["files"].items()}
+            skills = frozenset(map(str, data["skill"]))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            files, skills = {}, frozenset()
+        _earlier_copies = (files, skills)
+    return _earlier_copies
+
+
 def written_unchanged(data: bytes) -> bool:
     """Whether a file is exactly what this app, or the original OmaWhatsApp, wrote."""
     match = WRITTEN_STAMP.match(data)
@@ -1979,30 +2035,38 @@ class Backend:
         return pointee if pointee.is_absolute() else link.parent / pointee
 
     @staticmethod
-    def _identifies_as_this_app(path: Path) -> bool:
-        """A helper, MCP server, module or skill of this app says so in its content."""
+    def _is_earlier_copy(path: Path) -> bool:
+        """Whether an old install script left path exactly as it copied it.
+
+        A file counts only when it is byte for byte a version of the file by
+        that name the installers shipped, and a folder only when its files are
+        exactly those of a shipped skill. Anything that merely mentions the
+        app, or a copy someone changed, belongs to someone else.
+        """
+        if path.is_symlink():
+            return False
+        files, skills = earlier_copies()
         if path.is_dir():
-            skill = path / "SKILL.md"
-            try:
-                text = skill.read_text(encoding="utf-8", errors="replace")[:65536]
-            except OSError:
-                return False
-            return re.search(r"^name:\s*omawhatsapp\s*$", text, re.MULTILINE) is not None
+            return skill_folder_digest(path) in skills
+        known = files.get(path.name)
+        if not known or not path.is_file():
+            return False
         try:
-            with path.open("rb") as handle:
-                data = handle.read(1024 * 1024).lower()
+            if path.stat().st_size > MAX_EARLIER_COPY:
+                return False
+            data = path.read_bytes()
         except OSError:
             return False
-        return (b"omawhatsapp" in data and b"wacli" in data) or b"avatarcacheerror" in data
+        return hashlib.sha256(data).hexdigest() in known
 
     def _path_owner(self, link: Path, target: Path) -> str:
         """Who owns a path the setup links, and so what the setup may do there.
 
         ok: it already links to target. missing: nothing is there. ours: a
-        link into this app's own plugin folder, or a file or folder that an
-        earlier install of this app (or the original OmaWhatsApp, which uses
-        the same names) left and that says so; the setup replaces a link and
-        moves a copy aside. foreign: anything else, which is never touched.
+        link into this app's own plugin folder, or a file or folder an earlier
+        install of this app (or of the original OmaWhatsApp, which uses the
+        same names) left unchanged; the setup replaces a link and moves a copy
+        aside. foreign: anything else, which is never touched.
         """
         if link.is_symlink():
             pointee = self._link_pointee(link)
@@ -2018,14 +2082,13 @@ class Backend:
                 return "ours"
             return "foreign"
         if link.is_file() or link.is_dir():
-            return "ours" if self._identifies_as_this_app(link) else "foreign"
+            return "ours" if self._is_earlier_copy(link) else "foreign"
         if os.path.lexists(link):
             return "foreign"
         return "missing"
 
     def _is_own_copy(self, path: Path) -> bool:
-        return (path.is_file() and not path.is_symlink()
-                and self._identifies_as_this_app(path))
+        return path.is_file() and self._is_earlier_copy(path)
 
     @staticmethod
     def _written_file_owner(path: Path, expected: bytes | None = None) -> str:
