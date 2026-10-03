@@ -474,7 +474,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 # Bumped with manifest.json (scripts/test checks it). The app compares it with
 # the plugin it loaded: an update that replaced only the plugin says so.
-HELPER_VERSION = "0.15.1"  # x-release-please-version
+HELPER_VERSION = "0.15.2"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
@@ -1049,7 +1049,9 @@ class Backend:
             (candidate for candidate in accounts if candidate.name == name), None
         )
         if existing is not None:
-            if (existing.store_dir / "session.db").is_file():
+            if (existing.store_dir / "session.db").is_file() \
+                    and self._doctor(existing).get("authenticated") is True \
+                    and self._sync_health(existing) != "relink-required":
                 raise OmaWhatsAppError(f"Account {name!r} is already linked.")
             result, _, _ = self._transport_interactive(
                 ["auth"], authorization="interactive", account=name
@@ -1073,14 +1075,21 @@ class Backend:
 
     def _finalize_link(self, account: Account, result: int) -> int:
         """Reconcile one terminal auth result and enable its sync exactly once."""
-        if result != 0 and self._sync_health(account) == "relink-required":
-            # A failed relink must not promote an old session marker to success.
-            return result
-        committed = (account.store_dir / "session.db").is_file()
-        if not committed:
+        self._invalidate_doctor_cache(account)
+        marker_exists = (account.store_dir / "session.db").is_file()
+        if not marker_exists:
             if result == 0:
                 raise OmaWhatsAppError(
                     "The link command completed, but no linked session was created."
+                )
+            return result
+        # wacli can print Authenticated and return zero after a 401 logout.
+        # Only a fresh read-only credential probe can confirm this attempt.
+        if self._doctor(account).get("authenticated") is not True:
+            if result == 0:
+                raise OmaWhatsAppError(
+                    "WhatsApp did not finish pairing. Click Link again to scan "
+                    "a fresh QR code. Saved chats are kept."
                 )
             return result
         # Before the first-run setup there is no unit to start; the setup starts it.
@@ -2526,7 +2535,8 @@ class Backend:
                 return "unknown"
             state = "unknown"
             for line in result.stdout.splitlines():
-                if "Logged out of WhatsApp" in line or "Stopping sync (logged out)" in line:
+                if "Logged out of WhatsApp" in line or "Stopping sync (logged out)" in line \
+                        or "not authenticated" in line.lower():
                     state = "relink-required"
                 elif line.strip() == "Connected.":
                     state = "connected"
@@ -2752,6 +2762,15 @@ class Backend:
             return {}
         data = envelope.get("data") if isinstance(envelope, dict) else None
         return data if isinstance(data, dict) else {}
+
+    def _invalidate_doctor_cache(self, account: Account) -> None:
+        """A pairing attempt changes credentials even when wacli returns zero."""
+        key = hashlib.sha256(account.key.encode("utf-8")).hexdigest()[:24]
+        with self._state_lock("doctor-cache.lock"):
+            cache = self._read_state_json(DOCTOR_CACHE_FILE, MAX_DOCTOR_CACHE, {})
+            if isinstance(cache, dict) and key in cache:
+                cache.pop(key)
+                self._write_state_json(DOCTOR_CACHE_FILE, cache, MAX_DOCTOR_CACHE)
 
     def _doctor_cached(self, account: Account) -> dict[str, Any]:
         """The status poll's doctor, reused for a minute while all is well.
@@ -7082,8 +7101,10 @@ class Backend:
         return result
 
     def session_ready(self) -> bool:
-        """True when the active account has a linked-device session on disk."""
-        return (self.active.store_dir / "session.db").is_file()
+        """A leftover database file cannot authorize a sync process."""
+        account = self.active
+        return (account.store_dir / "session.db").is_file() \
+            and self._doctor(account).get("authenticated") is True
 
 def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(prog="omawhatsapp")

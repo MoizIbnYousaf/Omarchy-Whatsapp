@@ -129,6 +129,7 @@ class SetupTests(unittest.TestCase):
                       "per-account units ask the linked helper")
         self.assertIn(f"ExecStart={self.wacli} --account %i", template)
         self.assertIn("ProtectSystem=strict", unit, "the sandbox comes along")
+        self.assertIn("ExecCondition=%h/.local/bin/omawhatsapp session-ready", unit)
         self.assertIn("daemon-reload", self.verbs())
         self.assertIn("enable wacli-sync.service", self.verbs())
         self.assertIn("start wacli-sync.service", self.verbs(), "the first setup starts sync")
@@ -573,7 +574,8 @@ class SetupTests(unittest.TestCase):
         self.assertNotIn("disable --now wacli-sync@work.service", self.verbs(),
                          "a unit it keeps keeps running")
 
-    def test_linking_before_setup_does_not_touch_missing_units(self) -> None:
+    @mock.patch.object(backend_module.Backend, "_doctor", return_value={"authenticated": True})
+    def test_linking_before_setup_does_not_touch_missing_units(self, doctor) -> None:
         self.assertEqual(self.backend._units_state(), "missing")
         account = self.backend.account("")
         (account.store_dir / "session.db").write_text("", encoding="utf-8")

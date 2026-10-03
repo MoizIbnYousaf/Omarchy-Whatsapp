@@ -900,7 +900,8 @@ class AccountLifecycleTests(unittest.TestCase):
             ["start", "wacli-sync@home.service"],
         ])
 
-    def test_linking_an_inactive_named_account_starts_only_its_unit(self) -> None:
+    @mock.patch.object(backend_module.Backend, "_doctor", return_value={"authenticated": True})
+    def test_linking_an_inactive_named_account_starts_only_its_unit(self, doctor) -> None:
         self._online(self.home, True)
         (self.home_store / "session.db").write_bytes(b"synthetic-session")
         completed = subprocess.CompletedProcess([], 0, "", "")

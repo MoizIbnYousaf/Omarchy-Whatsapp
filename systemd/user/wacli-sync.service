@@ -10,6 +10,8 @@ Wants=network-online.target
 Type=simple
 # Settings → Media can empty this through a drop-in (10-omawhatsapp-media.conf).
 Environment=OMAW_MEDIA_FLAGS=--download-media
+# A revoked session may leave session.db behind; inspect credentials locally.
+ExecCondition=%h/.local/bin/omawhatsapp session-ready
 ExecStart=%h/.local/bin/wacli --store %h/.local/state/wacli --lock-wait 30s sync --follow $OMAW_MEDIA_FLAGS --max-reconnect 10m --stale-threshold 2m --presence-mode quiet --max-db-size 1GB --refresh-groups
 Restart=on-failure
 RestartSec=10

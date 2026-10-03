@@ -189,6 +189,40 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(self.backend._finalize_link(self.backend.active, 1), 1)
             systemctl.assert_not_called()
 
+    def test_zero_exit_after_logout_cannot_report_success_or_start_sync(self) -> None:
+        (self.store / "session.db").write_bytes(b"synthetic-expired-session")
+        key = hashlib.sha256(self.backend.active.key.encode()).hexdigest()[:24]
+        self.backend._write_state_json(backend_module.DOCTOR_CACHE_FILE,
+            {key: {"at": int(time.time()), "doctor": {"authenticated": True}}},
+            backend_module.MAX_DOCTOR_CACHE)
+        with mock.patch.object(self.backend, "_doctor", return_value={"authenticated": False}) as doctor, \
+                mock.patch.object(self.backend, "_systemctl_user") as systemctl, \
+                self.assertRaisesRegex(backend_module.OmaWhatsAppError, "did not finish pairing"):
+            self.backend._finalize_link(self.backend.active, 0)
+        systemctl.assert_not_called()
+        doctor.assert_called_once_with(self.backend.active)
+        cache = self.backend._read_state_json(backend_module.DOCTOR_CACHE_FILE,
+            backend_module.MAX_DOCTOR_CACHE, {})
+        self.assertNotIn(key, cache)
+        self.assertTrue((self.store / "wacli.db").is_file())
+
+    def test_session_condition_checks_credentials_not_the_database_file(self) -> None:
+        (self.store / "session.db").write_bytes(b"synthetic-expired-session")
+        with mock.patch.object(self.backend, "_doctor", return_value={"authenticated": False}):
+            self.assertFalse(self.backend.session_ready())
+        with mock.patch.object(self.backend, "_doctor", return_value={"authenticated": True}):
+            self.assertTrue(self.backend.session_ready())
+
+    def test_not_authenticated_sync_failure_requires_pairing(self) -> None:
+        with mock.patch.object(backend_module, "run_bounded", side_effect=[
+                subprocess.CompletedProcess([], 0, "c" * 32, ""),
+                subprocess.CompletedProcess([], 1, "Error: not authenticated; run wacli auth", "")]):
+            self.assertEqual(self.backend._sync_health(self.backend.active), "unknown")
+        with mock.patch.object(backend_module, "run_bounded", side_effect=[
+                subprocess.CompletedProcess([], 0, "c" * 32, ""),
+                subprocess.CompletedProcess([], 0, "Error: not authenticated; run wacli auth", "")]):
+            self.assertEqual(self.backend._sync_health(self.backend.active), "relink-required")
+
     def test_sync_health_does_not_read_old_logs_without_invocation(self) -> None:
         with mock.patch.object(backend_module, "run_bounded", return_value=
                 subprocess.CompletedProcess([], 0, "", "")) as run:
@@ -2655,7 +2689,8 @@ class BackendTests(unittest.TestCase):
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "needs a terminal"):
             self.backend.transport({"args": ["auth"], "authorization": "interactive"})
 
-    def test_wacli_interactive_mode_is_limited_and_exact(self) -> None:
+    @mock.patch.object(backend_module.Backend, "_doctor", return_value={"authenticated": True})
+    def test_wacli_interactive_mode_is_limited_and_exact(self, doctor) -> None:
         completed = subprocess.CompletedProcess([], 0, "", "")
 
         def authenticate(*args, **kwargs):
@@ -2686,7 +2721,8 @@ class BackendTests(unittest.TestCase):
                 ["send", "text"], authorization="whatsapp-write"
             )
 
-    def test_one_off_store_auth_validates_session_without_managing_a_unit(self) -> None:
+    @mock.patch.object(backend_module.Backend, "_doctor", return_value={"authenticated": True})
+    def test_one_off_store_auth_validates_session_without_managing_a_unit(self, doctor) -> None:
         one_off = self.root / "one-off"
         one_off.mkdir()
         completed = subprocess.CompletedProcess([], 0, "", "")
@@ -3438,7 +3474,8 @@ sys.exit(0)
         self.backend.use_account("work")
         self.assertTrue(self.backend.online())
 
-    def test_account_link_resumes_unfinished_names_and_starts_new_sync(self) -> None:
+    @mock.patch.object(backend_module.Backend, "_doctor", return_value={"authenticated": True})
+    def test_account_link_resumes_unfinished_names_and_starts_new_sync(self, doctor) -> None:
         def finish_home(*args, **kwargs):
             (self.home / "session.db").write_bytes(b"synthetic-session")
             return 0, self.backend.account("home"), ("auth",)
@@ -3477,7 +3514,8 @@ sys.exit(0)
             ["enable", "--now", "wacli-sync@travel.service"]
         )
 
-    def test_account_link_reconciles_a_committed_nonzero_terminal_exit(self) -> None:
+    @mock.patch.object(backend_module.Backend, "_doctor", return_value={"authenticated": True})
+    def test_account_link_reconciles_a_committed_nonzero_terminal_exit(self, doctor) -> None:
         travel_store = self.root / "stores" / "travel"
         travel_store.mkdir(parents=True)
         new = backend_module.Account("travel", travel_store)
@@ -3517,7 +3555,19 @@ sys.exit(0)
             self.backend.link_account("travel", "interactive")
         systemctl.assert_not_called()
 
-    def test_account_link_rejects_invalid_or_already_linked_names(self) -> None:
+    def test_named_account_can_repair_an_expired_session_marker(self) -> None:
+        (self.home / "session.db").write_bytes(b"synthetic-expired-session")
+        with mock.patch.object(self.backend, "_doctor", side_effect=[
+                {"authenticated": False}, {"authenticated": True}]), \
+                mock.patch.object(self.backend, "_transport_interactive", return_value=(
+                    0, self.backend.account("home"), ("auth",))) as interactive, \
+                mock.patch.object(self.backend, "_systemctl_user") as systemctl:
+            self.assertEqual(self.backend.link_account("home", "interactive"), 0)
+        interactive.assert_called_once_with(["auth"], authorization="interactive", account="home")
+        systemctl.assert_called_once_with(["enable", "--now", "wacli-sync@home.service"])
+
+    @mock.patch.object(backend_module.Backend, "_doctor", return_value={"authenticated": True})
+    def test_account_link_rejects_invalid_or_already_linked_names(self, doctor) -> None:
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "1-64"):
             self.backend.link_account(".hidden", "interactive")
         (self.home / "session.db").write_bytes(b"synthetic-session")

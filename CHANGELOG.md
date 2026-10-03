@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.2 (2026-10-03)
+
+- Reject pairing success when wacli exits zero after a 401 logout; verify fresh local credentials and invalidate stale authentication status.
+- Keep unlinked accounts out of sync retry loops, even when a session database remains on disk.
+- Allow named accounts with expired credentials to start fresh pairing without deleting saved chats.
+
 ## 0.15.1 (2026-10-03)
 
 - Show account linkage and actual sync state beneath the account switcher, with a direct relink action when WhatsApp revokes the session.

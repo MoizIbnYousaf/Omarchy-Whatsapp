@@ -220,3 +220,10 @@ a running process alone is displayed as connecting. A remotely revoked link
 overrides stale local authentication markers. Cached archives remain readable,
 while WhatsApp writes require an authenticated account. Linking is always an
 explicit user action through the account status card.
+
+Pairing completion and both sync unit conditions verify fresh local credentials
+through wacli's read-only doctor. They do not treat session.db's existence or
+a zero auth exit code as proof of authentication. Pairing invalidates the
+app's doctor cache before reconciling its outcome. A 401 may leave a database
+file while clearing the device record; the next explicit pairing starts QR
+setup against that unlinked store. Saved message history is preserved.
