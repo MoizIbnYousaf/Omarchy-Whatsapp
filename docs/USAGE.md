@@ -108,10 +108,10 @@ them keeps the chat list warm in the resident service.
 
 ## Notifications and the bar badge
 
-- A desktop notification per chat with new messages: the chat photo, the
-  sender and the text (or just the chat name), one short sound unless
-  Omarchy's do not disturb is on, and a click that opens the chat, or a small
-  reply view by the bar.
+- A private desktop notification per chat with new messages: a generic notice
+  and app icon, one short sound unless Omarchy's do not disturb is on, and a
+  click that opens the chat or a small reply view by the bar. Chat names,
+  message text and photos stay inside the app.
 - Muted and archived chats stay silent, and so does the chat you are reading.
   Unmuting starts from now: nothing that arrived meanwhile pops up later.
 - The bar badge counts unread chats, not messages; its tooltip gives both.

@@ -84,7 +84,7 @@ and checks that its helper finds itself there.
 9. Desktop notifications are on by default. Confirm the next incoming message
    pops up within about a second with the chat photo and one sound, that a photo
    reads "📷 Photo", that Omarchy's do not disturb keeps the sound quiet, that
-   turning off Sound silences it, that turning off "Message text in notifications" drops the preview to chat names,
+   turning off Sound silences it, that popups contain no chat names, message text or photos,
    and that muted and archived chats stay silent. Check that the popup still
    arrives with the bar badge preference off, with every window closed, and for
    a chat already read on the phone, while the chat visibly on screen does not

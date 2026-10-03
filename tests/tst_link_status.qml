@@ -9,6 +9,15 @@ TestCase {
   visible: true
   when: windowShown
   Component { id: component; Oma.LinkStatus { width: 360; actionEnabled: true } }
+  function test_compact_indicator_keeps_recovery_in_expanded_card() {
+    var card = createTemporaryObject(component, this, { compact: true, state: "connected" })
+    verify(card.height < 40)
+    compare(findChild(card, "railHeaderLinkAction").visible, false)
+    card.state = "relink-required"
+    compare(card.label, "Link expired")
+    card.compact = false
+    verify(findChild(card, "railLinkAction").visible)
+  }
   function test_link_states_and_action() {
     var card = createTemporaryObject(component, this)
     card.state = "connected"

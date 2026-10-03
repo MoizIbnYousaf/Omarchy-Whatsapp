@@ -115,7 +115,6 @@ TestCase {
       ["reading", "send_read_receipts", "setPreference", ["send_read_receipts", false]],
       ["reading", "read_on_reply", "setPreference", ["read_on_reply", false]],
       ["notifications", "notify", "setNotifications", [false, null, null]],
-      ["notifications", "notify_preview", "setNotifications", [null, false, null]],
       ["notifications", "notify_sound", "setNotifications", [null, null, false]],
       ["notifications", "show_unread_count", "setPreference", ["show_unread_count", false]],
       ["chats", "enter_sends", "setPreference", ["enter_sends", false]],

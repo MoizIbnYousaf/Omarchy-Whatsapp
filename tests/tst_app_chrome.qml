@@ -778,6 +778,8 @@ TestCase {
     h.app.accountScope = "work"
     compare(status.label, "Linked · connected")
     compare(status.action, "")
+    verify(!status.visible)
+    verify(findChild(h.app, "railHeaderLinkStatus").visible)
   }
 
   function test_new_chat_is_a_rail_button_with_a_shortcut() {
@@ -879,6 +881,10 @@ TestCase {
     var toggle = findChild(harness.app, "chatReadToggle")
     verify(toggle !== null, "every rail row carries the toggle")
     verify(!toggle.visible, "hidden until the row is hovered")
+    // Start outside the row so an identical position from a prior test
+    // still produces a real hover transition after layout settles.
+    mouseMove(harness.app, 0, 0)
+    wait(0)
     mouseMove(toggle.parent, toggle.parent.width / 2, toggle.parent.height / 2)
     tryVerify(function() { return toggle.visible })
     toggle.clicked()
@@ -984,15 +990,12 @@ TestCase {
     wait(0)
     var notify = findChild(app, "setting-notify")
     var preview = findChild(app, "setting-notify_preview")
-    verify(notify !== null && preview !== null)
+    verify(notify !== null)
+    compare(preview, null)
     verify(notify.checked)
-    verify(preview.checked)
     notify.toggled()
     compare(harness.service.lastNotifications.enabled, false)
     compare(harness.service.lastNotifications.preview, null)
-    preview.toggled()
-    compare(harness.service.lastNotifications.enabled, null)
-    compare(harness.service.lastNotifications.preview, false)
   }
 
   function test_a_shared_contact_draft_checks_once_then_sends_and_opens_the_chat() {

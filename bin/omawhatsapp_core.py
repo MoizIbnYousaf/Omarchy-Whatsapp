@@ -474,7 +474,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 # Bumped with manifest.json (scripts/test checks it). The app compares it with
 # the plugin it loaded: an update that replaced only the plugin says so.
-HELPER_VERSION = "0.15.2"  # x-release-please-version
+HELPER_VERSION = "0.15.3"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
@@ -3581,11 +3581,9 @@ class Backend:
         waits for the click, so a detached `notify-open` child owns the popup
         and this helper returns at once.
         """
-        command = [str(NOTIFY_SEND), "--app-name=OmaWhatsApp", "--urgency=normal",
-                   "--category=im.received", f"--expire-time={NOTIFY_EXPIRE_MS}",
-                   f"--icon={NOTIFY_APP_ICON}"]
-        if image:
-            command.append(f"--hint=string:image-path:{image}")
+        # Public process arguments must never contain chat text or media paths.
+        summary, body = "OmaWhatsApp", "New messages. Open OmaWhatsApp to read them."
+        command = self._notification_command()
         if target and str(target.get("jid") or ""):
             command.append("--print-id")
             previous = self._notify_ids().get(self._notify_key(target))
@@ -3622,6 +3620,13 @@ class Backend:
         except (ProcessOutputLimitExceeded, subprocess.TimeoutExpired, OSError):
             return False
         return result.returncode == 0
+
+    @staticmethod
+    def _notification_command() -> list[str]:
+        """Only public constants cross the process-list boundary."""
+        return [str(NOTIFY_SEND), "--app-name=OmaWhatsApp", "--urgency=normal",
+                "--category=im.received", f"--expire-time={NOTIFY_EXPIRE_MS}",
+                f"--icon={NOTIFY_APP_ICON}"]
 
     @staticmethod
     def _notify_key(target: dict[str, Any]) -> str:
@@ -3739,6 +3744,17 @@ class Backend:
                 or command[0] != str(NOTIFY_SEND)
                 or not all(isinstance(part, str) for part in command)):
             raise OmaWhatsAppError("Invalid notification command.")
+        # Rebuild rather than trusting an old queued child's command: upgrades
+        # must also strip private previews and avatar hints from pending requests.
+        safe_command = self._notification_command()
+        if target.get("jid"):
+            safe_command.extend(["--print-id", "--action=default=Open chat"])
+            previous = self._notify_ids().get(self._notify_key(target))
+            if previous:
+                safe_command.append(f"--replace-id={previous}")
+        safe_command.extend(["--", "OmaWhatsApp",
+                             "New messages. Open OmaWhatsApp to read them."])
+        command = safe_command
         key = self._notify_key(target) if str(target.get("jid") or "") else ""
         closed = {"ok": True, "kind": "notify-open", "opened": False}
         try:

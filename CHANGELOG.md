@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.3
+
+- Show a compact connection indicator beside Chats in the full app. Healthy sync no longer takes up a full status card; recovery details and actions remain visible when needed.
+
+- Keep private chat names, message previews and avatar paths out of desktop notification process arguments. Popups use a generic notice, keep click-to-open and replacement behavior, and sanitize pending requests from older versions.
+- Remove the message-preview toggle from notification settings because desktop popups always hide private content. No new dependencies.
+
 ## 0.15.2 (2026-10-03)
 
 - Reject pairing success when wacli exits zero after a 401 logout; verify fresh local credentials and invalidate stale authentication status.

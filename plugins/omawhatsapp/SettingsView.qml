@@ -124,7 +124,7 @@ Rectangle {
     if (section === "notifications") return [
       { kind: "toggle", key: "notify", title: "Desktop notifications",
         subtitle: !notifyAvailable ? "Needs notify-send from libnotify."
-          : (notifyOn ? "Muted and archived chats stay silent. Right-click the bar icon to mute everything."
+          : (notifyOn ? "Private popups hide chat names, message text and photos. Right-click the bar icon to mute everything."
             : "Muted; the bar still counts unread chats. Right-click the bar icon to turn them back on."),
         checked: notifyOn, available: notifyAvailable || notifyOn, busy: controlBusy },
       { kind: "toggle", key: "notify_reply", title: "Reply from the bar when clicking a notification",
@@ -132,10 +132,6 @@ Rectangle {
           ? "A small reply view opens by the bar on that chat; Esc closes it."
           : "Clicking a notification opens the full app on that chat.",
         checked: value("notifyReply", true), available: notifyOn, busy: busy },
-      { kind: "toggle", key: "notify_preview", title: "Message text in notifications",
-        subtitle: value("notificationsPreview", true)
-          ? "Sender, message text and the chat photo." : "Chat names only.",
-        checked: value("notificationsPreview", true), available: notifyOn, busy: controlBusy },
       { kind: "toggle", key: "notify_sound", title: "Sound",
         subtitle: value("notificationsSound", true)
           ? "One short sound per batch of new messages; silent while Omarchy's do not disturb is on."

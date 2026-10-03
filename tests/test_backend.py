@@ -776,7 +776,8 @@ class BackendTests(unittest.TestCase):
                 "Design team", "Sam: new", {"account": "", "jid": "team@g.us"}, str(self.preview))
         request = json.loads(popen.return_value.stdin.write.call_args.args[0].decode("utf-8"))
         self.assertIn("--icon=whatsapp", request["command"])
-        self.assertIn(f"--hint=string:image-path:{self.preview}", request["command"])
+        self.assertFalse(any("image-path" in part for part in request["command"]))
+        self.assertNotIn("Sam: new", request["command"])
 
     def test_one_sound_per_pass_and_none_when_turned_off(self) -> None:
         self._enable_notifications()
@@ -908,8 +909,27 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
         request = json.loads(popen.return_value.stdin.write.call_args.args[0].decode("utf-8"))
         self.assertIn("--action=default=Open chat", request["command"])
-        self.assertEqual(request["command"][-2:], ["Design team", "hi"])
+        self.assertEqual(request["command"][-2:], ["OmaWhatsApp", "New messages. Open OmaWhatsApp to read them."])
         self.assertEqual(request["target"]["jid"], "team@g.us")
+
+    def test_notification_process_arguments_never_include_private_content(self) -> None:
+        secrets = ["PRIVATE CHAT", "PRIVATE MESSAGE", "/private/avatar.png"]
+        with mock.patch.object(backend_module, "run_bounded",
+                               return_value=subprocess.CompletedProcess([], 0)) as run:
+            self.assertTrue(self.backend._deliver_notification(*secrets[:2], image=secrets[2]))
+        argv = run.call_args.args[0]
+        for secret in secrets:
+            self.assertNotIn(secret, " ".join(argv))
+        # A pending pre-upgrade request must also be sanitized at execution.
+        command = [str(backend_module.NOTIFY_SEND),
+                   "--hint=string:image-path:" + secrets[2], "--", *secrets[:2]]
+        with mock.patch.object(backend_module.subprocess, "Popen",
+                               return_value=self._fake_notify_send(b"42\n")) as popen:
+            self.backend.notify_open({"command": command, "target": {"jid": "synthetic@g.us"}})
+        argv = popen.call_args.args[0]
+        for secret in secrets:
+            self.assertNotIn(secret, " ".join(argv))
+        self.assertIn("--action=default=Open chat", argv)
 
     @staticmethod
     def _fake_notify_send(output: bytes):
@@ -938,7 +958,8 @@ class BackendTests(unittest.TestCase):
                 mock.patch.object(backend_module, "OMARCHY_SHELL", shell):
             opened = self.backend.notify_open(
                 {"command": command, "target": {"account": "work", "jid": "team@g.us"}})
-        self.assertEqual(popen.call_args.args[0], command)
+        self.assertNotIn("X", popen.call_args.args[0])
+        self.assertEqual(popen.call_args.args[0][-2:], ["OmaWhatsApp", "New messages. Open OmaWhatsApp to read them."])
         self.assertTrue(opened["opened"])
         # The owner's report: a click opened the full app with no quick reply.
         self.assertEqual(calls[0][:3], [str(shell), backend_module.PLUGIN_ID, "openDropdown"],

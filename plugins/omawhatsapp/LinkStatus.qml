@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Ui
 
 Rectangle {
     id: root
@@ -10,6 +11,7 @@ Rectangle {
     property color dim
     property color urgent
     property string fontFamily
+    property bool compact: false
     property bool busy: false
     property bool actionEnabled: false
     property bool demo: false
@@ -19,14 +21,14 @@ Rectangle {
     readonly property string detail: expired ? "Link again to receive new messages." : state === "closed" ? "Open to receive new messages." : root.pauseReason !== "" ? "Sync resumes when this finishes." : state === "connected" ? "Your messages are syncing." : state === "connecting" ? "Waiting for WhatsApp to connect." : state === "offline" ? "Your saved chats are available." : state === "stopped" ? "New messages are not arriving." : "Reading this account’s status."
     readonly property string action: expired ? "Link again" : state === "closed" ? "Open" : state === "offline" ? "Go online" : state === "stopped" && root.pauseReason === "" ? "Resume" : ""
     width: parent.width
-    height: Style.space(66)
-    radius: Style.cornerRadius
+    height: Style.space(root.compact ? 28 : 66)
+    radius: root.compact ? height / 2 : Style.cornerRadius
     color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.06)
     border.width: 1
     border.color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18)
     Rectangle {
         x: Style.space(12)
-        y: Style.space(18)
+        y: root.compact ? (parent.height - height) / 2 : Style.space(18)
         width: Style.space(6)
         height: width
         radius: width / 2
@@ -42,7 +44,7 @@ Rectangle {
         Text {
             textFormat: Text.PlainText
             width: parent.width
-            text: root.label
+            text: root.compact && root.state === "connected" ? "Connected" : root.label
             elide: Text.ElideRight
             color: root.foreground
             font.family: root.fontFamily
@@ -51,6 +53,7 @@ Rectangle {
         Text {
             textFormat: Text.PlainText
             width: parent.width
+            visible: !root.compact
             text: root.detail
             elide: Text.ElideRight
             color: root.dim
@@ -72,13 +75,13 @@ Rectangle {
             root.actionRequested()
         Keys.onSpacePressed: if (actionMouse.enabled)
             root.actionRequested()
-        objectName: "railLinkAction"
+        objectName: root.compact ? "railHeaderLinkAction" : "railLinkAction"
         anchors.right: parent.right
         anchors.rightMargin: Style.space(10)
         anchors.verticalCenter: parent.verticalCenter
         width: visible ? actionText.implicitWidth + Style.space(18) : 0
         height: Style.space(30)
-        visible: root.action !== ""
+        visible: !root.compact && root.action !== ""
         radius: Style.cornerRadius
         color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, actionMouse.containsMouse ? 0.22 : 0.12)
         opacity: actionMouse.enabled ? 1 : 0.5
@@ -100,4 +103,10 @@ Rectangle {
             onClicked: root.actionRequested()
         }
     }
+    HoverHandler { id: statusHover }
+    PanelToolTip {
+        visible: root.compact && statusHover.hovered
+        text: root.label + " · " + root.detail
+    }
+
 }

@@ -53,10 +53,12 @@ running sync only. The sync ends that online state by
 itself about 90 seconds after the app stops renewing it, and removes the file
 when it stops.
 
-Desktop popups leave the process: chat names, senders, and message previews
-reach the notification daemon and its history. They are on by default, can be
-muted from the bar icon, the preview can be dropped so only chat names travel, and every field is truncated
-to one printable, markup-inert line before it is handed to `notify-send`.
+Desktop popups use a generic OmaWhatsApp title and new-message notice. Chat
+names, senders, message previews and avatar paths never enter `notify-send`
+arguments or the notification daemon's history. Click targets travel to the
+detached helper through its stdin pipe, never its command line. Notifications
+can be muted from the bar icon. Saved preview preferences from older versions
+are retained for compatibility but do not expose text in desktop popups.
 
 An agent connected through `omawhatsapp-mcp` reads what its tools return:
 chat names, message text, contacts, and attachment paths. That content goes
@@ -104,10 +106,8 @@ Unregistered numbers are not kept. WhatsApp answers with the person's `@lid`;
 wacli sends to it and files the chat under the phone JID when it knows the
 mapping.
 
-Desktop notifications are on by default. A popup carries the chat name, the
-sender and message text (unless previews are off), and the chat's cached
-photo as its image, which Omarchy's notification service may copy into its
-own history directory. The helper reads only the `dnd` flag of
+Desktop notifications are on by default and carry only a generic new-message
+notice and the app icon. The helper reads only the `dnd` flag of
 `~/.local/state/omarchy/notifications.json` to keep the notification sound
 quiet under do not disturb; the sound is the freedesktop theme's
 `message-new-instant`, played with `pw-play`.

@@ -33,7 +33,7 @@ review before sending, forwarding to several chats at once with a note, and
 deleting many messages together.
 
 **Feels like the phone.** The chat on screen is read, replying marks it read,
-and the contact sees you typing. Desktop notifications carry the chat photo,
+and the contact sees you typing. Desktop notifications hide private content,
 open the chat on click and can be answered from the bar. Muted and archived
 chats stay quiet.
 

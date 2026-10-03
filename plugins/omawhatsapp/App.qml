@@ -2673,6 +2673,7 @@ Item {
             height: Style.space(30)
             Text {
               textFormat: Text.PlainText
+              id: railTitle
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
               text: "Chats"
@@ -2681,7 +2682,24 @@ Item {
               font.pixelSize: Style.font.heading
               font.weight: Font.Bold
             }
+            LinkStatus {
+              objectName: "railHeaderLinkStatus"
+              anchors.left: railTitle.right
+              anchors.leftMargin: Style.space(12)
+              width: Math.max(0, Math.min(Style.space(140),
+                railHeaderActions.x - railTitle.width - Style.space(22)))
+              anchors.verticalCenter: parent.verticalCenter
+              compact: true
+              state: railSyncStatus.state
+              pauseReason: railSyncStatus.pauseReason
+              foreground: root.foreground
+              accent: root.accent
+              dim: root.dim
+              urgent: root.urgent
+              fontFamily: root.fontFamily
+            }
             Row {
+              id: railHeaderActions
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(2)
@@ -2926,6 +2944,8 @@ Item {
           LinkStatus {
             id: railSyncStatus
             objectName: "railSyncStatus"
+            visible: state !== "connected"
+            height: visible ? Style.space(66) : 0
             readonly property var account: root.accountEntries.find(function(entry) {
               return String(entry.account || "") === String(root.accountScope || root.selectedAccount || (root.service ? root.service.defaultAccountName : ""))
             }) || ({})
