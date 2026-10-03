@@ -85,6 +85,31 @@ class SetupTests(unittest.TestCase):
     def verbs(self) -> list[str]:
         return [" ".join(call) for call in self.calls]
 
+    def test_managed_launcher_uses_the_same_package_and_preserves_arguments(self) -> None:
+        config = self.root / "config with spaces"
+        helper = config / "omarchy/plugins/io.github.moizibnyousaf.omawhatsapp/bin/omawhatsapp"
+        helper.parent.mkdir(parents=True)
+        helper.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n', encoding="utf-8")
+        helper.chmod(0o755)
+        arguments = ["status", "--account", "synthetic account; ignored"]
+        environment = dict(os.environ, XDG_CONFIG_HOME=str(config))
+        result = subprocess.run(["sh", str(REPOSITORY / "managed/omawhatsapp"), *arguments],
+                                env=environment, capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.splitlines(), arguments)
+
+    def test_managed_install_defers_setup_and_teardown_without_mutating(self) -> None:
+        (self.checkout / "managed-install.json").write_text(
+            '{"manager":"my-omarchy-plugin"}', encoding="utf-8")
+        state = self.backend._setup_state()
+        self.assertTrue(state["complete"])
+        self.assertEqual(state["manager"], "my-omarchy-plugin")
+        for operation in (lambda: self.backend.setup(True, True),
+                          lambda: self.backend.teardown("remove")):
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "managed by My Plugins"):
+                operation()
+        self.assertFalse(self.home_bin.exists())
+        self.assertFalse(self.units.exists())
+
     def test_the_first_setup_links_writes_units_and_starts_sync(self) -> None:
         before = self.backend._setup_state()
         self.assertFalse(before["consented"])

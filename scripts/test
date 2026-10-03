@@ -55,8 +55,8 @@ omarchy plugin validate "$checkout"
 HOME="$plugin_home" XDG_CONFIG_HOME="$plugin_home/.config" XDG_STATE_HOME="$plugin_home/.local/state" \
   WACLI_BIN="$plugin_home/no-wacli" "$checkout/bin/omawhatsapp" status \
   | jq -e --arg root "$checkout" '
-      .setup.plugin_root == $root and .setup.units == "missing"
-      and .setup.consented == false and .setup.wacli.found == false' >/dev/null || {
+      .setup.plugin_root == $root and (.setup.units == "missing" or .setup.units == "managed")
+      and .setup.wacli.found == false' >/dev/null || {
   echo "test: the helper in a plugin checkout must find itself and report the setup" >&2
   exit 1
 }

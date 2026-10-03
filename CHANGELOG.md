@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 (2026-10-03)
 
 - Add forwarding, message selection, favorites, emoji and text formatting.
 - Add contact/group details, group administration, new-chat search and onboarding.
@@ -8,6 +8,7 @@
 - Improve notification routing, chat filters, unread counts, delivery ticks and optional presence.
 - Add opt-in agent setup and an MCP server backed by the guarded helper.
 - Harden setup ownership checks, teardown and sync locking; support wacli 0.17.1–0.19.0.
+- Deploy the complete app through My Plugins so UI and helper cannot drift apart.
 - Preserve existing notification and private-reading choices during upgrades.
 - Validate every shipped QML/JavaScript component and test multi-account preference migrations.
 

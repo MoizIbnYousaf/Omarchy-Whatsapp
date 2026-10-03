@@ -1,0 +1,3 @@
+#!/bin/sh
+# My Plugins owns this launcher; helper and UI share one installed revision.
+exec "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/io.github.moizibnyousaf.omawhatsapp/bin/omawhatsapp" "$@"

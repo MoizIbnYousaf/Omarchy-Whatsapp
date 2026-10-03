@@ -17,3 +17,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .DS_Store
+
+# Synthetic test fixtures are generated for each verification run.
+tests/.generated-media/

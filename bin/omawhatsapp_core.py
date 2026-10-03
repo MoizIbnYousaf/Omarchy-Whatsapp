@@ -474,7 +474,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 # Bumped with manifest.json (scripts/test checks it). The app compares it with
 # the plugin it loaded: an update that replaced only the plugin says so.
-HELPER_VERSION = "0.16.4"  # x-release-please-version
+HELPER_VERSION = "0.15.0"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
@@ -2216,8 +2216,27 @@ class Backend:
                           for item in entries)
         return {"installed": installed, "enabled": enabled}
 
+    def _externally_managed(self) -> bool:
+        """A materialized managed package owns installation, never the app."""
+        marker = self.plugin_root / "managed-install.json"
+        try:
+            return json.loads(marker.read_text(encoding="utf-8")).get("manager") == "my-omarchy-plugin"
+        except (OSError, ValueError, AttributeError):
+            return False
+
     def _setup_state(self, preferences: dict[str, Any] | None = None) -> dict[str, Any]:
         value = preferences if preferences is not None else self._preferences()
+        if self._externally_managed():
+            return {
+                "consented": True, "agents": True, "previous_install": False,
+                "complete": True, "units": "managed", "links": {}, "conflicts": [],
+                "legacy_copies": False,
+                "wacli": {"path": str(self.wacli), "found": self.wacli.is_file()
+                          and os.access(self.wacli, os.X_OK)},
+                "zenity": ZENITY.is_file(), "original_plugin": {"installed": False, "enabled": False},
+                "managed": True, "manager": "my-omarchy-plugin",
+                "plugin_root": str(self.plugin_root),
+            }
         consent = value.get("setup") or {}
         agents = consent.get("agents") is True
         links = {
@@ -2306,6 +2325,8 @@ class Backend:
         if self._wacli_too_old(self._wacli_version()):
             raise OmaWhatsAppError(
                 f"wacli is older than {WACLI_MINIMUM_VERSION}; update it: omarchy pkg aur add wacli-bin")
+        if self._externally_managed():
+            raise OmaWhatsAppError("This installation is managed by My Plugins; use my-omarchy-plugin.")
         with self._state_lock("setup.lock"):
             before = self._preferences()["setup"]
             want_agents = before["agents"] if agents is None else agents
@@ -2364,6 +2385,8 @@ class Backend:
         return {"ok": True, "kind": "setup", "changed": changed, "setup": self._setup_state()}
 
     def teardown(self, confirm: Any) -> dict[str, Any]:
+        if self._externally_managed():
+            raise OmaWhatsAppError("This installation is managed by My Plugins; use my-omarchy-plugin.")
         """Undo the setup; the linked device, the archive and the settings stay."""
         if confirm != "remove":
             raise OmaWhatsAppError('Confirm by sending "remove".')
