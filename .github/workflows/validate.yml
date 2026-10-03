@@ -11,6 +11,20 @@ jobs:
   release-gate:
     runs-on: ubuntu-latest
     container: archlinux:base
+    strategy:
+      fail-fast: false
+      matrix:
+        wacli:
+          # Minimum accepted release, the previous verified release (its
+          # unread counts still need the helper's correction), and the
+          # newest verified release.
+          - version: 0.17.1
+            sha256: cbd5e74d5b805550cc36c7479aca552970cc1b314c5c08e02367e08b785714fd
+          - version: 0.18.3
+            sha256: a8b42ae59489d9377bd76d88da0faf92b8432c5c6e5f957cef619c04ae5b3018
+          - version: 0.19.0
+            sha256: 57ea00b26c0ffefa29758b2bcfc183b3e7b061271afee21cb0471a024f3c57ff
+    name: release-gate (wacli ${{ matrix.wacli.version }})
     steps:
       - name: Install pinned test prerequisites
         run: >-
@@ -24,22 +38,23 @@ jobs:
       - name: Check out the audited Omarchy shell API
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: basecamp/omarchy
-          ref: b686ed892d9c3020c3336203f6d34cc75b544e2b
+          repository: omacom/omarchy
+          ref: c668141e9c42b13c80c9ca4ea108e11708c5e8a5 # v4.0.4
           path: .omarchy
           sparse-checkout: |
             bin
             shell
 
-      - name: Install audited wacli 0.17.1
+      - name: Install audited wacli ${{ matrix.wacli.version }}
+        env:
+          WACLI_VERSION: ${{ matrix.wacli.version }}
+          WACLI_SHA256: ${{ matrix.wacli.sha256 }}
         run: |
-          archive="$RUNNER_TEMP/wacli_0.17.1_linux_amd64.tar.gz"
+          archive="$RUNNER_TEMP/wacli_${WACLI_VERSION}_linux_amd64.tar.gz"
           curl --fail --location --silent --show-error \
             --output "$archive" \
-            https://github.com/openclaw/wacli/releases/download/v0.17.1/wacli_0.17.1_linux_amd64.tar.gz
-          printf '%s  %s\n' \
-            cbd5e74d5b805550cc36c7479aca552970cc1b314c5c08e02367e08b785714fd \
-            "$archive" | sha256sum --check --strict
+            "https://github.com/openclaw/wacli/releases/download/v${WACLI_VERSION}/wacli_${WACLI_VERSION}_linux_amd64.tar.gz"
+          printf '%s  %s\n' "$WACLI_SHA256" "$archive" | sha256sum --check --strict
           install -d "$RUNNER_TEMP/omawhatsapp-home/.local/bin"
           tar -xzf "$archive" -C "$RUNNER_TEMP/omawhatsapp-home/.local/bin" ./wacli
 
@@ -52,8 +67,4 @@ jobs:
           export PATH="/usr/lib/qt6/bin:$GITHUB_WORKSPACE/.omarchy/bin:$PATH"
           export OMARCHY_SHELL_DIR="$GITHUB_WORKSPACE/.omarchy/shell"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          install -d "$HOME/.config/omarchy"
-          printf '%s\n' \
-            '{"plugins":[],"bar":{"layout":{"left":[],"center":[],"right":[]}}}' \
-            > "$HOME/.config/omarchy/shell.json"
           ./scripts/test

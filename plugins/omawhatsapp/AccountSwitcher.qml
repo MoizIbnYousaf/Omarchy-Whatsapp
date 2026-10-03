@@ -3,6 +3,7 @@ import QtQuick.Controls as Controls
 import qs.Commons
 import qs.Ui
 import "AccountModel.js" as AccountModel
+import "Tint.js" as Tint
 
 Item {
   id: root
@@ -51,7 +52,10 @@ Item {
       id: accountChip
       required property var modelData
       height: accountList.height
-      width: Math.max(Style.space(52), chipLabel.implicitWidth + Style.space(18))
+      // Each account's chip carries the color its chats show on their row.
+      readonly property int mark: String(modelData.scope || "") === "" || root.options.length < 2 ? -1
+        : AccountModel.accountIndex(root.accounts, String(modelData.scope || ""))
+      width: Math.max(Style.space(52), chipContent.implicitWidth + Style.space(18))
       radius: height / 2
       color: modelData.scope === root.normalizedScope
         ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18)
@@ -59,17 +63,30 @@ Item {
       border.width: modelData.scope === root.normalizedScope ? 1 : 0
       border.color: root.accent
 
-      Text {
-        textFormat: Text.PlainText
-        id: chipLabel
+      Row {
+        id: chipContent
         anchors.centerIn: parent
-        text: String(accountChip.modelData.label || "default")
-        color: accountChip.modelData.scope === root.normalizedScope
-          ? root.accent : root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        font.weight: accountChip.modelData.scope === root.normalizedScope
-          ? Font.DemiBold : Font.Normal
+        spacing: Style.space(6)
+        Rectangle {
+          objectName: "accountChipDot"
+          visible: accountChip.mark >= 0
+          width: Style.space(7)
+          height: width
+          radius: width / 2
+          anchors.verticalCenter: parent.verticalCenter
+          color: Tint.accountColor(accountChip.mark, root.accent)
+        }
+        Text {
+          textFormat: Text.PlainText
+          id: chipLabel
+          text: String(accountChip.modelData.label || "default")
+          color: accountChip.modelData.scope === root.normalizedScope
+            ? root.accent : root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.weight: accountChip.modelData.scope === root.normalizedScope
+            ? Font.DemiBold : Font.Normal
+        }
       }
       TapHandler {
         onTapped: root.scopeSelected(String(accountChip.modelData.scope || ""))

@@ -1,5 +1,7 @@
 # WhatsApp parity map
 
+[← Documentation](README.md)
+
 This is the implementation contract for OmaWhatsApp. “Feature complete” means
 every row is either verified end to end or has a named upstream transport gap;
 it does not mean that a button-shaped placeholder exists.
@@ -8,14 +10,15 @@ Evidence sources:
 
 - **Web** — authenticated WhatsApp Web behavior, inspected without copying
   private conversation content.
-- **Transport** — wacli 0.17.1 command help and the live local-store schema.
+- **Transport** — wacli 0.19.0 command help and the live local-store schema
+  (minimum accepted release: 0.17.1).
 - **App** — the private OmaWhatsApp worktree, installed Omarchy plugin, and
   rendered runtime checks.
 
 ## Agent transport parity
 
-The shared `$omawhatsapp` skill and helper account for all 103 command leaves
-in wacli 0.17.1. This is separate from graphical parity: channels, calls,
+The shared `$omawhatsapp` skill and helper account for all 104 command leaves
+in wacli 0.19.0. This is separate from graphical parity: channels, calls,
 Communities, profiles, accounts, and maintenance remain absent from the visual
 chat rail, but agents can perform them after the exact current request passes
 the operation's local-read, remote-read, local-write, sync, WhatsApp-write,
@@ -102,7 +105,7 @@ button must remain reachable at every supported size.
 | Buttons/list rows | `messages.buttons` | building |
 | Contact card | payload not normalized by wacli | transport gap |
 | Link preview card | wacli sends previews; mirror lacks normalized card | transport gap |
-| Delivery/read receipts | not exposed in the mirror | transport gap |
+| Delivery/read receipts | `message_status` in wacli builds that keep receipts (fork `oma-presence-receipts`); official wacli has none, so no tick is shown | building |
 | Disappearing timer state | send flag exists; chat timer state not exposed | transport gap |
 | Native image/GIF/video gallery | local media path | building |
 | External image annotation | optional Omasnap CLI | done |
@@ -119,7 +122,7 @@ button must remain reachable at every supported size.
 | Forward to another indexed chat | `messages forward` | building |
 | Select interactive option | `send select` | building |
 | Copy text / selection auto-copy | local clipboard | done |
-| Star/unstar | list-only in wacli | transport gap |
+| Star/unstar | `messages star` (wacli fork only) | done | message menu and selection bar; hidden when wacli cannot star |
 | Message info / receipt detail | receipts not exposed | transport gap |
 
 Destructive actions require an in-app confirmation. All message actions verify

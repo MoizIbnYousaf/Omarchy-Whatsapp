@@ -14,6 +14,7 @@ BIN = Path(__file__).resolve().parents[1] / "bin"
 sys.path.insert(0, str(BIN))
 
 from omawhatsapp_assets import (  # noqa: E402
+    MAX_AVATAR_FILES,
     AvatarCache,
     AvatarCacheError,
     _validate_public_https_url,
@@ -126,11 +127,11 @@ class AvatarCacheTests(unittest.TestCase):
                 "key": f"key-{index}", "picture_id": f"picture-{index}",
                 "checked_at": index + 1, "missing": False,
                 "data": b"\xff\xd8\xffsynthetic" + bytes([index % 256]),
-            } for index in range(129)])
+            } for index in range(MAX_AVATAR_FILES + 1)])
             avatars = state / "avatars"
-            self.assertEqual(len(list(avatars.iterdir())), 128)
+            self.assertEqual(len(list(avatars.iterdir())), MAX_AVATAR_FILES)
             index = json.loads((state / "avatars.json").read_text(encoding="utf-8"))
-            self.assertEqual(len(index), 128)
+            self.assertEqual(len(index), MAX_AVATAR_FILES)
 
             orphan = avatars / ("f" * 64 + ".jpg")
             orphan.write_bytes(b"\xff\xd8\xfforphan")
@@ -149,17 +150,17 @@ class AvatarCacheTests(unittest.TestCase):
             cache.update([{
                 "key": f"cached-{index}", "picture_id": "",
                 "checked_at": index + 1, "missing": True,
-            } for index in range(128)])
+            } for index in range(MAX_AVATAR_FILES)])
             cache.update([{
                 "key": "retry-later", "picture_id": "", "checked_at": 0,
                 "retry_after": 10_000, "missing": False,
             }])
             entries = cache.entries([
-                "retry-later", "cached-0", "cached-127"
+                "retry-later", "cached-0", f"cached-{MAX_AVATAR_FILES - 1}"
             ])
             self.assertIn("retry-later", entries)
             self.assertNotIn("cached-0", entries)
-            self.assertIn("cached-127", entries)
+            self.assertIn(f"cached-{MAX_AVATAR_FILES - 1}", entries)
 
     def test_reader_never_prunes_an_inflight_atomic_write(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

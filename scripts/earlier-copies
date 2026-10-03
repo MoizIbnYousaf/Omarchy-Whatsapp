@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Write bin/earlier-copies.json: every file and skill folder the old install
+scripts could have copied into ~/.local/bin and ~/.agents/skills.
+
+Until 0.16.0 this app, like the original OmaWhatsApp before it, was installed
+by scripts/install, which copied bin/omawhatsapp, bin/omawhatsapp-mcp,
+bin/omawhatsapp_core.py, bin/omawhatsapp_assets.py and skills/omawhatsapp byte
+for byte. The first-run setup moves such a copy aside only when it is exactly
+one of those versions. SOURCE is the last commit that shipped the installer;
+its history holds every earlier version of this app and the whole main branch
+of the original OmaWhatsApp.
+
+    scripts/earlier-copies           write the list
+    scripts/earlier-copies --check   exit 1 when the list differs from the history
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+SOURCE = "dd09400f17d293ccc40ee6ea7c602b1b9fac5796"
+FILES = ("omawhatsapp", "omawhatsapp-mcp", "omawhatsapp_core.py", "omawhatsapp_assets.py")
+SKILL = "skills/omawhatsapp/"
+OUTPUT = ROOT / "bin" / "earlier-copies.json"
+
+sys.path.insert(0, str(ROOT / "bin"))
+from omawhatsapp_core import tree_digest  # noqa: E402
+
+
+def git(*arguments: str) -> bytes:
+    return subprocess.run(["git", "-C", str(ROOT), *arguments],
+                          check=True, capture_output=True).stdout
+
+
+def generate() -> str:
+    contents: dict[str, bytes] = {}
+
+    def content(object_id: str) -> bytes:
+        if object_id not in contents:
+            contents[object_id] = git("cat-file", "blob", object_id)
+        return contents[object_id]
+
+    files: dict[str, set[str]] = {name: set() for name in FILES}
+    skills: set[str] = set()
+    for commit in git("rev-list", SOURCE).decode("ascii").split():
+        skill: list[tuple[str, bytes]] = []
+        for entry in git("ls-tree", "-r", "-z", commit).split(b"\0"):
+            if not entry:
+                continue
+            meta, raw_path = entry.split(b"\t", 1)
+            path = raw_path.decode("utf-8")
+            object_id = meta.split()[2].decode("ascii")
+            if path.startswith("bin/") and path[4:] in files:
+                files[path[4:]].add(hashlib.sha256(content(object_id)).hexdigest())
+            elif path.startswith(SKILL):
+                skill.append((path[len(SKILL):], content(object_id)))
+        if skill:
+            skills.add(tree_digest(skill))
+    data = {
+        "about": "sha256 of every file and skill folder the install scripts before "
+                 "0.16.0 could have copied; regenerate with scripts/earlier-copies",
+        "source": SOURCE,
+        "files": {name: sorted(digests) for name, digests in files.items()},
+        "skill": sorted(skills),
+    }
+    return json.dumps(data, indent=2) + "\n"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--check", action="store_true",
+                        help="compare with bin/earlier-copies.json instead of writing it")
+    arguments = parser.parse_args()
+    try:
+        git("cat-file", "-e", SOURCE + "^{commit}")
+    except subprocess.CalledProcessError:
+        print(f"earlier-copies: this clone lacks {SOURCE[:12]}; fetch the full history",
+              file=sys.stderr)
+        return 2
+    text = generate()
+    if arguments.check:
+        current = OUTPUT.read_text(encoding="utf-8") if OUTPUT.is_file() else ""
+        if current != text:
+            print("earlier-copies: bin/earlier-copies.json differs from the history; "
+                  "run scripts/earlier-copies", file=sys.stderr)
+            return 1
+        return 0
+    OUTPUT.write_text(text, encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

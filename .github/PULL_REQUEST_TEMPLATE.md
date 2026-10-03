@@ -1,3 +1,8 @@
+<!--
+Title: a Conventional Commit, such as `feat(dropdown): …` or `fix: …`.
+It becomes the commit on main and decides the next version (see CONTRIBUTING).
+-->
+
 ## What changed
 
 <!-- Describe the user-visible outcome. -->

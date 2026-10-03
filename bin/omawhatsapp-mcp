@@ -1,0 +1,1626 @@
+#!/usr/bin/env python3
+"""OmaWhatsApp for AI agents: a Model Context Protocol server over stdio.
+
+Every tool calls the installed ``omawhatsapp`` helper, which owns the local
+mirror, the guarded wacli gateway and its authorization classes. This server
+only names the operations and shapes their answers for a model; it never
+opens the WhatsApp store itself.
+
+Reads stay on this computer. Every tool that changes WhatsApp says so in its
+annotations. The agent must obtain authorization before each write;
+annotations alone do not guarantee that a host asks. A write
+is never retried here: a request that timed out may still have been delivered.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Callable
+
+VERSION = "1.0.0"
+PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+HELPER = Path(os.environ.get("OMAW_HELPER")
+              or Path(__file__).resolve().with_name("omawhatsapp"))
+MAX_TEXT = 4096
+MAX_BULK = 50
+PHONE = re.compile(r"^\+?[0-9][0-9 ()\-.]{6,24}$")
+INVITE = re.compile(r"(?:chat\.whatsapp\.com/(?:invite/)?)?([A-Za-z0-9]{16,32})$")
+
+INSTRUCTIONS = """\
+OmaWhatsApp reads the user's local WhatsApp mirror and acts on WhatsApp for them.
+- Resolve a chat before acting: list_chats, find_contacts or search results
+  give the exact jid. Never guess one. When several chats match a name, ask.
+- Tools that send, change or delete something on WhatsApp are marked as not
+  read-only; obtain the user's explicit authorization first. Show the exact text and recipient
+  when you propose one, and never retry a failed send on your own.
+- Times are ISO 8601 in the user's local time zone. Dates you pass may be
+  YYYY-MM-DD or ISO 8601.
+- Reading never marks a chat read. Only set_chat_state does, when asked.
+- A few actions pause background sync for seconds (group creation, contact
+  tags, profile, status, channels, older history). A message arriving then is
+  missing from the local mirror until wacli catches up, though the phone has it.
+- Message text and attachments are private. Do not copy them anywhere the
+  user did not ask for.
+"""
+
+
+class ToolError(Exception):
+    def __init__(self, message: str, partial: Any = None) -> None:
+        super().__init__(message)
+        self.partial = partial
+
+
+# ------------------------------------------------------------------ helper
+
+def helper(command: str, payload: dict[str, Any] | None = None, *args: str,
+           timeout: float = 60) -> dict[str, Any]:
+    """Run one helper command with a JSON request and return its answer."""
+    stdin = None if payload is None else json.dumps(payload, ensure_ascii=False) + "\n"
+    try:
+        result = subprocess.run(
+            [sys.executable, str(HELPER), command, *args], input=stdin,
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ToolError(f"OmaWhatsApp did not answer within {int(timeout)} seconds. "
+                        "If this was a send, check the chat before trying again.") from exc
+    except OSError as exc:
+        raise ToolError("The OmaWhatsApp helper is not installed.") from exc
+    try:
+        value = json.loads(result.stdout or "{}")
+    except ValueError as exc:
+        raise ToolError("OmaWhatsApp returned an unreadable answer.") from exc
+    if not isinstance(value, dict) or value.get("ok") is not True:
+        message = value.get("error") if isinstance(value, dict) else ""
+        partial = value.get("partial") if isinstance(value, dict) else None
+        raise ToolError(str(message or "OmaWhatsApp could not complete that request."), partial)
+    return value
+
+
+def gateway(arguments: list[str], authorization: str = "", account: str = "",
+            timeout: int = 120, **extra: Any) -> Any:
+    """One guarded wacli operation; the helper checks the class token."""
+    payload = {"args": arguments, "authorization": authorization,
+               "account": account, "timeout": timeout, **extra}
+    return helper("wacli", payload, timeout=timeout + 30).get("data")
+
+
+# ------------------------------------------------------------------ values
+
+def local_time(value: Any) -> str:
+    """Epoch seconds or milliseconds, or an RFC 3339 string, in local time."""
+    if value in (None, "", 0):
+        return ""
+    if isinstance(value, str) and not value.isdigit():
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+        return parsed.astimezone().isoformat(timespec="minutes")
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return ""
+    if number > 10**12:
+        number //= 1000
+    return datetime.fromtimestamp(number).astimezone().isoformat(timespec="minutes")
+
+
+def epoch(value: Any, name: str) -> int | None:
+    """A date the model passed, as epoch seconds; YYYY-MM-DD is local midnight."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            return int(datetime.strptime(text, "%Y-%m-%d").timestamp())
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.astimezone()
+        return int(parsed.timestamp())
+    except ValueError as exc:
+        raise ToolError(f"{name} must be YYYY-MM-DD or an ISO 8601 date and time.") from exc
+
+
+def rfc3339(value: Any, name: str) -> str:
+    moment = epoch(value, name)
+    return "" if moment is None else datetime.fromtimestamp(moment).astimezone().isoformat()
+
+
+def compact(value: Any) -> Any:
+    """Drop empty fields so answers stay short; False and 0 carry meaning."""
+    if isinstance(value, dict):
+        return {key: compact(item) for key, item in value.items()
+                if item not in (None, "", [], {})}
+    if isinstance(value, list):
+        return [compact(item) for item in value]
+    return value
+
+
+def digits_of(value: Any) -> str:
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def text_argument(value: Any, name: str, required: bool = True) -> str:
+    text = str(value or "").strip()
+    if required and not text:
+        raise ToolError(f"{name} cannot be empty.")
+    if len(text) > MAX_TEXT:
+        raise ToolError(f"{name} is too long (maximum {MAX_TEXT} characters).")
+    return text
+
+
+# ------------------------------------------------------------------ shapes
+
+def shape_chat(row: dict[str, Any]) -> dict[str, Any]:
+    return compact({
+        "jid": row.get("jid"), "account": row.get("account"), "name": row.get("name"),
+        "kind": row.get("kind"), "unread": int(row.get("unread") or 0),
+        "pinned": bool(row.get("pinned")), "muted": bool(row.get("muted")),
+        "archived": bool(row.get("archived")),
+        "last": compact({
+            "time": local_time(row.get("timestamp")),
+            "from_me": bool(row.get("last_from_me")),
+            "sender": row.get("last_sender"),
+            "preview": row.get("preview"),
+            "media_type": row.get("last_media_type"),
+        }),
+    })
+
+
+def shape_message(row: dict[str, Any]) -> dict[str, Any]:
+    from_me = bool(row.get("from_me"))
+    shaped: dict[str, Any] = {
+        "id": row.get("id"), "time": local_time(row.get("timestamp")), "from_me": from_me,
+        "sender": "You" if from_me else row.get("sender"),
+        "sender_jid": None if from_me else row.get("sender_jid"),
+        "text": row.get("text"), "media_type": row.get("media_type"),
+        "filename": row.get("filename"), "mime_type": row.get("mime_type"),
+        "on_disk": bool(row.get("local_path")) if row.get("media_type") else None,
+        "edited": True if row.get("edited") else None,
+        "forwarded": True if row.get("forwarded") else None,
+        "starred": True if row.get("starred") else None,
+        "deleted_for_everyone": True if row.get("revoked") else None,
+        # sent, delivered, read or played; absent when wacli recorded none.
+        "delivery": row.get("status") if from_me and row.get("status") else None,
+    }
+    cards = row.get("contacts")
+    if isinstance(cards, list) and cards:
+        shaped["shared_contacts"] = [compact({"name": card.get("name"), "phone": card.get("phone"),
+                                              "jid": card.get("jid"),
+                                              "has_chat": True if card.get("has_chat") else None})
+                                     for card in cards if isinstance(card, dict)]
+    poll = row.get("poll")
+    if isinstance(poll, dict):
+        shaped["poll"] = compact({
+            "question": poll.get("question"), "choices_allowed": poll.get("selectable"),
+            "voters": poll.get("voters"),
+            "options": [compact({"text": option.get("text"), "votes": option.get("votes"),
+                                 "voters": option.get("voters"),
+                                 "mine": True if option.get("mine") else None})
+                        for option in poll.get("options") or [] if isinstance(option, dict)],
+        })
+    if row.get("quoted_id"):
+        shaped["reply_to"] = compact({
+            "id": row.get("quoted_id"), "sender": row.get("quoted_sender"),
+            "text": str(row.get("quoted_text") or "")[:280],
+            "media_type": row.get("quoted_media_type"),
+        })
+    reactions = row.get("reactions")
+    if isinstance(reactions, list) and reactions:
+        shaped["reactions"] = [compact({"emoji": item.get("emoji"),
+                                        "from_me": bool(item.get("from_me")) or None,
+                                        "sender": item.get("sender")})
+                               for item in reactions if isinstance(item, dict)]
+    if row.get("latitude") is not None:
+        shaped["location"] = compact({
+            "latitude": row.get("latitude"), "longitude": row.get("longitude"),
+            "name": row.get("location_name"), "address": row.get("location_address"),
+        })
+    return compact(shaped)
+
+
+def shape_found(row: dict[str, Any]) -> dict[str, Any]:
+    """A message row from wacli's own JSON (search, starred, list, context)."""
+    from_me = bool(row.get("FromMe"))
+    return compact({
+        "chat_jid": row.get("ChatJID"), "chat_name": row.get("ChatName"),
+        "id": row.get("MsgID"), "time": local_time(row.get("Timestamp")),
+        "from_me": from_me, "sender": "You" if from_me else row.get("SenderName"),
+        "sender_jid": None if from_me else row.get("SenderJID"),
+        "text": row.get("Text") or row.get("DisplayText"),
+        "match": row.get("Snippet"), "media_type": row.get("MediaType"),
+        "filename": row.get("Filename"), "caption": row.get("MediaCaption"),
+        "starred": True if row.get("Starred") else None,
+        "forwarded": True if row.get("IsForwarded") else None,
+    })
+
+
+def shape_attachment(row: dict[str, Any]) -> dict[str, Any]:
+    return compact({
+        "chat_jid": row.get("chat_jid"), "chat_name": row.get("chat_name"),
+        "id": row.get("id"), "time": local_time(row.get("timestamp")),
+        "from_me": bool(row.get("from_me")),
+        "sender": "You" if row.get("from_me") else row.get("sender"),
+        "sender_jid": None if row.get("from_me") else row.get("sender_jid"),
+        "media_type": row.get("media_type"), "filename": row.get("filename"),
+        "mime_type": row.get("mime_type"), "caption": row.get("caption"),
+        "size_bytes": row.get("file_size") or None,
+        "local_path": row.get("local_path"),
+        "expired": True if row.get("available") is False else None,
+        "location": compact({"latitude": row.get("latitude"), "longitude": row.get("longitude"),
+                             "name": row.get("location_name"),
+                             "address": row.get("location_address")})
+        if row.get("latitude") is not None else None,
+    })
+
+
+# ------------------------------------------------------------------ chats
+
+def all_chats(account: str = "") -> list[dict[str, Any]]:
+    return helper("chats", {"account": account}, "--limit", "500").get("chats") or []
+
+
+def resolve_chat(value: Any, account: str = "") -> dict[str, Any]:
+    """A jid, a phone number or a chat name, to one exact rail chat."""
+    text = str(value or "").strip()
+    if not text:
+        raise ToolError("Name the chat: a jid from list_chats, a phone number or a chat name.")
+    if "@" in text:
+        return {"jid": text, "account": account, "name": ""}
+    rows = all_chats(account)
+    if PHONE.match(text):
+        digits = digits_of(text)
+        matches = [row for row in rows if digits_of(str(row.get("jid", "")).split("@")[0])
+                   .endswith(digits[-10:])]
+    else:
+        needle = text.casefold()
+        exact = [row for row in rows if str(row.get("name") or "").casefold() == needle]
+        matches = exact or [row for row in rows if needle in str(row.get("name") or "").casefold()]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ToolError(f'No chat matches "{text}". Try find_contacts, or start_chat for a '
+                        "number you have never messaged.")
+    options = [compact({"jid": row.get("jid"), "name": row.get("name"), "kind": row.get("kind"),
+                        "account": row.get("account"), "last": local_time(row.get("timestamp"))})
+               for row in matches[:12]]
+    raise ToolError("Several chats match. Ask the user which one, then pass its jid: "
+                    + json.dumps(options, ensure_ascii=False))
+
+
+def chat_payload(chat: dict[str, Any], account: str, **fields: Any) -> dict[str, Any]:
+    return {"account": str(chat.get("account") or account or ""), "jid": chat["jid"], **fields}
+
+
+def exact_jid(value: Any, name: str = "jid") -> str:
+    text = str(value or "").strip()
+    if "@" not in text or len(text) > 160:
+        raise ToolError(f"{name} must be an exact jid from list_chats, find_contacts or a "
+                        "search result.")
+    return text
+
+
+def chat_pages(chat: dict[str, Any], account: str, *, limit: int, before: Any = None,
+               after: int | None = None, query: str = "", kind: str = "",
+               ) -> tuple[list[dict[str, Any]], bool]:
+    """Messages newest first, paging back until ``after`` or ``limit``."""
+    collected: list[dict[str, Any]] = []
+    cursor = before
+    more = True
+    while more and len(collected) < limit:
+        page = min(300, limit - len(collected) + 1)
+        fields: dict[str, Any] = {"query": query, "kind": kind}
+        if cursor:
+            fields["before"] = cursor
+        answer = helper("messages", chat_payload(chat, account, **fields), "--limit", str(page))
+        rows = answer.get("messages") or []
+        more = bool(answer.get("has_more"))
+        for row in rows:
+            if after is not None and int(row.get("timestamp") or 0) <= after:
+                return collected, False
+            collected.append(row)
+            if len(collected) >= limit:
+                return collected, True
+        if not rows:
+            break
+        cursor = {"ts": rows[-1].get("timestamp"), "id": rows[-1].get("id")}
+    return collected, more
+
+
+def cursor_of(value: Any) -> dict[str, Any] | None:
+    """``before`` is a date, or the ``next_before`` token of an earlier page."""
+    if value in (None, ""):
+        return None
+    text = str(value)
+    if text.startswith("cursor:"):
+        _, ts, identifier = (text.split(":", 2) + ["", ""])[:3]
+        return {"ts": int(ts or 0), "id": identifier}
+    return {"ts": epoch(value, "before"), "id": ""}
+
+
+# ------------------------------------------------------------------ tools
+
+TOOLS: dict[str, dict[str, Any]] = {}
+ACCOUNT = {"type": "string", "description": "Named wacli account; leave empty for the default."}
+
+
+def tool(name: str, title: str, description: str, properties: dict[str, Any],
+         required: tuple[str, ...] = (), *, kind: str = "read",
+         destructive: bool = False) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Register a tool. ``kind`` is read (local), remote (asks WhatsApp) or write."""
+    def register(function: Callable[..., Any]) -> Callable[..., Any]:
+        TOOLS[name] = {
+            "name": name, "title": title, "description": description,
+            "inputSchema": {"type": "object",
+                            "properties": {**properties, "account": ACCOUNT},
+                            "required": list(required), "additionalProperties": False},
+            "annotations": {"title": title, "readOnlyHint": kind != "write",
+                            "destructiveHint": destructive,
+                            "idempotentHint": kind != "write",
+                            "openWorldHint": kind != "read"},
+            "handler": function,
+        }
+        return function
+    return register
+
+
+def validate(schema: dict[str, Any], arguments: Any) -> dict[str, Any]:
+    if arguments is None:
+        arguments = {}
+    if not isinstance(arguments, dict):
+        raise ToolError("Arguments must be an object.")
+    properties = schema["properties"]
+    unknown = sorted(set(arguments) - set(properties))
+    if unknown:
+        raise ToolError("Unknown argument: " + ", ".join(unknown))
+    for key in schema["required"]:
+        if arguments.get(key) in (None, "", []):
+            raise ToolError(f"{key} is required.")
+    checks = {"string": str, "boolean": bool, "array": list, "object": dict}
+    for key, value in arguments.items():
+        if value is None:
+            continue
+        expected = properties[key].get("type")
+        if expected == "integer":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ToolError(f"{key} must be a whole number.")
+        elif expected == "number":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ToolError(f"{key} must be a number.")
+        elif expected in checks and not isinstance(value, checks[expected]):
+            raise ToolError(f"{key} must be a {expected}.")
+        allowed = properties[key].get("enum")
+        if allowed and value not in allowed:
+            raise ToolError(f"{key} must be one of: " + ", ".join(map(str, allowed)))
+        if expected == "array" and properties[key].get("items", {}).get("type") == "string":
+            if not all(isinstance(item, str) for item in value):
+                raise ToolError(f"{key} must be a list of strings.")
+    return arguments
+
+
+def bounded(value: Any, fallback: int, low: int, high: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(low, min(number, high))
+
+
+STRING = {"type": "string"}
+BOOL = {"type": "boolean"}
+DATE = {"type": "string", "description": "YYYY-MM-DD or ISO 8601, local time."}
+CHAT = {"type": "string", "description": "Chat jid, phone number or chat name."}
+JID = {"type": "string", "description": "Exact jid of an existing chat (from list_chats, find_contacts or a search result)."}
+MESSAGE = {"type": "string", "description": "Message id from read_chat or a search result."}
+STRINGS = {"type": "array", "items": {"type": "string"}}
+
+
+# ------------------------------------------------------------------ v1 reads
+
+@tool("whatsapp_status", "WhatsApp status",
+      "Whether WhatsApp is linked and syncing, the linked accounts, and how many chats "
+      "are unread. Call it first when something fails.", {})
+def whatsapp_status(account: str = "") -> dict[str, Any]:
+    status = helper("status", None, "--account", account)
+    chats = all_chats(account) if status.get("rail_ready") else []
+    return compact({
+        "authenticated": bool(status.get("authenticated")),
+        "local_archive_ready": bool(status.get("database_ready")),
+        "syncing": bool(status.get("sync_active")),
+        "offline_mode": bool(status.get("offline_mode")),
+        "accounts": [compact({"name": item.get("name"), "label": item.get("label"),
+                              "authenticated": bool(item.get("authenticated"))})
+                     for item in status.get("accounts") or [] if isinstance(item, dict)],
+        "unread_chats": sum(1 for chat in chats if int(chat.get("unread") or 0) > 0),
+        "chats": len(chats),
+    })
+
+
+VIEWS = ["all", "unread", "people", "groups", "pinned", "muted", "archived"]
+
+
+@tool("list_chats", "List chats",
+      "Chats newest first with unread counts and the last message. Filter by name or "
+      "by view. Use it to find the exact jid before reading or acting on a chat.",
+      {"query": {"type": "string", "description": "Part of the chat name, or a phone number."},
+       "view": {"type": "string", "enum": VIEWS, "description": "Default all (archived chats are left out unless view is archived)."},
+       "limit": {"type": "integer", "description": "Default 30, at most 200."}})
+def list_chats(query: str = "", view: str = "all", limit: int = 30,
+               account: str = "") -> dict[str, Any]:
+    rows = all_chats(account)
+    if query:
+        if PHONE.match(query):
+            digits = digits_of(query)[-10:]
+            rows = [row for row in rows if digits in str(row.get("jid", ""))]
+        else:
+            needle = query.casefold()
+            rows = [row for row in rows if needle in str(row.get("name") or "").casefold()]
+    tests = {
+        "unread": lambda row: int(row.get("unread") or 0) > 0,
+        "people": lambda row: row.get("kind") == "dm",
+        "groups": lambda row: row.get("kind") == "group",
+        "pinned": lambda row: bool(row.get("pinned")),
+        "muted": lambda row: bool(row.get("muted")),
+    }
+    if view == "archived":
+        rows = [row for row in rows if row.get("archived")]
+    else:
+        rows = [row for row in rows if not row.get("archived")]
+        if view in tests:
+            rows = [row for row in rows if tests[view](row)]
+    count = bounded(limit, 30, 1, 200)
+    return {"chats": [shape_chat(row) for row in rows[:count]],
+            "more": max(0, len(rows) - count)}
+
+
+def unread_split(rows: list[dict[str, Any]], unread: int) -> list[dict[str, Any]]:
+    """Newest-first rows to oldest-first, flagging the newest incoming ``unread``."""
+    left = unread
+    flagged: list[dict[str, Any]] = []
+    for row in rows:
+        shaped = shape_message(row)
+        if left > 0 and not row.get("from_me"):
+            shaped["unread"] = True
+            left -= 1
+        flagged.append(shaped)
+    return list(reversed(flagged))
+
+
+@tool("unread_messages", "Unread messages",
+      "Every chat with unread messages and those messages, with a few earlier ones for "
+      "context (flagged unread: true on the unread ones). Muted and archived chats are "
+      "counted but left out unless asked. Use it for 'who wrote to me and what about'.",
+      {"max_chats": {"type": "integer", "description": "Default 15, at most 40."},
+       "per_chat": {"type": "integer", "description": "Unread messages per chat, default 20, at most 80."},
+       "context": {"type": "integer", "description": "Earlier messages per chat, default 4, at most 20."},
+       "include_muted": BOOL, "include_archived": BOOL})
+def unread_messages(max_chats: int = 15, per_chat: int = 20, context: int = 4,
+                    include_muted: bool = False, include_archived: bool = False,
+                    account: str = "") -> dict[str, Any]:
+    rows = [row for row in all_chats(account) if int(row.get("unread") or 0) > 0]
+    skipped = [row for row in rows
+               if (row.get("muted") and not include_muted)
+               or (row.get("archived") and not include_archived)]
+    chosen = [row for row in rows if row not in skipped]
+    limit = bounded(max_chats, 15, 1, 40)
+    each = bounded(per_chat, 20, 1, 80)
+    earlier = bounded(context, 4, 0, 20)
+    out = []
+    for row in chosen[:limit]:
+        unread = int(row.get("unread") or 0)
+        shown = min(unread, each)
+        messages, _ = chat_pages(row, account, limit=shown + earlier)
+        out.append(compact({
+            "chat": shape_chat(row), "unread": unread,
+            "not_shown": unread - shown if unread > shown else None,
+            "messages": unread_split(messages, shown),
+        }))
+    return compact({
+        "chats": out,
+        "more_unread_chats": max(0, len(chosen) - limit) or None,
+        "left_out": compact({
+            "muted": sum(1 for row in skipped if row.get("muted")),
+            "archived": sum(1 for row in skipped if row.get("archived")),
+        }) or None,
+    })
+
+
+@tool("awaiting_reply", "Chats awaiting your reply",
+      "Chats where the last message is from the other person and you have not answered: "
+      "a to-do list of replies. Groups are left out unless include_groups is true.",
+      {"min_hours": {"type": "integer", "description": "Only chats waiting at least this long. Default 0."},
+       "max_days": {"type": "integer", "description": "Ignore chats quiet for longer. Default 14."},
+       "include_groups": BOOL,
+       "limit": {"type": "integer", "description": "Default 25, at most 100."}})
+def awaiting_reply(min_hours: int = 0, max_days: int = 14, include_groups: bool = False,
+                   limit: int = 25, account: str = "") -> dict[str, Any]:
+    now = time.time()
+    newest = now - bounded(min_hours, 0, 0, 24 * 90) * 3600
+    oldest = now - bounded(max_days, 14, 1, 365) * 86400
+    waiting = []
+    for row in all_chats(account):
+        stamp = int(row.get("timestamp") or 0)
+        if row.get("last_from_me") or row.get("archived") or not stamp:
+            continue
+        if row.get("kind") != "dm" and not (include_groups and row.get("kind") == "group"):
+            continue
+        if oldest <= stamp <= newest:
+            shaped = shape_chat(row)
+            shaped["waiting_hours"] = round((now - stamp) / 3600, 1)
+            waiting.append(shaped)
+    count = bounded(limit, 25, 1, 100)
+    return {"chats": waiting[:count], "more": max(0, len(waiting) - count)}
+
+
+@tool("read_chat", "Read a chat",
+      "Messages of one chat, oldest first. Pages back from 'before' (default now) until "
+      "'after' or 'limit'. Pass next_before from the answer to read further back.",
+      {"chat": CHAT, "limit": {"type": "integer", "description": "Default 50, at most 500."},
+       "before": {"type": "string", "description": "YYYY-MM-DD, ISO 8601 or a next_before token."},
+       "after": DATE,
+       "query": {"type": "string", "description": "Only messages containing this text."}},
+      ("chat",))
+def read_chat(chat: str, limit: int = 50, before: str = "", after: str = "",
+              query: str = "", account: str = "") -> dict[str, Any]:
+    target = resolve_chat(chat, account)
+    rows, more = chat_pages(target, account, limit=bounded(limit, 50, 1, 500),
+                            before=cursor_of(before), after=epoch(after, "after"),
+                            query=text_argument(query, "query", False))
+    answer: dict[str, Any] = {
+        "chat": compact({"jid": target.get("jid"), "name": target.get("name"),
+                         "kind": target.get("kind")}),
+        "messages": [shape_message(row) for row in reversed(rows)],
+        "older_messages": more,
+    }
+    if more and rows:
+        answer["next_before"] = f"cursor:{rows[-1].get('timestamp')}:{rows[-1].get('id')}"
+    return answer
+
+
+MESSAGE_TYPES = ["text", "image", "video", "audio", "document"]
+
+
+@tool("search_messages", "Search messages",
+      "Full-text search over every chat, or inside one chat. Try several keywords and "
+      "synonyms when the first search finds nothing (for example filme, série, assiste). "
+      "Each result carries chat_jid and id for message_context.",
+      {"query": {"type": "string"}, "chat": CHAT,
+       "sender": {"type": "string", "description": "Exact sender jid from find_contacts."},
+       "after": DATE, "before": DATE,
+       "type": {"type": "string", "enum": MESSAGE_TYPES},
+       "from_me": {"type": "boolean", "description": "true: only yours; false: only received."},
+       "forwarded": BOOL, "starred": BOOL,
+       "limit": {"type": "integer", "description": "Default 30, at most 100."}},
+      ("query",))
+def search_messages(query: str, chat: str = "", sender: str = "", after: str = "",
+                    before: str = "", type: str = "", from_me: bool | None = None,
+                    forwarded: bool = False, starred: bool = False, limit: int = 30,
+                    account: str = "") -> dict[str, Any]:
+    needle = text_argument(query, "query")
+    count = bounded(limit, 30, 1, 100)
+    low, high = epoch(after, "after"), epoch(before, "before")
+    if chat:
+        # Inside one chat the helper also reads the rows wacli filed under the
+        # contact's hidden @lid, which a jid-scoped wacli search would miss.
+        target = resolve_chat(chat, account)
+        rows, _ = chat_pages(target, account, limit=500, query=needle,
+                             before={"ts": high, "id": ""} if high else None, after=low)
+        results = []
+        for row in rows:
+            if from_me is not None and bool(row.get("from_me")) != from_me:
+                continue
+            if sender and row.get("sender_jid") != sender:
+                continue
+            if type and (row.get("media_type") or "text") != type:
+                continue
+            if forwarded and not row.get("forwarded"):
+                continue
+            if starred and not row.get("starred"):
+                continue
+            shaped = shape_message(row)
+            shaped["chat_jid"] = target.get("jid")
+            results.append(shaped)
+            if len(results) >= count:
+                break
+        return {"results": results}
+    arguments = ["messages", "search", needle, "--limit", str(min(100, count * 2))]
+    if sender:
+        arguments += ["--from", exact_jid(sender, "sender")]
+    if after:
+        arguments += ["--after", rfc3339(after, "after")]
+    if before:
+        arguments += ["--before", rfc3339(before, "before")]
+    if type:
+        arguments += ["--type", type]
+    if forwarded:
+        arguments.append("--forwarded")
+    if starred:
+        arguments.append("--starred")
+    data = gateway(arguments, account=account) or {}
+    rows = (data.get("messages") or []) if isinstance(data, dict) else []
+    results = [shape_found(row) for row in rows
+               if from_me is None or bool(row.get("FromMe")) == from_me]
+    return {"results": results[:count]}
+
+
+@tool("message_context", "Message in context",
+      "The messages around one message, to understand a search result.",
+      {"chat_jid": {"type": "string", "description": "chat_jid of the search result."},
+       "id": MESSAGE,
+       "before": {"type": "integer", "description": "Messages before it, default 6."},
+       "after": {"type": "integer", "description": "Messages after it, default 6."}},
+      ("chat_jid", "id"))
+def message_context(chat_jid: str, id: str, before: int = 6, after: int = 6,
+                    account: str = "") -> dict[str, Any]:
+    data = gateway(["messages", "context", "--chat", exact_jid(chat_jid, "chat_jid"),
+                    "--id", str(id), "--before", str(bounded(before, 6, 0, 50)),
+                    "--after", str(bounded(after, 6, 0, 50))], account=account)
+    rows = data.get("messages") if isinstance(data, dict) else data
+    return {"messages": [dict(shape_found(row), match=True if row.get("MsgID") == id else None)
+                         for row in rows or [] if isinstance(row, dict)]}
+
+
+@tool("starred_messages", "Starred messages",
+      "Messages starred on WhatsApp, newest first, in every chat or one.",
+      {"chat": CHAT, "limit": {"type": "integer", "description": "Default 30, at most 200."}})
+def starred_messages(chat: str = "", limit: int = 30, account: str = "") -> dict[str, Any]:
+    arguments = ["messages", "starred", "--limit", str(bounded(limit, 30, 1, 200))]
+    if chat:
+        arguments += ["--chat", resolve_chat(chat, account)["jid"]]
+    data = gateway(arguments, account=account) or {}
+    rows = (data.get("messages") or []) if isinstance(data, dict) else []
+    return {"messages": [shape_found(row) for row in rows]}
+
+
+ATTACHMENT_KINDS = ["image", "video", "audio", "document", "sticker", "location"]
+
+
+@tool("list_attachments", "List attachments",
+      "Photos, videos, audio, documents, stickers and locations, newest first, from one "
+      "chat or every chat, optionally only from one person or a period. local_path is set "
+      "when the file is already on this computer; open_attachment fetches it otherwise.",
+      {"chat": CHAT, "sender": {"type": "string", "description": "Exact sender jid (find_contacts)."},
+       "kinds": {"type": "array", "items": {"type": "string", "enum": ATTACHMENT_KINDS}},
+       "direction": {"type": "string", "enum": ["any", "received", "sent"]},
+       "after": DATE, "before": DATE,
+       "missing_only": {"type": "boolean", "description": "Only the ones not downloaded yet."},
+       "limit": {"type": "integer", "description": "Default 40, at most 200."}})
+def list_attachments(chat: str = "", sender: str = "", kinds: list[str] | None = None,
+                     direction: str = "any", after: str = "", before: str = "",
+                     missing_only: bool = False, limit: int = 40,
+                     account: str = "") -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "account": account, "sender": sender, "kinds": kinds or [], "direction": direction,
+        "after": epoch(after, "after"), "before": epoch(before, "before"),
+        "missing_only": missing_only, "limit": bounded(limit, 40, 1, 200),
+    }
+    if chat:
+        target = resolve_chat(chat, account)
+        payload.update(jid=target["jid"], account=str(target.get("account") or account))
+    rows = helper("attachments", payload).get("attachments") or []
+    return {"attachments": [shape_attachment(row) for row in rows]}
+
+
+@tool("open_attachment", "Open an attachment",
+      "Puts one attachment on this computer (downloading it from WhatsApp beside the live "
+      "sync if needed) and returns its local path. Read that file to see a photo or PDF.",
+      {"chat_jid": {"type": "string", "description": "chat_jid from list_attachments, or the chat's jid."},
+       "id": MESSAGE}, ("chat_jid", "id"), kind="remote")
+def open_attachment(chat_jid: str, id: str, account: str = "") -> dict[str, Any]:
+    answer = helper("media", {"account": account, "jid": exact_jid(chat_jid, "chat_jid"),
+                              "id": str(id)}, timeout=240)
+    path = str(answer.get("local_path") or "")
+    return compact({"local_path": path,
+                    "size_bytes": Path(path).stat().st_size if path and Path(path).is_file() else None})
+
+
+@tool("find_contacts", "Find contacts",
+      "People this WhatsApp account knows, by name, phone number or contact tag, with "
+      "whether a chat already exists, the alias you gave them and their tags.",
+      {"query": {"type": "string"}, "tag": {"type": "string"},
+       "limit": {"type": "integer", "description": "Default 20, at most 80."}})
+def find_contacts(query: str = "", tag: str = "", limit: int = 20,
+                  account: str = "") -> dict[str, Any]:
+    answer = helper("contacts-search", {"account": account, "query": query, "tag": tag,
+                                        "limit": bounded(limit, 20, 1, 80)})
+    return {"people": [compact(person) for person in answer.get("people") or []]}
+
+
+@tool("chat_info", "Chat details",
+      "Details of one chat from the local archive: for a group its participants and "
+      "roles, your role and the history counts; for a person their numbers and the "
+      "groups you share. live: true also asks WhatsApp for the group's settings.",
+      {"chat": CHAT, "live": BOOL}, ("chat",))
+def chat_info(chat: str, live: bool = False, account: str = "") -> dict[str, Any]:
+    target = resolve_chat(chat, account)
+    details = helper("chat-details", chat_payload(target, account))
+    details.pop("ok", None)
+    details.pop("kind", None)  # The answer's own kind; the chat's is details.chat.kind.
+    details.pop("avatar_path", None)
+    for person in details.get("participants") or []:
+        if isinstance(person, dict):
+            person.pop("avatar_path", None)
+    if "since" in details:
+        details["since"] = local_time(details["since"])
+    if live and (details.get("chat") or {}).get("kind") == "group":
+        settings = helper("group-info", chat_payload(target, account, authorization="remote-read"),
+                          timeout=90)
+        settings.pop("ok", None)
+        details["live_settings"] = settings
+    return compact(details)
+
+
+# ------------------------------------------------------------------ v1 writes
+
+def sent(answer: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    return compact({"done": True, "message_id": answer.get("message_id"), **extra})
+
+
+@tool("send_message", "Send a message",
+      "Send a text to one existing chat, optionally as a reply to one of its messages. "
+      "mentions lists participant jids for @mentions in groups.",
+      {"jid": JID, "text": STRING, "reply_to": MESSAGE, "mentions": STRINGS},
+      ("jid", "text"), kind="write")
+def send_message(jid: str, text: str, reply_to: str = "", mentions: list[str] | None = None,
+                 account: str = "") -> dict[str, Any]:
+    answer = helper("send", {"account": account, "jid": exact_jid(jid),
+                             "text": text_argument(text, "text"), "reply_id": reply_to,
+                             "mentions": mentions or []}, timeout=120)
+    return sent(answer)
+
+
+@tool("send_files", "Send files",
+      "Send up to 10 local files (photos, videos, documents) to one existing chat, with "
+      "an optional caption on the first one.",
+      {"jid": JID, "paths": {"type": "array", "items": {"type": "string"},
+                             "description": "Absolute paths on this computer."},
+       "caption": STRING, "reply_to": MESSAGE}, ("jid", "paths"), kind="write")
+def send_files(jid: str, paths: list[str], caption: str = "", reply_to: str = "",
+               account: str = "") -> dict[str, Any]:
+    if not 1 <= len(paths) <= 10:
+        raise ToolError("Send 1 to 10 files at a time.")
+    files = [str(Path(path).expanduser()) for path in paths]
+    missing = [path for path in files if not Path(path).is_file()]
+    if missing:
+        raise ToolError("These files do not exist: " + ", ".join(missing))
+    answer = helper("files", {"account": account, "jid": exact_jid(jid), "paths": files,
+                              "caption": text_argument(caption, "caption", False),
+                              "reply_id": reply_to}, timeout=600)
+    return compact({"done": True, "sent": answer.get("count") or len(files)})
+
+
+@tool("start_chat", "Message a new number",
+      "Send the first message to a phone number you have never messaged. WhatsApp is asked "
+      "first whether the number has an account.",
+      {"phone": {"type": "string", "description": "With country and area code, e.g. +55 16 99999-0000."},
+       "text": STRING}, ("phone", "text"), kind="write")
+def start_chat(phone: str, text: str, account: str = "") -> dict[str, Any]:
+    digits = digits_of(phone)
+    if not 8 <= len(digits) <= 15:
+        raise ToolError("Give the full number with country and area code.")
+    message = text_argument(text, "text")
+    check = helper("check-number", {"account": account, "phone": digits,
+                                    "authorization": "remote-read"}, timeout=90)
+    if not check.get("registered"):
+        raise ToolError("That number has no WhatsApp account. Nothing was sent.")
+    answer = helper("send-new", {"account": account, "target": {"phone": digits},
+                                 "text": message}, timeout=120)
+    return compact({"done": True, "chat_jid": answer.get("chat_jid") or answer.get("jid")})
+
+
+@tool("react", "React to a message",
+      "React with one emoji; an empty emoji removes your reaction.",
+      {"jid": JID, "id": MESSAGE, "emoji": STRING}, ("jid", "id"), kind="write")
+def react(jid: str, id: str, emoji: str = "", account: str = "") -> dict[str, Any]:
+    helper("react", {"account": account, "jid": exact_jid(jid), "id": id, "emoji": emoji},
+           timeout=90)
+    return {"done": True}
+
+
+@tool("forward_message", "Forward a message",
+      "Forward one message, text or attachment, to another existing chat.",
+      {"jid": {"type": "string", "description": "Chat the message is in."}, "id": MESSAGE,
+       "to_jid": {"type": "string", "description": "Exact jid of the chat that receives it."}},
+      ("jid", "id", "to_jid"), kind="write")
+def forward_message(jid: str, id: str, to_jid: str, account: str = "") -> dict[str, Any]:
+    helper("forward", {"account": account, "jid": exact_jid(jid), "id": id,
+                       "to_jid": exact_jid(to_jid, "to_jid")}, timeout=180)
+    return {"done": True}
+
+
+@tool("edit_message", "Edit a sent message",
+      "Change the text of a text message you sent. WhatsApp marks it as edited.",
+      {"jid": JID, "id": MESSAGE, "text": STRING}, ("jid", "id", "text"), kind="write")
+def edit_message(jid: str, id: str, text: str, account: str = "") -> dict[str, Any]:
+    helper("edit", {"account": account, "jid": exact_jid(jid), "id": id,
+                    "text": text_argument(text, "text")}, timeout=90)
+    return {"done": True}
+
+
+@tool("delete_message", "Delete a message",
+      "Delete one message for everyone (only your own, within WhatsApp's time limit) or "
+      "only on your devices.",
+      {"jid": JID, "id": MESSAGE,
+       "for_everyone": {"type": "boolean", "description": "true removes it for everyone; false only for you."}},
+      ("jid", "id", "for_everyone"), kind="write", destructive=True)
+def delete_message(jid: str, id: str, for_everyone: bool, account: str = "") -> dict[str, Any]:
+    helper("delete", {"account": account, "jid": exact_jid(jid), "id": id,
+                      "for_me": not for_everyone}, timeout=90)
+    return {"done": True, "for_everyone": for_everyone}
+
+
+@tool("send_poll", "Send a poll",
+      "Send a poll with 2 to 12 options to one existing chat.",
+      {"jid": JID, "question": STRING, "options": STRINGS,
+       "multiple": {"type": "boolean", "description": "Allow choosing more than one option."}},
+      ("jid", "question", "options"), kind="write")
+def send_poll(jid: str, question: str, options: list[str], multiple: bool = False,
+              account: str = "") -> dict[str, Any]:
+    choices = [option.strip() for option in options if option.strip()]
+    if not 2 <= len(choices) <= 12:
+        raise ToolError("A poll needs 2 to 12 options.")
+    answer = helper("poll", {"account": account, "jid": exact_jid(jid),
+                             "question": text_argument(question, "question"),
+                             "options": choices, "multi": len(choices) if multiple else 1},
+                    timeout=90)
+    return sent(answer)
+
+
+CHAT_STATES = ["read", "unread", "pin", "unpin", "archive", "unarchive", "mute", "unmute"]
+
+
+@tool("set_chat_state", "Organize chats",
+      "Mark chats read or unread, pin, archive or mute them, on every linked device. "
+      "Several chats at once stop at the first failure.",
+      {"jids": {"type": "array", "items": {"type": "string"}, "description": "Exact chat jids, up to 50."},
+       "action": {"type": "string", "enum": CHAT_STATES}}, ("jids", "action"), kind="write")
+def set_chat_state(jids: list[str], action: str, account: str = "") -> dict[str, Any]:
+    if not 1 <= len(jids) <= MAX_BULK:
+        raise ToolError(f"Choose 1 to {MAX_BULK} chats.")
+    changed: list[str] = []
+    for jid in jids:
+        try:
+            helper("chat-action", {"account": account, "jid": exact_jid(jid), "action": action},
+                   timeout=90)
+        except ToolError as exc:
+            raise ToolError(f"Stopped at {jid}: {exc}. Already changed: "
+                            + (", ".join(changed) or "none")) from exc
+        changed.append(jid)
+    return {"done": True, "changed": len(changed)}
+
+
+def group_users(values: list[str]) -> list[str]:
+    users = []
+    for value in values:
+        text = str(value or "").strip()
+        if "@" in text:
+            users.append(exact_jid(text, "participant"))
+        elif PHONE.match(text) and 8 <= len(digits_of(text)) <= 15:
+            users.append("+" + digits_of(text))
+        else:
+            raise ToolError(f'"{text}" is not a jid or a full phone number. Use find_contacts.')
+    return users
+
+
+def indexed_chat(jid: str, account: str, wait: float = 20) -> bool:
+    """Whether a chat just created on WhatsApp reached the local archive."""
+    deadline = time.monotonic() + wait
+    while True:
+        if any(row.get("jid") == jid for row in all_chats(account)):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(2)
+
+
+@tool("create_group", "Create a group",
+      "Create a WhatsApp group (or a community) with a name and participants, and "
+      "optionally a description and admin-only settings. Pauses background sync briefly.",
+      {"name": STRING,
+       "participants": {"type": "array", "items": {"type": "string"},
+                        "description": "Exact jids from find_contacts, or full phone numbers."},
+       "description": STRING,
+       "announce_only": {"type": "boolean", "description": "Only admins send messages."},
+       "locked": {"type": "boolean", "description": "Only admins edit the group info."},
+       "join_approval": {"type": "boolean", "description": "Admins approve new members."},
+       "community": {"type": "boolean", "description": "Create a community instead of a group."},
+       "community_jid": {"type": "string", "description": "Create the group inside this community."}},
+      ("name",), kind="write")
+def create_group(name: str, participants: list[str] | None = None, description: str = "",
+                 announce_only: bool = False, locked: bool = False,
+                 join_approval: bool = False, community: bool = False,
+                 community_jid: str = "", account: str = "") -> dict[str, Any]:
+    title = " ".join(str(name or "").split())
+    if not 1 <= len(title) <= 100:
+        raise ToolError("A group name needs 1 to 100 characters.")
+    users = group_users(participants or [])
+    if not users and not community:
+        raise ToolError("Add at least one participant.")
+    arguments = ["groups", "create", "--name", title]
+    for user in users:
+        arguments += ["--user", user]
+    for flag, enabled in (("--announce-only", announce_only), ("--locked", locked),
+                          ("--join-approval", join_approval), ("--community", community)):
+        if enabled:
+            arguments.append(flag)
+    if community_jid:
+        arguments += ["--linked-parent", exact_jid(community_jid, "community_jid")]
+    data = gateway(arguments, "whatsapp-write", account, timeout=120) or {}
+    jid = str((data.get("jid") or data.get("JID") or data.get("id") or "")
+              if isinstance(data, dict) else "")
+    result: dict[str, Any] = {"done": True, "jid": jid, "name": title}
+    if description:
+        if jid and indexed_chat(jid, account):
+            helper("group-action", {"account": account, "jid": jid, "action": "description",
+                                    "value": text_argument(description, "description")},
+                   timeout=90)
+            result["description_set"] = True
+        else:
+            result["description_set"] = False
+            result["note"] = ("The group exists but is not in the local archive yet; "
+                              "set the description with manage_group in a moment.")
+    return compact(result)
+
+
+# A community and the groups inside it are not in the chat rail, so the
+# helper's group-action cannot reach them; the same actions then go through
+# the guarded wacli gateway with the class each one needs.
+OUTSIDE_RAIL = "not available in the local WhatsApp index"
+
+
+def gateway_group_action(jid: str, action: str, value: Any, account: str) -> dict[str, Any]:
+    target = ["--jid", jid]
+    users = value if isinstance(value, list) else [value]
+    flags: list[str] = []
+    for user in users:
+        if user:
+            flags += ["--user", str(user)]
+    table: dict[str, tuple[list[str], str]] = {
+        "rename": (["groups", "rename", *target, "--name", str(value or "")], "whatsapp-write"),
+        "description": (["groups", "description", *target, "--text", str(value or "")],
+                        "whatsapp-write"),
+        "announce": (["groups", "announce-only", *target, "--on" if value else "--off"],
+                     "whatsapp-write"),
+        "locked": (["groups", "locked", *target, "--on" if value else "--off"], "whatsapp-write"),
+        "add": (["groups", "participants", "add", *target, *flags], "whatsapp-write"),
+        "promote": (["groups", "participants", "promote", *target, *flags], "whatsapp-write"),
+        "demote": (["groups", "participants", "demote", *target, *flags], "destructive"),
+        "remove": (["groups", "participants", "remove", *target, *flags], "destructive"),
+        "invite-get": (["groups", "invite", "link", "get", *target], "remote-read"),
+        "invite-revoke": (["groups", "invite", "link", "revoke", *target], "destructive"),
+        "requests": (["groups", "requests", "list", *target], "remote-read"),
+        "approve": (["groups", "requests", "approve", *target, *flags], "whatsapp-write"),
+        "reject": (["groups", "requests", "reject", *target, *flags], "destructive"),
+        "leave": (["groups", "leave", *target], "destructive"),
+    }
+    arguments, token = table[action]
+    data = gateway(arguments, token, account, timeout=120)
+    return dict(data if isinstance(data, dict) else {"result": data}, outside_rail=True)
+
+
+def run_group_action(request: dict[str, Any]) -> dict[str, Any]:
+    try:
+        answer = helper("group-action", request, timeout=120)
+    except ToolError as exc:
+        if OUTSIDE_RAIL not in str(exc):
+            raise
+        answer = gateway_group_action(request["jid"], request["action"], request.get("value"),
+                                      str(request.get("account") or ""))
+    answer.pop("ok", None)
+    answer.pop("kind", None)
+    return compact(dict(answer, done=True))
+
+
+GROUP_ACTIONS = ["rename", "description", "announce_only", "locked", "add", "promote",
+                 "approve_request", "invite_link", "pending_requests"]
+
+
+@tool("manage_group", "Manage a group",
+      "Rename, describe, add people, promote admins, approve join requests, get the invite "
+      "link, list pending requests, or turn admin-only messages and info editing on or off. "
+      "Removing people and leaving are in remove_or_leave_group.",
+      {"jid": JID, "action": {"type": "string", "enum": GROUP_ACTIONS},
+       "value": {"description": "rename/description: text; announce_only/locked: true or false; "
+                                "add: list of jids or phone numbers; promote/approve_request: one jid."}},
+      ("jid", "action"), kind="write")
+def manage_group(jid: str, action: str, value: Any = None, account: str = "") -> dict[str, Any]:
+    names = {"announce_only": "announce", "approve_request": "approve",
+             "invite_link": "invite-get", "pending_requests": "requests"}
+    request: dict[str, Any] = {"account": account, "jid": exact_jid(jid),
+                               "action": names.get(action, action)}
+    if action in ("rename", "description"):
+        request["value"] = text_argument(value, action, action == "rename")
+    elif action in ("announce_only", "locked"):
+        if not isinstance(value, bool):
+            raise ToolError("value must be true or false.")
+        request["value"] = value
+    elif action == "add":
+        request["value"] = group_users(value if isinstance(value, list) else [value])
+    elif action in ("promote", "approve_request"):
+        request["value"] = exact_jid(value, "value")
+    if action in ("invite_link", "pending_requests"):
+        request["authorization"] = "remote-read"
+    return run_group_action(request)
+
+
+@tool("remove_or_leave_group", "Remove people or leave a group",
+      "Remove a participant, take away admin, reject a join request, reset the invite link, "
+      "or leave the group.",
+      {"jid": JID, "action": {"type": "string",
+                              "enum": ["remove", "demote", "reject_request", "reset_invite_link", "leave"]},
+       "user": {"type": "string", "description": "Participant jid for remove, demote and reject_request."}},
+      ("jid", "action"), kind="write", destructive=True)
+def remove_or_leave_group(jid: str, action: str, user: str = "",
+                          account: str = "") -> dict[str, Any]:
+    names = {"reject_request": "reject", "reset_invite_link": "invite-revoke"}
+    request: dict[str, Any] = {"account": account, "jid": exact_jid(jid),
+                               "action": names.get(action, action)}
+    if action in ("remove", "demote", "reject_request"):
+        request["value"] = exact_jid(user, "user")
+    return run_group_action(request)
+
+
+# ------------------------------------------------------------------ v2
+
+@tool("fetch_older_history", "Fetch older history",
+      "Ask the phone for older messages of one chat that are not in the local archive yet. "
+      "It is a routine in two calls: the first returns what to ask the user (open WhatsApp "
+      "on the phone, on that chat) and changes nothing; call again with phone_ready: true "
+      "only after the user confirms. Each batch pauses background sync for up to about a "
+      "minute. If the phone does not answer, tell the user; do not retry on your own.",
+      {"chat": CHAT,
+       "phone_ready": {"type": "boolean",
+                       "description": "true only after the user said WhatsApp is open on the phone."},
+       "batches": {"type": "integer", "description": "History batches to request, default 1, at most 10."},
+       "per_batch": {"type": "integer", "description": "Messages per batch, default 50, at most 200."}},
+      ("chat",), kind="write")
+def fetch_older_history(chat: str, phone_ready: bool = False, batches: int = 1,
+                        per_batch: int = 50, account: str = "") -> dict[str, Any]:
+    target = resolve_chat(chat, account)
+    scope = str(target.get("account") or account)
+    details = helper("chat-details", chat_payload(target, account))
+    before = details.get("counts") or {}
+    name = str((details.get("chat") or {}).get("name") or target.get("name") or "this chat")
+    oldest = local_time(details.get("since"))
+    if not phone_ready:
+        # Nothing is paused yet: the phone answers history requests only
+        # while WhatsApp runs there, so the user opens it first. It must be
+        # the phone of the number linked here, not the contact's.
+        try:
+            linked = gateway(["auth", "status"], account=scope) or {}
+        except ToolError:
+            linked = {}
+        digits = digits_of(linked.get("phone") if isinstance(linked, dict) else "")
+        phone = f" with the number +{digits}" if digits else ""
+        since = f" This computer has its messages since {oldest[:10]}; if the chat began then, there is nothing older." if oldest else ""
+        return compact({
+            "done": False,
+            "ask_user": (f"Open WhatsApp on the phone{phone} (the account linked here, not "
+                         f"{name}'s phone), open the chat with {name}, and keep the screen on. "
+                         "Tell me when it is ready." + since),
+            "local_archive_starts": oldest,
+            "messages_here": before.get("total"),
+            "next": "After the user confirms, call fetch_older_history again with phone_ready: true.",
+        })
+    requests = bounded(batches, 1, 1, 10)
+    try:
+        gateway(["history", "backfill", "--chat", target["jid"], "--requests", str(requests),
+                 "--count", str(bounded(per_batch, 50, 1, 200))], "sync", scope,
+                timeout=90 * requests + 30)
+    except ToolError as exc:
+        detail = str(exc)
+        silent = "no history response" in detail or "too long" in detail.lower()
+        raise ToolError(
+            ("The phone did not answer the history request. " if silent else detail + " ")
+            + "Either the chat has nothing older than what this computer has, or WhatsApp was "
+            "not open on the phone of the linked number. Ask the user which it is before "
+            "trying once more.") from exc
+    after = helper("chat-details", chat_payload(target, account)).get("counts") or {}
+    fetched = int(after.get("total") or 0) - int(before.get("total") or 0)
+    result: dict[str, Any] = {"done": True, "fetched": max(0, fetched),
+                              "messages_before": before.get("total"),
+                              "messages_now": after.get("total")}
+    if fetched <= 0:
+        result["note"] = ("The phone sent nothing new: this chat may have no older messages, "
+                          "or the phone did not have them loaded.")
+    return result
+
+
+@tool("list_calls", "Call history",
+      "Voice and video calls newest first, in every chat or one; missed_only keeps the "
+      "incoming calls you did not answer.",
+      {"chat": CHAT, "after": DATE, "before": DATE, "missed_only": BOOL,
+       "limit": {"type": "integer", "description": "Default 30, at most 200."}})
+def list_calls(chat: str = "", after: str = "", before: str = "", missed_only: bool = False,
+               limit: int = 30, account: str = "") -> dict[str, Any]:
+    count = bounded(limit, 30, 1, 200)
+    # Missed calls are a minority, so a filtered request scans the whole window.
+    arguments = ["calls", "list", "--limit", str(200 if missed_only else count)]
+    if chat:
+        arguments += ["--chat", resolve_chat(chat, account)["jid"]]
+    if after:
+        arguments += ["--after", rfc3339(after, "after")]
+    if before:
+        arguments += ["--before", rfc3339(before, "before")]
+    data = gateway(arguments, account=account) or {}
+    rows = (data.get("calls") or []) if isinstance(data, dict) else []
+    calls = []
+    for row in rows:
+        incoming = row.get("direction") == "inbound"
+        if missed_only and not (incoming and row.get("outcome") in ("missed", "rejected")):
+            continue
+        calls.append(compact({
+            "chat_jid": row.get("chat_jid"), "name": row.get("chat_name") or row.get("sender_name"),
+            "time": local_time(row.get("timestamp")),
+            "direction": "incoming" if incoming else "outgoing",
+            "outcome": row.get("outcome"), "media": row.get("media"),
+            "group_call": True if row.get("call_type") not in (None, "", "regular") else None,
+        }))
+    return {"calls": calls[:count]}
+
+
+@tool("list_contact_tags", "Contact tags",
+      "The tags you gave your contacts and how many people carry each.", {})
+def list_contact_tags(account: str = "") -> dict[str, Any]:
+    return {"tags": helper("contact-tags", {"account": account}).get("tags") or []}
+
+
+@tool("tag_contacts", "Tag contacts",
+      "Add a tag to people, or remove it (for example fornecedores, clientes). Tags live in "
+      "this computer's archive, not on the phone. Pauses background sync briefly.",
+      {"jids": {"type": "array", "items": {"type": "string"}, "description": "Exact contact jids, up to 50."},
+       "tag": STRING, "remove": BOOL}, ("jids", "tag"), kind="write")
+def tag_contacts(jids: list[str], tag: str, remove: bool = False,
+                 account: str = "") -> dict[str, Any]:
+    label = " ".join(str(tag or "").split())
+    if not 1 <= len(label) <= 64:
+        raise ToolError("A tag needs 1 to 64 characters.")
+    if not 1 <= len(jids) <= MAX_BULK:
+        raise ToolError(f"Choose 1 to {MAX_BULK} people.")
+    done: list[str] = []
+    for jid in jids:
+        try:
+            gateway(["contacts", "tags", "rm" if remove else "add", "--jid", exact_jid(jid),
+                     "--tag", label], "local-write", account, timeout=60)
+        except ToolError as exc:
+            raise ToolError(f"Stopped at {jid}: {exc}. Already done: "
+                            + (", ".join(done) or "none")) from exc
+        done.append(jid)
+    return {"done": True, "tag": label, "people": len(done), "removed": remove}
+
+
+@tool("set_contact_alias", "Set a contact alias",
+      "Give a person your own name for them on this computer, or clear it with an empty alias.",
+      {"jid": {"type": "string", "description": "Exact contact jid."}, "alias": STRING},
+      ("jid",), kind="write")
+def set_contact_alias(jid: str, alias: str = "", account: str = "") -> dict[str, Any]:
+    name = " ".join(str(alias or "").split())[:128]
+    arguments = (["contacts", "alias", "set", "--jid", exact_jid(jid), "--alias", name] if name
+                 else ["contacts", "alias", "rm", "--jid", exact_jid(jid)])
+    gateway(arguments, "local-write", account, timeout=60)
+    return {"done": True, "alias": name}
+
+
+def person_name(jid: str, account: str, chats: list[dict[str, Any]]) -> str:
+    for row in chats:
+        if row.get("jid") == jid and row.get("name"):
+            return str(row["name"])
+    people = helper("contacts-search", {"account": account,
+                                        "query": jid.split("@")[0], "limit": 5}).get("people") or []
+    for person in people:
+        if person.get("jid") == jid:
+            return str(person.get("alias") or person.get("name") or "")
+    return ""
+
+
+@tool("send_individually", "Send one message to each person",
+      "Send the same text to each person as a separate private message (not a group), for "
+      "example everyone with a tag from find_contacts. {name} in the text becomes each "
+      "person's first name. Sends one at a time with a pause and stops at the first failure.",
+      {"jids": {"type": "array", "items": {"type": "string"},
+                "description": "Exact person jids, up to 50. Show the list to the user first."},
+       "text": STRING,
+       "pause_seconds": {"type": "integer", "description": "Wait between messages, default 4, 2 to 60."}},
+      ("jids", "text"), kind="write")
+def send_individually(jids: list[str], text: str, pause_seconds: int = 4,
+                      account: str = "") -> dict[str, Any]:
+    template = text_argument(text, "text")
+    people = list(dict.fromkeys(exact_jid(jid) for jid in jids))
+    if not 1 <= len(people) <= MAX_BULK:
+        raise ToolError(f"Choose 1 to {MAX_BULK} people.")
+    if any(not jid.endswith(("@s.whatsapp.net", "@lid")) for jid in people):
+        raise ToolError("send_individually is for people; use send_message for a group.")
+    pause = bounded(pause_seconds, 4, 2, 60)
+    chats = all_chats(account)
+    known = {row.get("jid") for row in chats}
+    sent_to: list[str] = []
+    for index, jid in enumerate(people):
+        first = (person_name(jid, account, chats).split() or [""])[0]
+        message = template.replace("{name}", first).strip()
+        try:
+            if jid in known:
+                helper("send", {"account": account, "jid": jid, "text": message}, timeout=120)
+            else:
+                helper("send-new", {"account": account, "target": {"jid": jid},
+                                    "text": message}, timeout=120)
+        except ToolError as exc:
+            return compact({"done": False, "sent": len(sent_to), "sent_to": sent_to,
+                            "stopped_at": jid, "error": str(exc),
+                            "not_sent": people[index + 1:]})
+        sent_to.append(jid)
+        if index < len(people) - 1:
+            time.sleep(pause)
+    return {"done": True, "sent": len(sent_to)}
+
+
+@tool("list_polls", "List polls",
+      "Polls newest first, in every chat or one, with their message ids for poll_results.",
+      {"chat": CHAT, "limit": {"type": "integer", "description": "Default 20, at most 100."}})
+def list_polls(chat: str = "", limit: int = 20, account: str = "") -> dict[str, Any]:
+    arguments = ["polls", "list", "--limit", str(bounded(limit, 20, 1, 100))]
+    if chat:
+        arguments += ["--chat", resolve_chat(chat, account)["jid"]]
+    data = gateway(arguments, account=account) or {}
+    return {"polls": compact((data.get("polls") or []) if isinstance(data, dict) else data or [])}
+
+
+@tool("poll_results", "Poll results",
+      "The options of one poll, how many votes each has and who voted for what.",
+      {"chat_jid": STRING, "id": MESSAGE}, ("chat_jid", "id"))
+def poll_results(chat_jid: str, id: str, account: str = "") -> dict[str, Any]:
+    data = gateway(["poll", "show", "--to", exact_jid(chat_jid, "chat_jid"), "--id", str(id)],
+                   account=account)
+    return {"poll": compact(data)}
+
+
+@tool("vote_poll", "Vote in a poll",
+      "Vote in a poll with one or more of its option texts exactly as written.",
+      {"chat_jid": STRING, "id": MESSAGE, "options": STRINGS},
+      ("chat_jid", "id", "options"), kind="write")
+def vote_poll(chat_jid: str, id: str, options: list[str], account: str = "") -> dict[str, Any]:
+    if not options:
+        raise ToolError("Choose at least one option.")
+    arguments = ["poll", "vote", "--to", exact_jid(chat_jid, "chat_jid"), "--id", str(id)]
+    for option in options:
+        arguments += ["--option", option]
+    gateway(arguments, "whatsapp-write", account, timeout=90)
+    return {"done": True}
+
+
+@tool("send_location", "Send a location",
+      "Send a map pin. To pass on a location someone sent, take latitude and longitude from "
+      "that message in read_chat or list_attachments.",
+      {"jid": JID, "latitude": {"type": "number"}, "longitude": {"type": "number"},
+       "name": {"type": "string", "description": "Place name shown on the pin."}},
+      ("jid", "latitude", "longitude"), kind="write")
+def send_location(jid: str, latitude: float, longitude: float, name: str = "",
+                  account: str = "") -> dict[str, Any]:
+    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+        raise ToolError("Latitude goes from -90 to 90 and longitude from -180 to 180.")
+    arguments = ["send", "location", "--to", exact_jid(jid), "--latitude", repr(float(latitude)),
+                 "--longitude", repr(float(longitude)), "--post-send-wait", "0"]
+    if name:
+        arguments += ["--name", text_argument(name, "name")[:256]]
+    gateway(arguments, "whatsapp-write", account, timeout=90)
+    return {"done": True}
+
+
+@tool("update_profile", "Update your profile",
+      "Change your WhatsApp name, your about text, or your profile photo. Your contacts see "
+      "the change. Pauses background sync briefly.",
+      {"name": STRING, "about": STRING,
+       "photo_path": {"type": "string", "description": "Absolute path of a JPEG or PNG."}},
+      kind="write")
+def update_profile(name: str = "", about: str = "", photo_path: str = "",
+                   account: str = "") -> dict[str, Any]:
+    if not (name or about or photo_path):
+        raise ToolError("Choose a name, an about text or a photo.")
+    changed = []
+    if name:
+        gateway(["profile", "set-name", text_argument(name, "name")[:25]], "whatsapp-write",
+                account, timeout=60)
+        changed.append("name")
+    if about:
+        try:
+            gateway(["profile", "set-about", text_argument(about, "about")[:139]],
+                    "whatsapp-write", account, timeout=60)
+        except ToolError as exc:
+            if "graphql" not in str(exc).lower():
+                raise
+            # Seen on a WhatsApp Business number: its about lives in the
+            # business profile, and WhatsApp refuses this change.
+            raise ToolError("WhatsApp refused the about change. WhatsApp Business accounts keep "
+                            "it in the business profile, which is edited on the phone."
+                            + (f" Already changed: {', '.join(changed)}." if changed else "")) from exc
+        changed.append("about")
+    if photo_path:
+        photo = Path(photo_path).expanduser()
+        if not photo.is_file():
+            raise ToolError("That photo does not exist.")
+        gateway(["profile", "set-picture", str(photo)], "whatsapp-write", account, timeout=120)
+        changed.append("photo")
+    return {"done": True, "changed": changed}
+
+
+@tool("post_status", "Post a status",
+      "Post a status update (text, or a photo or video with a caption) that your contacts "
+      "see for 24 hours. Pauses background sync briefly.",
+      {"text": {"type": "string", "description": "Status text, or the caption of the file."},
+       "file_path": {"type": "string", "description": "Absolute path of a photo or video."},
+       "background_color": {"type": "string", "description": "Text status color, #RRGGBB."}},
+      kind="write")
+def post_status(text: str = "", file_path: str = "", background_color: str = "",
+                account: str = "") -> dict[str, Any]:
+    if not (text or file_path):
+        raise ToolError("A status needs text or a file.")
+    arguments = ["send", "status", "--post-send-wait", "0"]
+    if text:
+        arguments += ["--message", text_argument(text, "text")]
+    if file_path:
+        media = Path(file_path).expanduser()
+        if not media.is_file():
+            raise ToolError("That file does not exist.")
+        arguments += ["--file", str(media)]
+    if background_color:
+        if not re.fullmatch(r"#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})", background_color):
+            raise ToolError("background_color must look like #RRGGBB.")
+        arguments += ["--background-color", background_color]
+    data = gateway(arguments, "whatsapp-write", account, timeout=180) or {}
+    return compact({"done": True, "status_id": data.get("id") if isinstance(data, dict) else None,
+                    "note": "delete_status with this status_id removes it for everyone."})
+
+
+@tool("list_statuses", "Status updates",
+      "Status updates of the last 24 hours kept on this computer: your contacts' and yours, "
+      "newest first, with who posted them. Media in a status is named, not downloaded.",
+      {"mine_only": BOOL})
+def list_statuses(mine_only: bool = False, account: str = "") -> dict[str, Any]:
+    rows = helper("statuses", {"account": account, "mine_only": mine_only}).get("statuses") or []
+    return {"statuses": [compact({
+        "id": row.get("id"), "time": local_time(row.get("timestamp")),
+        "from_me": bool(row.get("from_me")), "sender": row.get("sender"),
+        "sender_jid": row.get("sender_jid"), "text": row.get("text"),
+        "media_type": row.get("media_type"), "caption": row.get("caption"),
+        "filename": row.get("filename"),
+    }) for row in rows]}
+
+
+@tool("delete_status", "Delete a status",
+      "Delete one of your own status updates for everyone, by the id from post_status or "
+      "list_statuses. Pauses background sync briefly.",
+      {"id": {"type": "string", "description": "Your status id."}}, ("id",),
+      kind="write", destructive=True)
+def delete_status(id: str, account: str = "") -> dict[str, Any]:
+    helper("delete-status", {"account": account, "id": str(id)}, timeout=120)
+    return {"done": True}
+
+
+@tool("contact_profile", "Contact profile",
+      "Ask WhatsApp for one person's about text and, for a business account, its business "
+      "profile: description, category, address, email, website and opening hours.",
+      {"jid": {"type": "string", "description": "Exact contact jid."}}, ("jid",), kind="remote")
+def contact_profile(jid: str, account: str = "") -> dict[str, Any]:
+    target = exact_jid(jid)
+    about = gateway(["profile", "get-about", "--jid", target], "remote-read", account, timeout=60)
+    try:
+        business = gateway(["profile", "business", "--jid", target], "remote-read", account,
+                           timeout=60)
+    except ToolError:
+        business = None
+    return compact({"about": about, "business": business})
+
+
+@tool("list_channels", "List channels",
+      "The WhatsApp channels you follow. wacli does not keep channel posts, so their "
+      "content cannot be read here. Pauses background sync briefly.", {}, kind="remote")
+def list_channels(account: str = "") -> dict[str, Any]:
+    return {"channels": compact(gateway(["channels", "list"], "remote-read", account,
+                                        timeout=60) or [])}
+
+
+@tool("channel_info", "Channel details",
+      "Name, description and follower count of one channel.",
+      {"jid": {"type": "string", "description": "Channel jid, ending in @newsletter."}},
+      ("jid",), kind="remote")
+def channel_info(jid: str, account: str = "") -> dict[str, Any]:
+    return {"channel": compact(gateway(["channels", "info", "--jid", exact_jid(jid)],
+                                       "remote-read", account, timeout=60))}
+
+
+@tool("join_channel", "Follow a channel",
+      "Follow a channel from its invite link.",
+      {"invite": {"type": "string", "description": "https://whatsapp.com/channel/... link or code."}},
+      ("invite",), kind="write")
+def join_channel(invite: str, account: str = "") -> dict[str, Any]:
+    return compact(dict(gateway(["channels", "join", "--invite", text_argument(invite, "invite")],
+                                "whatsapp-write", account, timeout=60) or {}, done=True))
+
+
+@tool("leave_channel", "Unfollow a channel", "Stop following one channel.",
+      {"jid": {"type": "string", "description": "Channel jid, ending in @newsletter."}},
+      ("jid",), kind="write", destructive=True)
+def leave_channel(jid: str, account: str = "") -> dict[str, Any]:
+    gateway(["channels", "leave", "--jid", exact_jid(jid)], "destructive", account, timeout=60)
+    return {"done": True}
+
+
+@tool("export_chat", "Export a chat",
+      "Write one chat's messages to a JSON file on this computer. The file holds private "
+      "messages; save it where the user asked, outside code repositories.",
+      {"chat": CHAT, "path": {"type": "string", "description": "Absolute path of the new .json file."},
+       "after": DATE, "before": DATE,
+       "limit": {"type": "integer", "description": "Default 5000, at most 100000."}},
+      ("chat", "path"), kind="write")
+def export_chat(chat: str, path: str, after: str = "", before: str = "", limit: int = 5000,
+                account: str = "") -> dict[str, Any]:
+    target = resolve_chat(chat, account)
+    requested = Path(path).expanduser()
+    if not requested.is_absolute():
+        raise ToolError("path must be absolute.")
+    if not requested.parent.is_dir():
+        raise ToolError("The folder for that file does not exist.")
+    # The helper authorizes the resolved path, so a symlinked folder matches.
+    destination = requested.parent.resolve() / requested.name
+    if os.path.lexists(destination):
+        raise ToolError("A file is already there; choose a new file name.")
+    arguments = ["messages", "export", "--chat", target["jid"], "--output", str(destination),
+                 "--limit", str(bounded(limit, 5000, 1, 100000))]
+    if after:
+        arguments += ["--after", rfc3339(after, "after")]
+    if before:
+        arguments += ["--before", rfc3339(before, "before")]
+    gateway(arguments, f"private-export:{destination}", str(target.get("account") or account),
+            timeout=300)
+    return compact({"done": True, "path": str(destination),
+                    "size_bytes": destination.stat().st_size if destination.is_file() else None})
+
+
+@tool("join_group", "Join a group by link",
+      "Join a group from its invite link.",
+      {"invite": {"type": "string", "description": "https://chat.whatsapp.com/... link or code."}},
+      ("invite",), kind="write")
+def join_group(invite: str, account: str = "") -> dict[str, Any]:
+    match = INVITE.search(str(invite or "").strip().rstrip("/"))
+    if not match:
+        raise ToolError("That is not a WhatsApp group invite link.")
+    data = gateway(["groups", "join", "--code", match.group(1)], "whatsapp-write", account,
+                   timeout=90) or {}
+    return compact({"done": True, "jid": data.get("jid") if isinstance(data, dict) else None})
+
+
+@tool("download_pending_media", "Download missing attachments",
+      "Download attachments that are not on this computer yet, in one chat or the most recent "
+      "ones overall, beside the live sync. ask_phone also asks the phone to re-send expired "
+      "ones, which pauses background sync.",
+      {"chat": CHAT, "limit": {"type": "integer", "description": "Default 20, at most 100."},
+       "kinds": {"type": "array", "items": {"type": "string", "enum": ATTACHMENT_KINDS}},
+       "ask_phone": BOOL}, kind="remote")
+def download_pending_media(chat: str = "", limit: int = 20, kinds: list[str] | None = None,
+                           ask_phone: bool = False, account: str = "") -> dict[str, Any]:
+    payload: dict[str, Any] = {"account": account, "missing_only": True,
+                               "kinds": [kind for kind in (kinds or ATTACHMENT_KINDS)
+                                         if kind != "location"],
+                               "limit": bounded(limit, 20, 1, 100)}
+    target = resolve_chat(chat, account) if chat else None
+    if target:
+        payload["jid"] = target["jid"]
+    pending = helper("attachments", payload).get("attachments") or []
+    downloaded, failed, expired = 0, [], 0
+    for item in pending:
+        if item.get("available") is False:
+            expired += 1
+            continue
+        try:
+            helper("media", {"account": account, "jid": item["chat_jid"], "id": item["id"]},
+                   timeout=240)
+            downloaded += 1
+        except ToolError as exc:
+            # WhatsApp's media server answers 403 once an old file expired there.
+            if "403" in str(exc):
+                expired += 1
+                continue
+            failed.append(compact({"chat_name": item.get("chat_name"), "id": item.get("id"),
+                                   "error": str(exc)}))
+    result: dict[str, Any] = {"downloaded": downloaded, "failed": failed or None,
+                              "expired": expired or None}
+    if expired and not ask_phone:
+        result["hint"] = ("Expired files are no longer on WhatsApp's server; ask_phone: true "
+                          "asks the phone to send them again if it still has them.")
+    if ask_phone:
+        arguments = ["media", "retry", "--limit", str(bounded(limit, 20, 1, 100))]
+        if target:
+            arguments += ["--chat", target["jid"]]
+        result["asked_phone"] = compact(gateway(arguments, "sync", account, timeout=300))
+    return compact(result)
+
+
+# ------------------------------------------------------------------ protocol
+
+def call_tool(name: str, arguments: Any) -> dict[str, Any]:
+    entry = TOOLS.get(name)
+    if entry is None:
+        return {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}
+    try:
+        values = validate(entry["inputSchema"], arguments)
+        result = entry["handler"](**values)
+    except ToolError as exc:
+        text = str(exc)
+        if exc.partial:
+            text += "\nPartly done: " + json.dumps(exc.partial, ensure_ascii=False)
+        return {"content": [{"type": "text", "text": text}], "isError": True}
+    except Exception as exc:  # A tool bug must not take the server down.
+        return {"content": [{"type": "text",
+                             "text": f"OmaWhatsApp failed unexpectedly ({type(exc).__name__})."}],
+                "isError": True}
+    return {"content": [{"type": "text",
+                         "text": json.dumps(result, ensure_ascii=False, separators=(",", ":"))}],
+            "isError": False}
+
+
+def listed_tools() -> list[dict[str, Any]]:
+    return [{key: value for key, value in entry.items() if key != "handler"}
+            for entry in TOOLS.values()]
+
+
+def respond(message: dict[str, Any]) -> dict[str, Any] | None:
+    method = message.get("method")
+    identifier = message.get("id")
+    params = message.get("params") if isinstance(message.get("params"), dict) else {}
+    if identifier is None:
+        return None  # A notification such as notifications/initialized.
+    if method == "initialize":
+        requested = str(params.get("protocolVersion") or "")
+        result: Any = {
+            "protocolVersion": requested if requested in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
+            "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": {"name": "omawhatsapp", "title": "OmaWhatsApp", "version": VERSION},
+            "instructions": INSTRUCTIONS,
+        }
+    elif method == "ping":
+        result = {}
+    elif method == "tools/list":
+        result = {"tools": listed_tools()}
+    elif method == "tools/call":
+        result = call_tool(str(params.get("name") or ""), params.get("arguments"))
+    else:
+        return {"jsonrpc": "2.0", "id": identifier,
+                "error": {"code": -32601, "message": f"Method not found: {method}"}}
+    return {"jsonrpc": "2.0", "id": identifier, "result": result}
+
+
+def serve(stdin: Any = sys.stdin, stdout: Any = sys.stdout) -> int:
+    for line in stdin:
+        if not line.strip():
+            continue
+        try:
+            message = json.loads(line)
+        except ValueError:
+            reply: Any = {"jsonrpc": "2.0", "id": None,
+                          "error": {"code": -32700, "message": "Parse error"}}
+        else:
+            batch = message if isinstance(message, list) else [message]
+            replies = [respond(item) if isinstance(item, dict) else
+                       {"jsonrpc": "2.0", "id": None,
+                        "error": {"code": -32600, "message": "Invalid request"}}
+                       for item in batch]
+            replies = [item for item in replies if item is not None]
+            if not replies:
+                continue
+            reply = replies if isinstance(message, list) else replies[0]
+        stdout.write(json.dumps(reply, ensure_ascii=False) + "\n")
+        stdout.flush()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(serve())

@@ -64,6 +64,16 @@ function isMultiAccount(accounts) {
   return Array.isArray(accounts) && accounts.length > 1
 }
 
+// Where an account sits in the configured order; its color follows it.
+function accountIndex(accounts, name) {
+  var values = Array.isArray(accounts) ? accounts : []
+  var wanted = String(name || "")
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i] && values[i].account || "") === wanted) return i
+  }
+  return -1
+}
+
 function accountOptions(accounts) {
   var values = Array.isArray(accounts) ? accounts : []
   var options = []
@@ -91,12 +101,35 @@ function normalizeScope(scope, accounts) {
   return ""
 }
 
-function filterChats(chats, scope, query, limit) {
+// Rail views, as in WhatsApp: archived chats live in their own view and stay
+// out of the others, except that a search looks through them too.
+var CHAT_VIEWS = ["all", "unread", "groups", "archived"]
+function matchesView(chat, view, searching) {
+  var archived = chat && chat.archived === true
+  var name = String(view || "all")
+  if (name === "archived") return archived
+  if (archived && !(searching && name === "all")) return false
+  if (name === "unread") return Number(chat.unread || 0) > 0
+  if (name === "groups") return String(chat.kind || "") === "group"
+  // People whose message is the last one in the chat: replies you owe.
+  if (name === "reply") return String(chat.kind || "") === "dm"
+    && chat.last_from_me !== true && Number(chat.timestamp || 0) > 0
+  return true
+}
+function viewCount(chats, scope, view) {
+  var account = String(scope || "")
+  return (Array.isArray(chats) ? chats : []).filter(function(chat) {
+    return (account === "" || accountOf(chat) === account) && matchesView(chat, view, false)
+  }).length
+}
+
+function filterChats(chats, scope, query, limit, view) {
   var values = Array.isArray(chats) ? chats : []
   var account = String(scope || "")
   var needle = String(query || "").trim().toLowerCase()
   var filtered = values.filter(function(chat) {
     if (account !== "" && accountOf(chat) !== account) return false
+    if (view !== undefined && !matchesView(chat, view, needle !== "")) return false
     return needle === ""
       || String(chat.name || "").toLowerCase().indexOf(needle) >= 0
       || String(chat.preview || "").toLowerCase().indexOf(needle) >= 0
@@ -192,4 +225,99 @@ function forwardTargets(chats, chat) {
 function forwardTargetsForRef(chats, ref) {
   var origin = findChat(chats, ref)
   return origin ? forwardTargets(chats, origin) : []
+}
+
+// The message the "N unread messages" divider sits above: the Nth newest
+// message from someone else when the chat opened. Anchoring to that message,
+// not to a position from the bottom, keeps your own replies and anything that
+// arrives later below the divider. Lists are newest first.
+function unreadAnchorId(messages, count) {
+  var wanted = Number(count || 0)
+  var items = messages || []
+  var anchor = ""
+  var seen = 0
+  for (var i = 0; i < items.length && seen < wanted; i++) {
+    var item = items[i]
+    if (!item || item.from_me === true || item.pending === true) continue
+    anchor = String(item.id || "")
+    seen++
+  }
+  return anchor
+}
+
+// Row of a message in a list whose albums fold several messages into one row.
+function messageIndexOf(items, id) {
+  var target = String(id || "")
+  var rows = items || []
+  if (target === "") return -1
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i]) continue
+    if (String(rows[i].id || "") === target) return i
+    var album = rows[i].album_items || []
+    for (var j = 0; j < album.length; j++)
+      if (album[j] && String(album[j].id || "") === target) return i
+  }
+  return -1
+}
+
+// Messages loaded for this chat, not counting bubbles still being sent.
+function hasStoredMessages(messages) {
+  var items = messages || []
+  for (var i = 0; i < items.length; i++)
+    if (items[i] && items[i].pending !== true) return true
+  return false
+}
+
+// Two messages form one run when the same person sent them within ten
+// minutes: timelines tighten the gap and name the sender once.
+function sameRun(older, newer) {
+  if (!older || !newer) return false
+  if ((older.from_me === true) !== (newer.from_me === true)) return false
+  if (older.from_me !== true
+      && String(older.sender_jid || older.sender || "") !== String(newer.sender_jid || newer.sender || ""))
+    return false
+  return Math.abs(Number(newer.timestamp || 0) - Number(older.timestamp || 0)) < 600
+}
+
+// The list's preview for the latest message: media gets its kind, and a bare
+// "[image]"-style placeholder reads as a word. A caption or file name stays.
+var PREVIEW_KINDS = {
+  image: { kind: "photo", label: "Photo" },
+  video: { kind: "video", label: "Video" },
+  gif: { kind: "gif", label: "GIF" },
+  sticker: { kind: "sticker", label: "Sticker" },
+  audio: { kind: "voice", label: "Voice message" },
+  document: { kind: "document", label: "Document" },
+  location: { kind: "location", label: "Location" }
+}
+
+function previewParts(chat) {
+  var text = String(chat && chat.preview || "")
+  var entry = PREVIEW_KINDS[String(chat && chat.last_media_type || "").toLowerCase()]
+  if (!entry) return { kind: "", text: text }
+  var placeholder = /^\[[a-z]+\]$/i.test(text.trim()) || text.trim() === ""
+  return { kind: entry.kind, text: placeholder ? entry.label : text }
+}
+
+// A group's preview names who wrote it, by first name, as on the phone.
+function previewSender(chat) {
+  if (!chat || chat.kind !== "group" || chat.last_from_me === true) return ""
+  var name = String(chat.last_sender || "").trim().split(/\s+/)[0] || ""
+  return name === "" ? "" : name + ": "
+}
+
+// Nerd Font glyphs shared by the full app and the dropdown: a sent message's
+// delivery state ("" when none is known) and the kind of a preview.
+function deliveryGlyph(status) {
+  var value = String(status || "")
+  if (value === "sent") return "󰄬"
+  if (value === "delivered" || value === "read" || value === "played") return "󰄭"
+  if (value === "pending") return "󰅐"
+  if (value === "error") return "󰀦"
+  return ""
+}
+
+function previewKindGlyph(kind) {
+  return ({ photo: "󰄀", video: "󰕧", gif: "󰵸", sticker: "󰞅", voice: "󰍬",
+    document: "󰈙", location: "󰍎" })[String(kind || "")] || ""
 }

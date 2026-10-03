@@ -5,6 +5,10 @@ description: Inspect, search, summarize, sync, and operate WhatsApp through OmaW
 
 # OmaWhatsApp
 
+When the `whatsapp` MCP server (`~/.local/bin/omawhatsapp-mcp`) is connected,
+prefer its tools: they call this helper with the right authorization classes
+and apply the same boundaries below. Otherwise use the helper directly.
+
 Use the installed `~/.local/bin/omawhatsapp` helper. Its focused commands keep
 ordinary chat work inside the locally indexed DM/standalone-group boundary.
 Its guarded `wacli` gateway covers every command leaf in the supported wacli
@@ -15,14 +19,14 @@ invoking `wacli` directly.
 
 - For a runtime WhatsApp operation, follow the guarded workflow below.
 - For source, test, deployment, release, or submission work, follow the
-  checkout's `AGENTS.md` and repository workflow. Never edit an installed
+  repository's `CONTRIBUTING.md` and workflow. Never edit an installed
   helper, plugin, or skill as source; use only synthetic/demo data for public
   evidence. Runtime authorization does not authorize repository writes,
   pushes, deployments, releases, or submissions.
   In-app release checks are opt-in and contact GitHub, not WhatsApp. App settings
   include `check_updates_on_launch`; changing it is a local preference write.
-  Standalone upgrades require separate installation approval and a confirmation
-  terminal. Managed copies must use their repository/plugin-manager workflow.
+  Updates run `omarchy plugin update` in a terminal the user confirms; they
+  need separate approval and are never started by the skill.
 
 ## Safety boundary
 
@@ -43,9 +47,9 @@ invoking `wacli` directly.
 - Never create a test write. Never retry a possibly delivered send, vote,
   reaction, edit, deletion, membership change, profile change, status,
   channel/group action, or account mutation automatically.
-- Opening or reading a chat does not grant an agent permission to send a read
-  receipt or change the user's private-reading preference. Send a receipt or
-  change that preference only after an explicit request.
+- Reading a chat through the helper never marks it read. Mark a chat read or
+  unread, or change the automatic-reading preference, only after an explicit
+  request; the phone shows the change.
 - Respect offline mode. Do not turn background sync on merely to complete
   another action. Local reads and explicitly requested local maintenance may
   continue; remote reads, sync, and WhatsApp mutations must stop.

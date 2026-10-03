@@ -14,8 +14,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parent.parent
-HELPER = ROOT / "bin/omawhatsapp"
-WACLI = Path(os.environ.get("WACLI_BIN", Path.home() / ".local/bin/wacli"))
+HELPER = ROOT / "bin/omawhatsapp_core.py"
 
 
 def load_helper():
@@ -27,6 +26,10 @@ def load_helper():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+# The same wacli the app would use: WACLI_BIN, ~/.local/bin, then the system.
+WACLI = load_helper().locate_wacli()
 
 
 @lru_cache(maxsize=None)
@@ -82,27 +85,60 @@ def main() -> int:
         check=False,
     )
     match = re.fullmatch(
-        rf"wacli\s+v?{re.escape(helper.WACLI_PARITY_VERSION)}\s*",
+        r"wacli\s+v?([0-9]+(?:[.][0-9]+)+)\s*",
         version.stdout or version.stderr,
     )
     if version.returncode != 0 or match is None:
+        print("parity: could not read the installed wacli version", file=sys.stderr)
+        return 1
+    installed = match.group(1)
+    if version_key(installed) < version_key(helper.WACLI_MINIMUM_VERSION):
         print(
-            f"parity: requires exactly wacli {helper.WACLI_PARITY_VERSION}",
+            f"parity: requires wacli {helper.WACLI_MINIMUM_VERSION} or newer "
+            f"(found {installed})",
             file=sys.stderr,
         )
         return 1
+    if installed != helper.WACLI_PARITY_VERSION:
+        print(
+            f"parity: installed wacli {installed} differs from the tested "
+            f"{helper.WACLI_PARITY_VERSION}",
+            file=sys.stderr,
+        )
     discovered = leaves()
     # `auth` is both an executable QR flow and a parent for status/logout.
     discovered.add(("auth",))
     registered = set(helper.WACLI_OPERATION_POLICIES)
+    # A leaf the installed wacli has but the registry does not is always an
+    # error: it would stay blocked for agents until classified. A registered
+    # leaf the installed wacli lacks is only acceptable when the registry says
+    # that leaf appeared in a later release than the one installed.
     missing = sorted(discovered - registered)
-    stale = sorted(registered - discovered)
+    installed_key = version_key(installed)
+    expected_absent = []
+    stale = []
+    optional = getattr(helper, "WACLI_OPTIONAL_LEAVES", frozenset())
+    for path in sorted(registered - discovered):
+        if path in optional:
+            # A fork-only leaf: official releases lack it by design.
+            continue
+        needs = helper.WACLI_LEAF_MINIMUM_VERSIONS.get(path, helper.WACLI_MINIMUM_VERSION)
+        if version_key(needs) > installed_key:
+            expected_absent.append((path, needs))
+        else:
+            stale.append(path)
+    for path in missing:
+        print(f"parity: unclassified wacli leaf: {' '.join(path)}", file=sys.stderr)
+    for path in stale:
+        print(f"parity: registered leaf missing from wacli: {' '.join(path)}", file=sys.stderr)
+    for path, needs in expected_absent:
+        print(
+            f"parity: {' '.join(path)} needs wacli {needs}; installed {installed} lacks it",
+            file=sys.stderr,
+        )
     if missing or stale:
-        for path in missing:
-            print(f"parity: unclassified wacli leaf: {' '.join(path)}", file=sys.stderr)
-        for path in stale:
-            print(f"parity: registered leaf missing from wacli: {' '.join(path)}", file=sys.stderr)
         return 1
+    strict = not expected_absent
     optional_chat_contract = {
         ("calls", "list"): "--chat",
         ("history", "coverage"): "--chat",
@@ -114,6 +150,8 @@ def main() -> int:
         ("profile", "picture-info"): "--jid",
     }
     for path, flag in {**optional_chat_contract, **contact_contract}.items():
+        if path not in discovered:
+            continue
         advertised = set(re.findall(r"(?<!\S)(--[a-z0-9-]+)(?:[ =]|$)", help_text(path)))
         if flag not in advertised:
             print(
@@ -137,9 +175,14 @@ def main() -> int:
             return 1
     print(
         f"OmaWhatsApp covers all {len(registered)} wacli "
-        f"{helper.WACLI_PARITY_VERSION} command leaves."
+        f"{helper.WACLI_PARITY_VERSION} command leaves"
+        + ("." if strict else f" ({len(expected_absent)} not yet in installed {installed}).")
     )
     return 0
+
+
+def version_key(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.split("."))
 
 
 if __name__ == "__main__":

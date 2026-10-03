@@ -14,13 +14,20 @@ import time
 import unittest
 from unittest import mock
 
-from test_backend import SCHEMA, SCRIPT, backend_module
+from test_backend import SCHEMA, SCRIPT, backend_module, installed_units
 
 
 class BackendHardeningTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        # Session markers (quit, launch) live in the runtime directory; keep
+        # them in the test's own tree, never the desktop session's.
+        runtime = self.root / "runtime"
+        runtime.mkdir(mode=0o700, exist_ok=True)
+        environment = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.store = self.root / "store"
         self.store.mkdir()
         self.wacli = self.root / "wacli"
@@ -64,6 +71,7 @@ class BackendHardeningTests(unittest.TestCase):
             state_dir=self.root / "state",
             wacli=self.wacli,
             account_config=self.root / "absent.yaml",
+            unit_dir=installed_units(self.root),
         )
 
     def tearDown(self) -> None:
@@ -395,6 +403,13 @@ class BackendHardeningTests(unittest.TestCase):
                 })
             self.assertEqual(result["policy"], "private-export")
             self.assertFalse(mutate.call_args.kwargs["require_online"])
+
+            destination.write_text("mine", encoding="utf-8")
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "already at that export path"):
+                self.backend.transport({"args": args,
+                                        "authorization": f"private-export:{destination}"})
+            self.assertEqual(destination.read_text(encoding="utf-8"), "mine")
+            destination.unlink()
 
             repository = self.root / "repository"
             (repository / ".git").mkdir(parents=True)
@@ -786,20 +801,43 @@ class BackendHardeningTests(unittest.TestCase):
         )
         self.assertEqual(len(hints), 40)
 
-    def test_release_scripts_pin_version_and_reconcile_stale_instances(self) -> None:
-        source = SCRIPT.parent.parent
-        installer = (source / "scripts" / "install").read_text(encoding="utf-8")
-        parity = (source / "scripts" / "check-wacli-parity").read_text(encoding="utf-8")
-        self.assertIn("[[ $wacli_version != 0.17.1 ]]", installer)
-        self.assertIn("list-unit-files", installer)
-        self.assertIn("list-units --all", installer)
-        self.assertIn("requires exactly wacli", parity)
+    def test_an_old_wacli_is_refused_at_runtime(self) -> None:
+        # Nothing installs wacli with the app, so the helper checks the minimum.
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            wacli = root / "wacli"
+            wacli.write_text("#!/bin/sh\necho 'wacli 0.16.9'\n", encoding="utf-8")
+            wacli.chmod(0o700)
+            (root / "store").mkdir()
+            backend = backend_module.Backend(store_dir=root / "store", state_dir=root / "state",
+                                             wacli=wacli, account_config=root / "absent.yaml")
+            status = backend.status()
+            self.assertFalse(status["ok"])
+            self.assertTrue(status["wacli_too_old"])
+            self.assertIn("older than 0.17.1", status["error"])
+            self.assertIn("omarchy pkg aur add wacli-bin", status["error"])
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "older than 0.17.1"):
+                backend.setup(True, False)
+            # The version is cached until the binary changes.
+            wacli.write_text("#!/bin/sh\necho 'wacli 0.19.0'\n", encoding="utf-8")
+            os.utime(wacli, ns=(wacli.stat().st_atime_ns, wacli.stat().st_mtime_ns + 1_000_000))
+            self.assertEqual(backend._wacli_version(), "0.19.0")
+        parity = (SCRIPT.parent.parent / "scripts" / "check-wacli-parity").read_text(encoding="utf-8")
+        self.assertIn("WACLI_MINIMUM_VERSION", parity)
+        self.assertIn("locate_wacli()", parity, "the parity check uses the app's own wacli")
 
 
 class AccountLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        # Session markers (quit, launch) live in the runtime directory; keep
+        # them in the test's own tree, never the desktop session's.
+        runtime = self.root / "runtime"
+        runtime.mkdir(mode=0o700, exist_ok=True)
+        environment = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(runtime)})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.wacli = self.root / "wacli"
         self.wacli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         self.wacli.chmod(0o700)
@@ -816,6 +854,7 @@ class AccountLifecycleTests(unittest.TestCase):
             state_dir=self.root / "state",
             wacli=self.wacli,
             account_config=self.root / "absent.yaml",
+            unit_dir=installed_units(self.root),
         )
         self.backend._accounts = [self.work, self.home]
         self.backend._active = self.work

@@ -46,7 +46,7 @@ TestCase {
     compare(findChild(header, "chatAvatarFallback").text, "SF")
 
     app.selectChat(group)
-    compare(findChild(header, "chatAvatarFallback").text, "󰠮")
+    compare(findChild(header, "chatAvatarFallback").text, "SG")
 
     app.demoChats = []
     compare(app.selectedChat, null)
@@ -78,10 +78,36 @@ TestCase {
 
   function test_groups_keep_a_clear_fallback_when_no_photo_exists() {
     var avatar = createTemporaryObject(avatarComponent, testCase, {
-      chat: { name: "Synthetic Group", kind: "group", avatar_path: "" }
+      width: 38, height: 38,
+      chat: { jid: "synthetic-group", name: "Synthetic Group", kind: "group", avatar_path: "" }
     })
     verify(avatar !== null)
     compare(avatar.avatarReady, false)
-    compare(findChild(avatar, "chatAvatarFallback").text, "󰠮")
+    // Initials on a rounded square: the shape says group, the letters which.
+    compare(findChild(avatar, "chatAvatarFallback").text, "SG")
+    verify(avatar.shapeRadius < avatar.width / 2)
+    var unnamed = createTemporaryObject(avatarComponent, testCase, {
+      chat: { name: "", kind: "group", avatar_path: "" }
+    })
+    compare(findChild(unnamed, "chatAvatarFallback").text, "󰠮")
+  }
+
+  function test_people_are_round_and_each_chat_keeps_its_own_color() {
+    var first = createTemporaryObject(avatarComponent, testCase, {
+      width: 38, height: 38,
+      chat: { jid: "synthetic-a", name: "Synthetic A", kind: "dm", avatar_path: "" }
+    })
+    var again = createTemporaryObject(avatarComponent, testCase, {
+      width: 38, height: 38,
+      chat: { jid: "synthetic-a", name: "Synthetic A", kind: "dm", avatar_path: "" }
+    })
+    var other = createTemporaryObject(avatarComponent, testCase, {
+      width: 38, height: 38,
+      chat: { jid: "synthetic-b", name: "Synthetic B", kind: "dm", avatar_path: "" }
+    })
+    compare(first.shapeRadius, 19)
+    compare(String(first.tint), String(again.tint))
+    verify(String(first.tint) !== String(other.tint))
+    compare(String(findChild(first, "chatAvatarBackdrop").color), String(first.tint))
   }
 }

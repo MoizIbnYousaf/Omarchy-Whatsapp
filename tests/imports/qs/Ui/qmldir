@@ -6,3 +6,7 @@ Panel 1.0 Panel.qml
 PanelKeyCatcher 1.0 PanelKeyCatcher.qml
 TextField 1.0 TextField.qml
 ToggleSwitch 1.0 ToggleSwitch.qml
+PanelActionButton 1.0 PanelActionButton.qml
+PanelToolTip 1.0 PanelToolTip.qml
+BarWidget 1.0 BarWidget.qml
+WidgetButton 1.0 WidgetButton.qml

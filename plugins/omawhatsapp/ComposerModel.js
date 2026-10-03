@@ -236,3 +236,33 @@ function failedState(current, kind, request, submitted, details) {
   if (sameContext(state.reply, consumed.reply)) state.reply = snapshot.reply
   return state
 }
+
+// The account's signature (from status): off unless it names someone.
+function signatureOf(accounts, account) {
+  var list = Array.isArray(accounts) ? accounts : []
+  var wanted = String(account || "")
+  for (var i = 0; i < list.length; i++) {
+    var item = list[i]
+    if (!item || (wanted !== "" && String(item.account || "") !== wanted)) continue
+    var value = item.signature || ({})
+    var name = String(value.name || "").trim()
+    return { enabled: value.enabled === true && name !== "", name: name,
+      position: value.position === "bottom" ? "bottom" : "top" }
+  }
+  return { enabled: false, name: "", position: "top" }
+}
+
+// A message as it goes out signed: the name in bold on its own first line,
+// or after the text. Text already carrying that exact signature is left alone.
+function signedText(text, signature) {
+  var value = String(text || "")
+  if (!signature || signature.enabled !== true || value.trim() === "") return value
+  var name = String(signature.name || "").trim()
+  if (name === "") return value
+  if (signature.position === "bottom") {
+    var tail = "\n\n— *" + name + "*"
+    return value.slice(-tail.length) === tail ? value : value + tail
+  }
+  var head = "*" + name + ":*\n"
+  return value.indexOf(head) === 0 ? value : head + value
+}

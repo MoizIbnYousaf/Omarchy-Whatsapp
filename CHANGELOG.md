@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Add forwarding, message selection, favorites, emoji and text formatting.
+- Add contact/group details, group administration, new-chat search and onboarding.
+- Add media browsing, older-message pagination, audio controls and pending-send queues.
+- Improve notification routing, chat filters, unread counts, delivery ticks and optional presence.
+- Add opt-in agent setup and an MCP server backed by the guarded helper.
+- Harden setup ownership checks, teardown and sync locking; support wacli 0.17.1–0.19.0.
+- Preserve existing notification and private-reading choices during upgrades.
+- Validate every shipped QML/JavaScript component and test multi-account preference migrations.
+
+
 ## 0.14.0 — 2026-09-16
 
 - Add `toggleDropdown` IPC for hot corners and keybindings, contributed by

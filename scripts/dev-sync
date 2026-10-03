@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Copy the working tree over the plugin checkout that `omarchy plugin add`
+# made, so QML, helper and skill changes can be tried before they are pushed.
+# The command link, the MCP server and the agent skill point into that
+# checkout, so they follow. Only changed files are copied: Quickshell reloads
+# the plugin once per changed QML file.
+#
+# The checkout keeps its .git, and the copied files show as local changes;
+# `./scripts/dev-sync --reset` puts it back to its commit before
+# `omarchy plugin update`.
+set -euo pipefail
+
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+user_home=${HOME:?HOME is required}
+plugin_id=io.github.moizibnyousaf.omawhatsapp
+config_home=${XDG_CONFIG_HOME:-$user_home/.config}
+plugin_target="$config_home/omarchy/plugins/$plugin_id"
+
+command -v rsync >/dev/null || { echo "dev-sync: rsync is required." >&2; exit 1; }
+if [[ ! -f $plugin_target/manifest.json || ! -d $plugin_target/bin ]]; then
+  echo "dev-sync: no plugin checkout at $plugin_target." >&2
+  echo "dev-sync: install it once with: omarchy plugin add <repository URL> --enable" >&2
+  exit 1
+fi
+
+if [[ ${1:-} == "--reset" ]]; then
+  git -C "$plugin_target" checkout -- .
+  git -C "$plugin_target" clean -fdq
+  echo "dev-sync: $plugin_target is back at $(git -C "$plugin_target" rev-parse --short HEAD)."
+  exit 0
+fi
+
+omarchy plugin validate "$repo_root" >/dev/null
+
+# The distributed files only: what git tracks or would track, never the local
+# notes, agent instructions or generated test media.
+file_list=$(mktemp)
+trap 'rm -f -- "$file_list"' EXIT
+# Regular files only: a nested checkout is listed as a directory.
+while IFS= read -r -d '' file; do
+  if [[ -f $repo_root/$file && ! -L $repo_root/$file ]]; then printf '%s\0' "$file"; fi
+done < <(git -C "$repo_root" ls-files -z --cached --others --exclude-standard \
+  | grep -zv '^tests/\.generated-media/') > "$file_list"
+# --inplace avoids the temp-file-and-rename dance the plugin watcher would see
+# as extra events; files that left the tree are removed from the checkout.
+changed=$(rsync -rci --inplace --from0 --files-from="$file_list" \
+  "$repo_root/" "$plugin_target/" | awk '$1 ~ /^[<>*c]/ {print $2}')
+while IFS= read -r -d '' tracked; do
+  if [[ ! -e $repo_root/$tracked ]]; then
+    rm -f -- "$plugin_target/$tracked"
+    changed+=$'\n'"$tracked (removed)"
+  fi
+done < <(git -C "$plugin_target" ls-files -z 2>/dev/null)
+
+changed=$(sed '/^$/d' <<<"$changed")
+if [[ -z $changed ]]; then
+  echo "dev-sync: the plugin checkout already matches the working tree."
+  exit 0
+fi
+echo "dev-sync: updated"
+sed 's/^/  /' <<<"$changed"
+
+# New unit templates reach systemd through the app's own setup, as they would
+# after omarchy plugin update.
+if grep -q '^systemd/' <<<"$changed"; then
+  echo '{}' | "$plugin_target/bin/omawhatsapp" setup >/dev/null \
+    && echo "dev-sync: sync units updated." \
+    || echo "dev-sync: the setup could not update the sync units; open the app to see why." >&2
+fi
+
+# The shell's "Local plugin changed, reloading" keeps QML types it already
+# compiled, so edited components keep running the old code until the shell
+# restarts. Restart once when any plugin file changed (the helper and the
+# skill are read fresh on every call and need no restart).
+if grep -qvE '^(bin/|skills/|docs/|tests/|systemd/|[^/]+\.md)' <<<"$changed"; then
+  if [[ ${DEV_SYNC_NO_RESTART:-0} == 1 ]]; then
+    echo "dev-sync: plugin files changed; restart the shell to load them (omarchy restart shell)."
+  else
+    echo "dev-sync: restarting the Omarchy shell to load the new QML"
+    omarchy-restart-shell >/dev/null
+  fi
+fi

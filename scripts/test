@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Arch installs the Qt tools (qmllint, qmltestrunner) outside PATH.
+[[ -d /usr/lib/qt6/bin && :$PATH: != *:/usr/lib/qt6/bin:* ]] && PATH="$PATH:/usr/lib/qt6/bin"
+
 repo_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
@@ -23,16 +26,48 @@ media_fixture_root="$repo_root/tests/.generated-media"
   exit 1
 }
 mkdir -- "$media_fixture_root"
+plugin_home=$(mktemp -d)
 cleanup_test_fixtures() {
   find "$media_fixture_root" -maxdepth 1 -type f -delete
   rmdir -- "$media_fixture_root"
+  rm -rf -- "$plugin_home"
 }
 trap cleanup_test_fixtures EXIT
 python3 tests/write_media_fixtures.py "$media_fixture_root"
 
 make validate
-./scripts/install --check
 ./scripts/check-wacli-parity
+
+# What `omarchy plugin add` installs: the repository's files in the plugins
+# folder, nothing else. It must validate, and its helper must find itself
+# there, with an empty home and no wacli.
+checkout="$plugin_home/.config/omarchy/plugins/io.github.moizibnyousaf.omawhatsapp"
+mkdir -p -- "$checkout"
+git ls-files -z --cached --others --exclude-standard \
+  | grep -zv '^tests/\.generated-media/' \
+  | while IFS= read -r -d '' file; do
+      # Regular files only: a nested checkout (CI keeps Omarchy's source in
+      # .omarchy/) is listed as a directory and is not part of the plugin.
+      [[ -f $file && ! -L $file ]] || continue
+      install -D -m "$(stat -c %a -- "$file")" -- "$file" "$checkout/$file"
+    done
+omarchy plugin validate "$checkout"
+HOME="$plugin_home" XDG_CONFIG_HOME="$plugin_home/.config" XDG_STATE_HOME="$plugin_home/.local/state" \
+  WACLI_BIN="$plugin_home/no-wacli" "$checkout/bin/omawhatsapp" status \
+  | jq -e --arg root "$checkout" '
+      .setup.plugin_root == $root and .setup.units == "missing"
+      and .setup.consented == false and .setup.wacli.found == false' >/dev/null || {
+  echo "test: the helper in a plugin checkout must find itself and report the setup" >&2
+  exit 1
+}
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  | HOME="$plugin_home" "$checkout/bin/omawhatsapp-mcp" | jq -e '.result.tools | length > 40' >/dev/null
+rg -q '^name: omawhatsapp$' skills/omawhatsapp/SKILL.md
+rg -q 'references/wacli-parity\.md' skills/omawhatsapp/SKILL.md
+! rg -q 'TODO|\[TODO' skills/omawhatsapp
+python3 bin/omawhatsapp capabilities \
+  | jq -e --arg version "$(sed -nE 's/^WACLI_PARITY_VERSION = "([^"]+)".*/\1/p' bin/omawhatsapp_core.py)" \
+    '.ok == true and .wacli_parity_version == $version and .operation_count == 108' >/dev/null
 while IFS= read -r -d '' qml_test; do
   QT_QPA_PLATFORM=offscreen "$qml_test_runner" \
     -input "$qml_test" \
@@ -41,38 +76,21 @@ while IFS= read -r -d '' qml_test; do
     -o -,txt
 done < <(find tests -maxdepth 1 -type f -name 'tst_*.qml' -print0 | sort -z)
 
-bash -n scripts/install scripts/install-common scripts/test scripts/uninstall
-python3 -m py_compile bin/omawhatsapp_assets.py \
-  scripts/check-wacli-parity scripts/install-transaction.py
-python3 -m py_compile tests/test_install_transaction.py tests/write_media_fixtures.py
+bash -n scripts/test scripts/dev-sync
+python3 -m py_compile bin/omawhatsapp_assets.py scripts/check-wacli-parity scripts/earlier-copies
+python3 -m py_compile tests/write_media_fixtures.py
 git diff --check
 
-jq -e '.id == "io.github.moizibnyousaf.omawhatsapp"' \
-  manifest.json plugins/omawhatsapp/manifest.json >/dev/null || {
+jq -e '.id == "io.github.moizibnyousaf.omawhatsapp"' manifest.json >/dev/null || {
   echo "test: public plugin ID must remain globally namespaced" >&2
   exit 1
 }
-[[ $(jq -r '.version' manifest.json) == $(jq -r '.version' plugins/omawhatsapp/manifest.json) ]] || {
-  echo "test: root and plugin manifest versions must match" >&2
+helper_version=$(sed -nE 's/^HELPER_VERSION = "([^"]+)".*/\1/p' bin/omawhatsapp_core.py)
+[[ $helper_version == $(jq -r '.version' manifest.json) ]] || {
+  echo "test: HELPER_VERSION in bin/omawhatsapp_core.py must match manifest.json" >&2
   exit 1
 }
 
-rg -q 'systemctl --user restart "\$unit"' scripts/install || {
-  echo "test: installer upgrades must activate the new sync unit" >&2
-  exit 1
-}
-rg -q "mapfile -t account_units .*\.accounts\[\]\.unit" scripts/install || {
-  echo "test: installer must reuse each helper-resolved account unit" >&2
-  exit 1
-}
-rg -q 'status_json=.*staged_helper.*status' scripts/install || {
-  echo "test: installer account discovery must reuse the canonical helper status" >&2
-  exit 1
-}
-! rg -q 'wacli.*accounts list' scripts/install || {
-  echo "test: installer must not duplicate helper account discovery" >&2
-  exit 1
-}
 rg -q 'ExecCondition=%h/\.local/bin/omawhatsapp session-ready --account %i' \
   systemd/user/wacli-sync@.service || {
   echo "test: the sync template must skip an account with no linked session" >&2
@@ -88,23 +106,6 @@ rg -q -- '--store %h/\.local/state/wacli' systemd/user/wacli-sync.service || {
   echo "test: the legacy unit must remain pinned to the preserved root store" >&2
   exit 1
 }
-
-rg -q 'install_plugin_dir=\$plugin_id' scripts/install || {
-  echo "test: installer must target Omarchy's canonical manifest-id directory" >&2
-  exit 1
-}
-rg -q '\{operation:"replace", staged:\$staged_plugin, target:\$plugin,' scripts/install \
-  && rg -q '\{operation:"remove", target:\$legacy_plugin,' scripts/install \
-  && rg -q '\{operation:"remove", target:\$legacy_bar,' scripts/install || {
-  echo "test: installer must remove the exact legacy duplicate directory" >&2
-  exit 1
-}
-for lifecycle_script in scripts/install scripts/uninstall; do
-  rg -q 'expected_sha256:\$shell_digest' "$lifecycle_script" || {
-    echo "test: $lifecycle_script must pin the shell merge source digest" >&2
-    exit 1
-  }
-done
 
 for branded_surface in BarWidget.qml Dropdown.qml App.qml; do
   rg -q '󰖣' "plugins/omawhatsapp/$branded_surface" || {

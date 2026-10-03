@@ -113,8 +113,10 @@ jq -nc --arg jid "$resolved_jid" --arg action "$action" \
 
 Allowed actions are `read`, `unread`, `pin`, `unpin`, `archive`, `unarchive`,
 `mute`, `unmute`, and `remove-local` (`remove-local` purges the chat and its
-messages from local storage without modifying WhatsApp servers). `read` sends
-the WhatsApp read receipt; local inspection never calls it.
+messages from local storage without modifying WhatsApp servers). `read` and
+`unread` change the chat's read state on the user's own devices through
+WhatsApp app state; no read receipt reaches the sender. Local inspection never
+calls them.
 
 ## Local app state
 
@@ -129,8 +131,10 @@ upgrades are a separate repository/deployment task, not a WhatsApp operation.
 printf '{}\n' | "$oma" settings
 ```
 
-The supported setting keys are `send_read_receipts` (default `false`, per
-account), `show_unread_count`, `dropdown_rows` (`5`, `7`, or `9`), and
+The supported setting keys are `send_read_receipts` (mark the open chat read;
+default `true` since preferences version 3, per account), `read_on_reply`,
+`enter_sends`, `show_avatars`, `auto_refresh_avatars`, `rail_density`
+(`comfortable` or `compact`), `show_unread_count`, `dropdown_rows` (`5`, `7`, or `9`), and
 `composer_max_lines` (`4`, `6`, `8`, or `10`, default `6`), and `time_format`
 (`auto`, `12h`, or `24h`, default `auto`). Time format is global; `auto` follows
 the system locale in chat previews, messages, and the media viewer. Change them only

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Effects
+import "Tint.js" as Tint
 
 Item {
   id: root
@@ -10,8 +11,10 @@ Item {
   required property color accent
   required property string fontFamily
   property bool selected: false
+  // Settings → Chats → Chat photos; off shows initials or the group icon.
+  property bool showPhoto: true
 
-  readonly property string localPath: String(chat && chat.avatar_path || "")
+  readonly property string localPath: showPhoto ? String(chat && chat.avatar_path || "") : ""
   readonly property bool localAvatar: localPath.charAt(0) === "/"
     || localPath === "__demo_avatar__"
   readonly property url avatarSource: localPath === "__demo_avatar__"
@@ -23,13 +26,22 @@ Item {
   implicitWidth: 38
   implicitHeight: implicitWidth
 
+  // People are round and groups a rounded square, so the two read apart
+  // before the name does; without a photo each has its own color.
+  readonly property bool group: String(chat && chat.kind || "") === "group"
+  readonly property real shapeRadius: group ? Math.round(width * 0.29) : width / 2
+  readonly property color tint: Tint.personColor(
+    String(chat && (chat.jid || chat.name) || ""), accent)
+
   function encodedFileUrl(path) {
     return "file://" + String(path || "").split("/")
       .map(function(part) { return encodeURIComponent(part) }).join("/")
   }
 
   function fallbackLabel() {
-    if (chat && chat.kind === "group") return "󰠮"
+    if (root.group && String(chat && chat.name || "").trim() === "") return "󰠮"
+    // Someone known only by number: a person glyph, not the "+" of the number.
+    if (/^[+]?[0-9 ().-]+$/.test(String(chat && chat.name || "").trim())) return "󰀓"
     var parts = String(chat && chat.name || "?").trim().split(/\s+/)
       .filter(function(part) { return part !== "" })
     if (parts.length === 0) return "?"
@@ -38,16 +50,17 @@ Item {
   }
 
   Rectangle {
+    objectName: "chatAvatarBackdrop"
     anchors.fill: parent
-    radius: width / 2
-    color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b,
-      root.selected ? 0.22 : 0.12)
+    radius: root.shapeRadius
+    color: root.avatarReady ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.12)
+      : root.tint
   }
 
   Rectangle {
     id: avatarMask
     anchors.fill: parent
-    radius: width / 2
+    radius: root.shapeRadius
     visible: false
     layer.enabled: true
   }
@@ -82,9 +95,10 @@ Item {
     visible: !root.avatarReady
     anchors.centerIn: parent
     text: root.fallbackLabel()
-    color: root.accent
+    color: root.background
     font.family: root.fontFamily
-    font.pixelSize: chat && chat.kind === "group" ? 18 : 13
-    font.weight: Font.DemiBold
+    font.pixelSize: text === "󰠮" ? Math.round(root.width * 0.47)
+      : Math.max(9, Math.round(root.width * 0.33))
+    font.weight: Font.Bold
   }
 }

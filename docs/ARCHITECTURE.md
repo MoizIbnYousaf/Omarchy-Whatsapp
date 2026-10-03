@@ -1,5 +1,10 @@
 # Architecture
 
+[← Documentation](README.md)
+
+How the resident service, the window, the bar dropdown, the helper and
+wacli fit together, and where each one's responsibility ends.
+
 ## Lifetimes
 
 - `Service.qml` is resident. It owns authentication/sync state, the chat rail,
@@ -38,9 +43,14 @@ archived chats stay silent.
 Unread state has two independent layers. wacli's `unread_count` remains the
 authoritative WhatsApp value. OmaWhatsApp stores a mode-`0600` local
 acknowledgement snapshot and derives only the bar's new-message delta from it.
-Opening or dismissing never mutates WhatsApp by default. Users can explicitly
-opt into automatic exact-chat receipts in the in-app settings card; the
-labelled chat-menu action remains the one-off receipt path.
+The conversation on screen is read: selecting a chat, and every refresh that
+finds new messages in it while a window is open, marks that exact chat read,
+throttled so a failing write cannot loop. Replying marks it read too. A chat
+the user marks unread stays unread until it is chosen again. wacli's
+`chats mark-read` sends only a WhatsApp app-state patch that syncs the read
+state to the user's own devices; it sends the other side no read receipt.
+Settings can turn automatic reading off per account. Dismissing a badge stays
+local.
 
 ## Accounts
 
@@ -72,14 +82,15 @@ targets are accepted only if their exact JID already exists in the local
 boundary. All writes use wacli's public CLI.
 
 The graphical chat boundary is intentionally narrower than the mirror: only `dm` rows
-and standalone `group` rows are discoverable. Newsletter/channel rows,
-Community parents, Community-linked subgroups, broadcasts, and call-event data
+and `group` rows, groups inside a Community included, are discoverable.
+Newsletter/channel rows, Community parents, broadcasts, and call-event data
 stay out of this release's UI. Explicit agent requests can reach those
 capabilities through the versioned parity registry without widening the chat
 rail or its default write paths.
 
 The advanced gateway is an argument-array adapter, not an arbitrary executable
-passthrough. Every wacli 0.17.1 leaf has a fixed policy. Local reads receive
+passthrough. Every wacli 0.19.0 leaf has a fixed policy (0.17.1 is the
+minimum accepted release). Local reads receive
 `--read-only`; network work respects offline mode; local writes, sync,
 WhatsApp writes, destructive operations, and interactive linking require
 distinct current-request authorization tokens. Global options are structured
@@ -121,7 +132,27 @@ its companion socket. If that path is unavailable, the helper serializes a
 bounded fallback, briefly yields the user service, sends, and restarts sync in
 a `finally` block.
 
-The header's offline choice is persisted privately and maps to
+A yield has a cost that the helper cannot avoid. The short command connects
+with the same WhatsApp session, and whatsmeow acknowledges to the server every
+message and receipt that reaches that connection, while the command registers
+no handler that stores them. Whatever arrives during the pause, including the
+read receipts from reading a chat on another device, never reaches the mirror.
+For that reason nothing yields by itself any more: automatic chat-photo refresh
+is off by default (preferences version 4 turns it off), and the remaining
+yields are user actions that official wacli cannot delegate: deletes, forwards,
+pin, mute and archive, photo refresh and number checks. A wacli with the
+additions listed in the README delegates deletes, forwards and number checks
+too. Text, files, voice
+notes, stickers, polls, reactions, edits and read state go through the sync
+process's socket and never pause it.
+
+A delegated file send can land under a contact's `@lid`: wacli's recipient
+warmup swaps the phone JID for the JID WhatsApp answers with, and only its next
+sync start migrates the row back. The helper folds such rows into the phone
+chat at read time, resolving each `@lid` once with `wacli --read-only contacts
+show` and caching the answer; it never reads `session.db` itself.
+
+The offline choice (Settings → Background sync) is persisted privately and maps to
 `systemctl --user disable --now wacli-sync.service`. Read paths remain usable;
 all WhatsApp mutations fail closed until the user explicitly returns online.
 Installer upgrades preserve that choice.
@@ -142,6 +173,41 @@ Installer upgrades preserve that choice.
   its navigation and zoom boundaries are covered by offscreen QML tests.
 - Search is debounced and scoped to the selected conversation.
 - Window opening performs no network request.
+
+## Message text
+
+Message bodies stay plain text unless they use WhatsApp's formatting. Then
+`FormatModel.js` renders them: it escapes the whole message first and emits
+only its own fixed tags (bold, italic, strikethrough, spans for code and
+monospace, list bullets and quotes), so a message can never produce a link,
+an image, a style, or any other markup. Every other `Text` surface is plain
+text, which a test enforces. Links open from chips under the body, never from
+the body itself.
+
+Shared contacts arrive from wacli as "Contact: Name (+number)" text. The helper
+turns that exact shape into cards with the number, and with the person's JID
+and chat when this account knows them; a lone line without a number stays text.
+
+## Agent server
+
+`bin/omawhatsapp-mcp` is a Model Context Protocol server over stdio, written
+against the standard library like the helper. Each tool is one helper command
+or one guarded gateway leaf with the authorization class the helper demands
+(`remote-read`, `local-write`, `sync`, `whatsapp-write`, `destructive`, or an
+exact `private-export:` path). The server resolves names to chats for reads,
+requires exact JIDs for writes, turns times into the local zone, and trims
+answers; it never opens `wacli.db`. Writes are annotated as not read-only, and
+destructive ones as destructive, so hosts can ask before each call. A write is
+never retried: a timeout may still have been delivered.
+
+Three helper commands exist for it: `attachments` (attachments across the
+rail, folding @lid rows into the phone chat), `contact-tags`, and a `tag`
+filter on `contacts-search`. Two helper repairs came out of its live tests:
+wacli 0.18.3 files an outgoing poll or vote under the phone chat but takes its
+kind and name from the @lid, so a person's chat with messages and kind
+`unknown` is read as a DM under the name saved on the phone; and a file under
+`/tmp` is sent from a private copy, since the delegated send is opened by
+`wacli-sync.service`, whose `PrivateTmp` hides the user's `/tmp`.
 
 ## Extension boundary
 

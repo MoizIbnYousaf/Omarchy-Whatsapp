@@ -14,8 +14,10 @@ oma="$HOME/.local/bin/omawhatsapp"
 "$oma" capabilities
 ```
 
-It accounts for every command leaf in exactly wacli 0.17.1. Before an
-advanced operation, inspect its flags without changing state:
+It accounts for every command leaf in wacli 0.19.0 and accepts 0.17.1 or
+newer; `wacli_minimum_version` and `wacli_parity_version` in the output say
+which, and each operation carries the `min_wacli` release it first appeared
+in. Before an advanced operation, inspect its flags without changing state:
 
 ```bash
 wacli <command> <subcommand> --help
@@ -115,7 +117,8 @@ automatically downgraded to `local-read`. `messages export --output` requires
 the destination-bearing `private-export` token. Export paths inside a Git
 repository are rejected unless the request also supplies
 `repository_export_authorization:"allow-repository-export:<exact-path>"`;
-prefer a private non-repository directory. `doctor --connect` is
+prefer a private non-repository directory. An export never replaces a file
+that is already at its path; choose a new file name. `doctor --connect` is
 `remote-read`.
 
 ## Interactive linking and foreground sync
@@ -136,7 +139,8 @@ restores it afterward. It never overrides OmaWhatsApp's explicit offline mode.
 
 - Resolve existing chat/group/channel/message targets to exact identifiers
   before mutation. Never use `--pick` to guess an ambiguous result.
-- Treat mark-read as a receipt and presence as visible activity.
+- Treat mark-read as a visible change on the user's own devices (it sends no
+  receipt to the sender) and presence as visible activity.
 - Status broadcasts, profile changes, group/channel membership and admin
   changes, logout, account removal, revoke/delete/purge, and cleanup require
   exact current authorization and no automatic retry.

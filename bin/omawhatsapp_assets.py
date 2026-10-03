@@ -19,8 +19,10 @@ from urllib.parse import urljoin, urlparse
 
 
 MAX_AVATAR_BYTES = 1024 * 1024
-MAX_AVATAR_FILES = 128
-MAX_AVATAR_INDEX = 512 * 1024
+# The index must hold every chat the rail can show, or refreshes evict the
+# oldest entries and re-download them forever on accounts with many chats.
+MAX_AVATAR_FILES = 2048
+MAX_AVATAR_INDEX = 4 * 1024 * 1024
 AVATAR_DIRECTORY = "avatars"
 AVATAR_INDEX = "avatars.json"
 AVATAR_FILE = re.compile(r"[0-9a-f]{64}\.(?:jpg|png|webp)\Z")

@@ -108,4 +108,19 @@ TestCase {
     compare(dropdown.timeLabel(yesterday.getTime() / 1000), "Yesterday")
     compare(dropdown.timeLabel(0), "")
   }
+
+  function test_the_list_stamp_shortens_with_age() {
+    var now = new Date(2026, 8, 25, 15, 0, 0)
+    var at = function(year, month, day, hour, minute) {
+      return new Date(year, month, day, hour, minute, 0).getTime() / 1000
+    }
+    compare(TimeFormat.listStamp(at(2026, 8, 25, 9, 21), now, "HH:mm", "dd/MM/yyyy"), "09:21")
+    compare(TimeFormat.listStamp(at(2026, 8, 24, 22, 0), now, "HH:mm", "dd/MM/yyyy"), "Yesterday")
+    // 23 September 2026 is a Wednesday.
+    compare(TimeFormat.listStamp(at(2026, 8, 23, 8, 0), now, "HH:mm", "dd/MM/yyyy"), "Wed")
+    compare(TimeFormat.listStamp(at(2026, 8, 12, 8, 0), now, "HH:mm", "dd/MM/yyyy"), "12/09")
+    compare(TimeFormat.listStamp(at(2026, 8, 12, 8, 0), now, "HH:mm", "M/d/yy"), "09/12")
+    compare(TimeFormat.listStamp(at(2025, 11, 30, 8, 0), now, "HH:mm", "dd/MM/yyyy"), "30/12/25")
+    compare(TimeFormat.listStamp(0, now, "HH:mm", "dd/MM/yyyy"), "")
+  }
 }

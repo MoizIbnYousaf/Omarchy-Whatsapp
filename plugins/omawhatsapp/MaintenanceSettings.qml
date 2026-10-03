@@ -11,11 +11,14 @@ Column {
   required property color accent
   required property string fontFamily
   property bool demoMode: false
+  // Settings → Media owns the chat-photo action; Updates embeds the rest.
+  property bool showChatPhotos: true
   spacing: Style.space(8)
   readonly property var operations: service ? service.accountOperations : null
 
   Ui.Button {
     objectName: "refreshChatPhotos"
+    visible: root.showChatPhotos
     width: parent.width
     foreground: root.foreground
     accent: root.accent
@@ -29,6 +32,7 @@ Column {
   }
   Text {
     textFormat: Text.PlainText
+    visible: root.showChatPhotos
     width: parent.width
     wrapMode: Text.Wrap
     text: root.operations && root.operations.statusMessage
@@ -79,29 +83,31 @@ Column {
     onClicked: root.updates.check()
   }
   Ui.Button {
+    objectName: "updateInTerminal"
     width: parent.width
     foreground: root.foreground
     accent: root.accent
     fontFamily: root.fontFamily
     focusable: true
     bordered: true
-    visible: !!root.updates.release && root.updates.release.available
-    text: root.updates.release && root.updates.release.standalone
-      ? "Update in terminal…" : "View release and update instructions"
+    visible: !!root.updates.release && root.updates.release.available === true
+      && root.updates.release.managed === true
+    text: "Update in terminal…"
     enabled: !root.demoMode && root.updates.online && !root.updates.busy
-    onClicked: {
-      if (root.updates.release.standalone) root.updates.install()
-      else Qt.openUrlExternally("https://github.com/MoizIbnYousaf/Omarchy-Whatsapp#upgrading")
-    }
+    onClicked: root.updates.install()
   }
-  Text {
-    textFormat: Text.PlainText
+  // Updated files wait for the shell to load them.
+  Ui.Button {
+    objectName: "restartShell"
     width: parent.width
-    visible: !!root.updates.release && !root.updates.release.standalone
-    wrapMode: Text.Wrap
-    text: "Managed or older install: update through your plugin manager or rerun the full installer."
-    color: root.foreground
-    font.family: root.fontFamily
-    font.pixelSize: Style.font.caption
+    foreground: root.foreground
+    accent: root.accent
+    fontFamily: root.fontFamily
+    focusable: true
+    bordered: true
+    visible: !!root.service && root.service.helperOutdated === true
+    text: "Restart the shell to finish updating"
+    enabled: !root.demoMode
+    onClicked: root.service.restartShell()
   }
 }

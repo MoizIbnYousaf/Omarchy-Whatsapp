@@ -1,0 +1,31 @@
+name: pr-title
+
+# Pull requests are squash-merged, so the title becomes the commit on main and
+# decides the next version. It must be a Conventional Commit.
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            revert
+            docs
+            refactor
+            test
+            build
+            ci
+            chore

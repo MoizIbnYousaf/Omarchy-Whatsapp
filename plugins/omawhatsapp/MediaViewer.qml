@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Ui
 import "MediaViewerLogic.js" as MediaLogic
 import "MediaModel.js" as MediaModel
 import "TimeFormat.js" as TimeFormat
@@ -26,6 +27,7 @@ FocusScope {
   property string timeFormat: "auto"
 
   signal openExternalRequested(string path)
+  signal saveRequested(var item)
 
   readonly property var currentItem: currentIndex >= 0 && currentIndex < items.length
     ? items[currentIndex] : null
@@ -169,6 +171,7 @@ FocusScope {
         font.pixelSize: Style.font.heading
       }
       HoverHandler { id: closeHover }
+      PanelToolTip { visible: closeHover.hovered; text: "Close · Esc" }
       TapHandler { onTapped: root.closeViewer() }
     }
 
@@ -208,11 +211,13 @@ FocusScope {
 
       Repeater {
         model: root.width < Style.space(520)
-          ? [{ icon: "󰏫", action: "external", tip: "Open externally" }]
+          ? [{ icon: "󰠘", action: "save", tip: "Save as…" },
+             { icon: "󰏫", action: "external", tip: "Open externally" }]
           : [
               { icon: "−", action: "out", tip: "Zoom out" },
               { icon: "󰁌", action: "reset", tip: "Fit" },
               { icon: "+", action: "in", tip: "Zoom in" },
+              { icon: "󰠘", action: "save", tip: "Save as…" },
               { icon: "󰏫", action: "external", tip: "Open externally" }
             ]
         delegate: Rectangle {
@@ -222,7 +227,7 @@ FocusScope {
           radius: Style.cornerRadius
           color: actionHover.hovered
             ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-          opacity: root.video && modelData.action !== "external" ? 0.35 : 1
+          opacity: root.video && modelData.action !== "external" && modelData.action !== "save" ? 0.35 : 1
           Text {
             textFormat: Text.PlainText
             anchors.centerIn: parent
@@ -235,13 +240,15 @@ FocusScope {
           ToolTip.visible: actionHover.hovered
           ToolTip.text: modelData.tip
           TapHandler {
-            enabled: !root.video || modelData.action === "external"
+            enabled: !root.video || modelData.action === "external" || modelData.action === "save"
             onTapped: {
               if (modelData.action === "out") root.setZoom(root.zoom - 0.25)
               else if (modelData.action === "reset") root.setZoom(1)
               else if (modelData.action === "in") root.setZoom(root.zoom + 0.25)
               else if (modelData.action === "external" && root.localPath !== "")
                 root.openExternalRequested(root.localPath)
+              else if (modelData.action === "save" && root.currentItem)
+                root.saveRequested(root.currentItem)
               root.forceActiveFocus()
             }
           }

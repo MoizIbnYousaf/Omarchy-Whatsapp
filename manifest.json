@@ -2,21 +2,29 @@
   "schemaVersion": 1,
   "id": "io.github.moizibnyousaf.omawhatsapp",
   "name": "OmaWhatsApp",
-  "version": "0.14.0",
+  "version": "0.16.4",
   "author": "MoizIbnYousaf",
   "license": "MIT",
-  "description": "WhatsApp in Quickshell—not Chromium. Fast local chats, draft-first voice notes, rich media, keyboard workflows, and Omarchy themes powered by wacli.",
-  "kinds": ["service", "bar-widget"],
+  "description": "Native WhatsApp for the Omarchy shell, not a browser tab: local-first chats that open instantly, quick replies from the bar, voice notes, media, notifications and several accounts, all in your Omarchy theme. Powered by wacli.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
   "activation": "on-demand",
   "entryPoints": {
     "service": "plugins/omawhatsapp/Service.qml",
     "barWidget": "plugins/omawhatsapp/BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "OmaWhatsApp",
+    "displayName": "WhatsApp",
     "description": "Open synced direct chats and standalone groups, with unread messages at a glance.",
     "category": "Communication",
-    "aliases": ["whatsapp", "chat", "messages", "messaging"],
+    "aliases": [
+      "whatsapp",
+      "chat",
+      "messages",
+      "messaging"
+    ],
     "allowMultiple": false,
     "defaultSection": "right"
   }

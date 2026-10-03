@@ -16,8 +16,11 @@ BarWidget {
   readonly property bool showUnreadCount:
     root.oma ? root.oma.showUnreadCount !== false : true
 
+  readonly property bool muted: !!oma && oma.notificationsMuted === true
+
   function refresh() { if (oma) oma.refresh() }
   function dismissNotifications() { if (oma) oma.dismissNotifications("") }
+  function toggleMute() { if (oma) oma.toggleNotificationsMuted() }
 
   readonly property bool opened: dropdownLoader.item
     ? dropdownLoader.item.opened === true : false
@@ -44,6 +47,14 @@ BarWidget {
     if (dropdownLoader.item) dropdownLoader.item.close()
   }
 
+  // A clicked message popup opens its chat here, ready for a reply.
+  function openChat(payload) {
+    injectDropdown()
+    if (!dropdownLoader.item) return false
+    dropdownLoader.item.open()
+    return dropdownLoader.item.openChatRef(String(payload.account || ""), String(payload.jid || ""))
+  }
+
   function closeForPopoutSwitch() {
     if (dropdownLoader.item) dropdownLoader.item.closeForPopoutSwitch()
   }
@@ -52,9 +63,14 @@ BarWidget {
     if (dropdownLoader.item) dropdownLoader.item.toggle()
   }
 
-  function openDropdownDemo() {
+  function openDropdownDemo(conversation) {
     injectDropdown()
-    if (dropdownLoader.item) dropdownLoader.item.openDemo()
+    if (!dropdownLoader.item) return
+    dropdownLoader.item.openDemo()
+    // {"demo":true,"conversation":true} opens the first demo chat, so the
+    // mini conversation can be captured with repository-owned data only.
+    if (conversation === true && dropdownLoader.item.filteredChats.length > 0)
+      dropdownLoader.item.openConversation(dropdownLoader.item.filteredChats[0])
   }
 
   function openFullApp(payload) {
@@ -82,20 +98,30 @@ BarWidget {
 
   WidgetButton {
     id: button
+    objectName: "barButton"
     anchors.fill: parent
     bar: root.bar
+    // Muted shows a crossed bell next to the count; a vertical bar has room
+    // for one glyph, so the bell replaces the logo there.
     text: root.vertical
-      ? "󰖣"
+      ? (root.muted ? "󰂛" : "󰖣")
       : "󰖣" + (root.available && root.showUnreadCount && root.unreadCount > 0
         ? " " + (root.unreadCount > 99 ? "99+" : root.unreadCount) : "")
+        + (root.muted ? " 󰂛" : "")
     active: root.available && root.unreadCount > 0
+    // Closed: grey until it opens again.
+    dimmed: root.muted || (!!root.oma && root.oma.closed === true)
     horizontalMargin: 8
-    tooltipText: root.oma ? root.oma.barTooltip : "OmaWhatsApp · reconnecting"
+    tooltipText: root.oma ? root.oma.barTooltipWithMute : "OmaWhatsApp · reconnecting"
 
     onPressed: function(code) {
       if (code === Qt.MiddleButton) root.dismissNotifications()
-      else if (code === Qt.RightButton) root.refresh()
-      else root.toggleDropdown()
+      else if (code === Qt.RightButton) root.toggleMute()
+      else {
+        // A closed OmaWhatsApp opens again from its icon.
+        if (root.oma && root.oma.closed === true) root.oma.launchApp()
+        root.toggleDropdown()
+      }
     }
   }
 
@@ -108,7 +134,8 @@ BarWidget {
   Connections {
     target: root.oma
     function onOpenDropdownRequested(payload) {
-      if (payload && payload.demo) root.openDropdownDemo()
+      if (payload && payload.demo) root.openDropdownDemo(payload.conversation === true)
+      else if (payload && String(payload.jid || "") !== "") root.openChat(payload)
       else root.open()
     }
     function onToggleDropdownRequested() {

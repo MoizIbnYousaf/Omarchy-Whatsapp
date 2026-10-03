@@ -7,4 +7,6 @@ Controls.Button {
   property string fontFamily: "sans"
   property bool focusable: false
   property bool bordered: false
+  property string iconText: ""
+  property string tooltipText: ""
 }

@@ -2,23 +2,27 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
+// The app is a git checkout made by `omarchy plugin add`. Checking compares it
+// with the repository (contacting GitHub only); updating runs
+// `omarchy plugin update` in a terminal, which shows the changes and asks
+// first, then restarts the shell to load them.
 Item {
   id: root
+  property string helper: ""
   property bool active: false
   property bool online: false
   property bool checkOnLaunch: false
   property bool checkedThisLaunch: false
   readonly property bool busy: checker.running
   property var release: null
-  property string message: "Check for a stable release on GitHub."
-  readonly property string script: decodeURIComponent(String(Qt.resolvedUrl("updates.py")).replace(/^file:\/\//, ""))
+  property string message: "Check whether a newer version is available."
   signal updateAvailable(string version)
 
   function maybeCheck() {
     if (active && online && checkOnLaunch && !checkedThisLaunch) check()
   }
   function check() {
-    if (!active || !online || busy) return false
+    if (!active || !online || busy || helper === "") return false
     checkedThisLaunch = true
     release = null
     message = "Checking for updates…"
@@ -29,23 +33,25 @@ Item {
     var result = null
     try { result = JSON.parse(text) } catch (error) {}
     release = null
-    if (exitCode !== 0 || !result || result.ok !== true
-        || !/^v?\d+\.\d+\.\d+$/.test(String(result.version))
-        || !/^[0-9a-f]{40}$/.test(String(result.commit))) {
+    if (exitCode !== 0 || !result || result.ok !== true) {
       message = "Could not check for updates. Try again when connected."
       return
     }
     release = result
-    message = result.available ? result.version + " is available."
-      : "You’re up to date (" + result.current + ")."
-    if (result.available && active) updateAvailable(result.version)
+    if (result.managed !== true) {
+      message = "This copy was not installed with omarchy plugin add, so it updates from where it came from."
+      return
+    }
+    message = result.available ? "A newer version is available."
+      : "You’re up to date" + (result.current ? " (" + result.current + ")." : ".")
+    if (result.available && active) updateAvailable(String(result.current || ""))
   }
   function install() {
-    if (!active || !online || busy || !release || !release.available
-        || !release.standalone) return false
-    Quickshell.execDetached(["omarchy", "launch", "terminal", "python3", script,
-      "install", "--version", release.version, "--commit", release.commit])
-    message = "Confirm the full-app update in the terminal that opened."
+    if (!active || !online || busy || !release || release.available !== true
+        || release.managed !== true) return false
+    Quickshell.execDetached(["/usr/bin/xdg-terminal-exec", "--title=Update OmaWhatsApp",
+      "--hold", "--", helper, "self-update"])
+    message = "Confirm the update in the terminal that opened; the shell restarts when it is done."
     return true
   }
   onActiveChanged: {
@@ -60,7 +66,7 @@ Item {
   Process {
     id: checker
     objectName: "releaseChecker"
-    command: ["python3", root.script, "check"]
+    command: [root.helper, "update-check"]
     stdout: StdioCollector { id: output }
     stderr: StdioCollector {}
     onExited: function(code) { root.acceptResult(output.text, code) }
