@@ -139,8 +139,7 @@ Panel {
   readonly property int rowHeight: Style.space(52)
   readonly property int chatListHeight: Math.max(2,
     Math.min(Math.max(2, maxRows), Math.max(2, filteredChats.length))) * rowHeight
-  readonly property string accountReadinessSummary: AccountModel.unreadyAccountSummary(
-    demoMode || !service ? [] : service.accounts)
+  readonly property string accountReadinessSummary: dropdownAccountReadiness.summary
   readonly property int accountReadinessHeight: accountReadinessSummary === ""
     ? 0 : Style.space(36)
   readonly property int chatChromeHeight:
@@ -1221,8 +1220,11 @@ Panel {
           }
 
           AccountReadiness {
+            id: dropdownAccountReadiness
             width: parent.width
-            accounts: root.demoMode || !root.service ? [] : root.service.accounts
+            accounts: root.demoMode || !root.service ? [] : root.service.accounts.filter(function(entry) {
+              return String(entry.account || "") !== String(railSyncStatus.account.account || "")
+            })
             foreground: root.foreground
             accent: root.accent
             fontFamily: root.fontFamily

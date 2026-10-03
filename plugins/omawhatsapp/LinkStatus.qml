@@ -60,7 +60,10 @@ Rectangle {
     }
     Rectangle {
         id: statusAction
-        activeFocusOnTab: visible && actionMouse.enabled
+        activeFocusOnTab: true
+        enabled: root.actionEnabled && !root.busy && !root.demo
+        border.width: activeFocus ? 1 : 0
+        border.color: root.accent
         Accessible.role: Accessible.Button
         Accessible.name: root.action
         Accessible.onPressAction: if (actionMouse.enabled)

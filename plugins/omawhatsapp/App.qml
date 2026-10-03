@@ -2956,7 +2956,9 @@ Item {
           AccountReadiness {
             id: appAccountReadiness
             width: parent.width
-            accounts: root.demoMode || !root.service ? [] : root.service.accounts
+            accounts: root.demoMode || !root.service ? [] : root.service.accounts.filter(function(entry) {
+              return String(entry.account || "") !== String(railSyncStatus.account.account || "")
+            })
             foreground: root.foreground
             accent: root.accent
             fontFamily: root.fontFamily
