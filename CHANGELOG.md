@@ -1,5 +1,79 @@
 # Changelog
 
+## [0.16.0](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/compare/v0.15.0...v0.16.0) (2026-10-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* scripts/install and scripts/uninstall are gone. Install with `omarchy plugin add https://github.com/atoslins/Omarchy-WhatsApp-v2 --enable`. An install made by the old script moves to links on its own after `omarchy plugin remove io.github.atoslins.whatsapp` and a new `omarchy plugin add`.
+* the plugin ID is now io.github.atoslins.whatsapp. Keybindings and scripts that call omarchy-shell with io.github.moizibnyousaf.omawhatsapp must use the new ID.
+
+### Features
+
+* add draft-first voice notes ([f652975](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/f6529753b574af5e9bf33b4f05227fefe1136402))
+* add guarded wacli parity ([2544736](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/2544736e3ea1f5ecb8436fb15391587ca5acbb8f))
+* add interactive bar client and private reading ([b3948e9](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/b3948e991b9dff72d9dd360d2e07f1e1046e2409))
+* add layered keyboard navigation ([47eaee6](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/47eaee6a2ec09880e755f8edba44c2bed74d598e))
+* add local chat removal action and confirmation dialog ([e5d65ba](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/e5d65ba33a5d3edeaa9d875f7a7ba936509ee46a))
+* add opt-in desktop notifications ([85f0d2c](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/85f0d2cd86598a7036269fd18175be8b5b7c14eb))
+* add slash search from chat list ([83f4c4a](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/83f4c4a35498b36a64adf613749765d4084b30b6))
+* add system and 12/24-hour timestamp settings ([66ac5dc](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/66ac5dcc15cfd6aadcb87d598484e16b8acc8302))
+* add toggleDropdown IPC for speakercorners hot-corner toggle ([866010f](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/866010f6c2db4127a1996b3398869e9f80b0502a))
+* add toggleDropdown IPC for speakercorners hot-corner toggle ([650f570](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/650f5708aa018189098a1f11b9703e2b62b2cdef))
+* expand chat composer upward with configurable max lines and scroll tracking ([4280f9c](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/4280f9cd2b15843a8a9fe180930c755bb7a05d11))
+* install with omarchy plugin add ([74b1763](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/74b1763e0e8f71cde80ffc8b878ecd109eb22831))
+* integrate expanded messaging, UI, setup and agent capabilities ([29de22c](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/29de22cb39b40766c4913a6145d9293f655e7198))
+* read and write every configured wacli account ([b3c041b](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/b3c041b5bf411cf055a575d1eec33e95ea271d41))
+* refresh chats from local store changes ([680b7c8](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/680b7c8241e6381efa843c3be7ab94fb2c8f7d7a))
+* rename the plugin to WhatsApp for Omarchy ([f4250fe](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/f4250fe6503f3ad369f368c3ffe2ee4d26a3e4b9))
+* reply to keyboard-selected message ([cea7ef1](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/cea7ef118bec719f0c3e8b91cdac68ffbfa47d6c))
+* run one sync instance per account ([22db7da](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/22db7da8d81652189c890594489c77d9bb71da11))
+* show one rail across accounts ([2abdf23](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/2abdf23b45bf2d341e43bc1bb70f2974bce795da))
+
+
+### Fixes
+
+* accept machines with no wacli-sync@ unit files ([147efbe](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/147efbe48937c319fe6805caf232834e96deaa8c))
+* add top padding to message bubbles ([93f317c](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/93f317c0f0f5013701e83d3af03902e0539760a4))
+* add top padding to message bubbles ([393bb3a](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/393bb3a253fcc239bb36928fa3dbfc5004dab22a))
+* **app:** show the chat photo in the conversation header ([ad005db](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/ad005dbb39a8db9be3de1ea4421e6101a19aaf38))
+* **ci:** copy only regular files when simulating plugin add ([a4d01ee](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/a4d01eec558ef1518861eae09eb0d8459d8a514e))
+* harden external data boundaries ([c30b1b9](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/c30b1b9524a75ff6fdc1b3f62ca428023d214d95))
+* install plugin under canonical id ([70465c0](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/70465c0bc3f883aee4901794ed69dd85c309c740))
+* **install:** accept machines with no wacli-sync@ unit files ([7e63cdb](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/7e63cdb0910e214df58363c9fa7fb9a3eb780102))
+* keep composer cursor and saved preferences in sync ([cd238b7](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/cd238b7663e6bf8b80629c18c6a5d8154e1f4665))
+* keep managed installations coherent and prepare 0.15.0 ([c966492](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/c9664924745468712b87080344b244fbc15f94cf))
+* make read receipt preference exact ([1487456](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/1487456877d91767f7a309c8e1d34d83a4d73700))
+* preserve demo selection after local chat removal ([d549d71](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/d549d71304a289ea3b53270c52e6f51bc7c8ae98))
+* preserve paused media previews ([353419f](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/353419fed37a69fb4879a68adc6da3380bcfa9f1))
+* report sync state for the selected account ([45c3889](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/45c38894eefeef8b9d86161cc57f2cbdb300e901))
+* respect composer line limits and credit contributed features ([33f415f](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/33f415fc4b0f12ea343e5ee579d94bdc11e89104))
+* **setup:** an older repository commit is not an update ([fa93c3b](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/fa93c3b005c1e257132453d3e09033ef8d405970))
+* **setup:** change only the files the app wrote, exactly as it wrote them ([b054af1](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/b054af1059ce1405a658eead3b64c6cd505d44bf))
+* **setup:** keep agent access off until the user turns it on ([6713871](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/6713871b4d09c6b42d9a2122237914990b8e80c5))
+* **setup:** never replace a path that belongs to something else ([25f4c8e](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/25f4c8ecd75b0e2aff20c2e72b8e8258c013f302))
+* **setup:** recognize an earlier copy only by its exact shipped content ([a4c6784](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/a4c67844191c51bf7e59f77dbbe060200c22687a))
+* show only current message reactions ([59fdffe](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/59fdffe37d87ec5e1a1c7feead9e953c3eaa164b))
+* show the chat photo in the conversation header ([30eae4a](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/30eae4ae9d794ab42f94e14047ddc876402d5b3b))
+* stop SQLite WAL refresh feedback loop (v0.13.1) ([7ee1540](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/7ee1540f01d4f7fb698d683577fecd57063a9204))
+* unify WhatsApp brand mark ([97ac672](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/97ac6725d2c8aeecc319a76629d8063902b201ca))
+* wait for the store lock instead of restarting ([647d7f0](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/647d7f0f401178ef247f569a96e5ed5f95c8abc2))
+
+
+### Documentation
+
+* add copyable agent install prompt ([f4294a7](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/f4294a7510d94553acdbc2ac0d5703ab8159af8f))
+* document installing with omarchy plugin add ([3008359](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/300835940f2e9abeb79001c4c94d19d7a75c8d65))
+* document remove-local action in parity map and skill reference ([3194dbd](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/3194dbd4e64264a5189d762a2a7f16e8ad0ccbb1))
+* document the complete upgrade path ([14f7e18](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/14f7e18049722117d6486c2b73dc95b8447f0cf5))
+* explain why OmaWhatsApp exists ([d67d9dc](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/d67d9dc2b34a12050a1408f7da0a5ea8aaf6f06b))
+* map the multi-account scope ([c280e2d](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/c280e2d77fe703742cbe9eab5e06eafd13a30164))
+* new README, usage guide, screenshots and store banner ([0dd8c18](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/0dd8c18dcf8b154c056cae84b2438a43214ab5f3))
+* record the two-account run and what it found ([4470a90](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/4470a909b6fac4b86a386b524055dffe5e049775))
+* remove benchmark machinery ([23bb7a1](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/23bb7a1f2dcda9ef987419e1224b58e24e040702))
+* say that the installer needs no sudo in the form the store scan reads ([70ff93f](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/70ff93f23f99833ae2c06ed4e965f1ddc8edee92))
+* **skill:** harden privacy-safe agent routing ([9928289](https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/commit/9928289e11de375c39f8ba73049b338ae6e7d57d))
+
 ## 0.15.0 (2026-10-03)
 
 - Add forwarding, message selection, favorites, emoji and text formatting.
