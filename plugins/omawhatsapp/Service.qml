@@ -17,6 +17,8 @@ Item {
   property bool ready: false
   property bool railReady: false
   property bool authenticated: false
+  property string connectionState: "unknown"
+  property bool needsRelink: false
   property bool syncActive: false
   property bool offlineMode: false
   property bool notificationsEnabled: false
@@ -797,7 +799,7 @@ Item {
   function writeRefusal(kind, payload, targetRef) {
     if (!statusReady || statusAccount !== targetRef.account)
       return "That account is still loading. Try again in a moment."
-    if (!ready) return "That account is not linked or its local archive is not ready."
+    if (!ready) return "Link this account again before changing WhatsApp."
     // Saving a copy works offline when the file is already local; the helper
     // refuses the download part while offline.
     var isLocalAction = (kind === "chat-action" && payload && payload.action === "remove-local")
@@ -1614,6 +1616,7 @@ Item {
   // First run: nothing linked yet (or no wacli at all) shows the welcome.
   property bool wacliInstalled: true
   property bool anyAuthenticated: true
+  property bool anyDatabaseReady: false
   property string defaultAccountName: "primary"
   // What the first run sets up outside the plugin folder (sync units, the
   // command link, the agent skill), as the helper reports it.
@@ -1638,7 +1641,7 @@ Item {
   property bool wacliTooOld: false
   property string wacliVersion: ""
   readonly property bool needsOnboarding: !wacliInstalled || wacliTooOld || needsSetup
-    || (statusReady && !anyAuthenticated)
+    || (statusReady && !anyAuthenticated && !anyDatabaseReady)
   property bool setupWriting: false
   property bool autoSetupTried: false
   property var lastTeardown: null
@@ -2022,11 +2025,14 @@ Item {
         root.statusReady = true
         root.authenticated = readiness.authenticated
         root.railReady = readiness.railReady
+        root.connectionState = String(payload.connection_state || "unknown")
+        root.needsRelink = payload.needs_relink === true
         root.syncActive = payload.sync_active === true
         root.wacliInstalled = true
         root.wacliTooOld = false
         root.wacliVersion = String(payload.wacli_version || "")
         root.anyAuthenticated = payload.any_authenticated === true
+        root.anyDatabaseReady = payload.any_database_ready === true
         root.defaultAccountName = String((Array.isArray(payload.accounts)
           ? (payload.accounts.filter(function(item) { return item && item["default"] === true })[0] || {})
           : {}).account || "primary")
@@ -2190,20 +2196,20 @@ Item {
       var accountIsCurrent = account === String(root.selectedChatAccount || "")
       if (finishedKind === "sync-mode" && accountIsCurrent) {
         root.offlineMode = payload.online !== true
-        root.syncActive = payload.online === true
+        root.syncActive = false
       }
       if (finishedKind === "sync-mode") {
         var syncedAccount = String(payload.account || account || "")
         root.accounts = root.accounts.map(function(item) {
           return item && String(item.account || "") === syncedAccount
             ? Object.assign({}, item, { online: payload.online === true,
-                offline_mode: payload.online !== true, sync_active: payload.online === true })
+                offline_mode: payload.online !== true, sync_active: false, connection_state: payload.online === true ? "connecting" : "offline" })
             : item
         })
       }
       if (finishedKind === "quit" || finishedKind === "launch") {
         root.closed = payload.closed === true
-        root.syncActive = finishedKind === "launch" && !root.offlineMode
+        root.syncActive = false
       }
       if (finishedKind === "media-mode")
         root.autoDownloadMedia = payload.auto_download_media !== false

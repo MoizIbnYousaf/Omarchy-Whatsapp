@@ -105,14 +105,14 @@ Item {
 
   function handleLinkExit(exitCode) {
     if (!recordLinkExit(exitCode)) return
-    linkProbe.command = [helper, "session-ready", "--account", linkTarget]
+    linkProbe.command = [helper, "status", "--account", linkTarget]
     linkProbe.running = true
     refreshRequested()
   }
 
-  function handleLinkProbeExit(exitCode) {
+  function handleLinkProbeExit(exitCode, authenticated) {
     if (linkPhase !== "probing" || linkTarget === "") return
-    statusMessage = Number(exitCode) === 0
+    statusMessage = Number(exitCode) === 0 && authenticated === true
       ? linkTarget + " linked"
       : "Linking was not finished; use the same name to resume"
     linkPhase = "idle"
@@ -174,7 +174,11 @@ Item {
   Process {
     id: linkProbe
     command: []
-    onExited: function(exitCode) { root.handleLinkProbeExit(exitCode) }
+    stdout: StdioCollector { id: linkProbeOutput }
+    onExited: function(exitCode) {
+      var payload = root.parseJson(linkProbeOutput.text)
+      root.handleLinkProbeExit(exitCode, !!payload && payload.ok === true && payload.authenticated === true)
+    }
   }
 
   Process {

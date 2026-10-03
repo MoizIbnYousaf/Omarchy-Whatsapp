@@ -145,7 +145,7 @@ Panel {
     ? 0 : Style.space(36)
   readonly property int chatChromeHeight:
     Style.space(40 + 8 + 32 + 8 + 8 + 8 + 26)
-      + accountSwitcher.height
+      + accountSwitcher.height + railSyncStatus.height + Style.space(8)
   readonly property int desiredHeight: viewMode === "conversation"
     ? Style.space(620) : chatChromeHeight
       + accountReadinessHeight + chatListHeight
@@ -1187,6 +1187,36 @@ Panel {
             }
             onLinkRequested: function(name) {
               if (root.service) root.service.accountOperations.linkAccount(name)
+            }
+          }
+
+          LinkStatus {
+            id: railSyncStatus
+            objectName: "railSyncStatus"
+            readonly property var account: root.accountEntries.find(function(entry) {
+              return String(entry.account || "") === String(root.accountScope || root.currentAccount() || (root.service ? root.service.defaultAccountName : ""))
+            }) || ({})
+            width: parent.width
+            state: root.demoMode ? "connected"
+              : String((root.service && root.service.closed && account.connection_state !== "relink-required" && account.connection_state !== "unlinked" ? "closed" : account.connection_state) || (root.accountStatusReady
+                ? (root.service.closed ? "closed" : root.service.offlineMode ? "offline" : root.service.syncActive ? "connecting" : "stopped") : "unknown"))
+            pauseReason: root.service && String(account.account || "") === String(root.service.statusAccount || "")
+              ? String(root.service.syncPauseReason || "") : ""
+            foreground: root.foreground
+            accent: root.accent
+            dim: root.muted
+            urgent: root.urgent
+            fontFamily: root.fontFamily
+            demo: root.demoMode
+            busy: !!root.service && !!root.service.accountOperations && root.service.accountOperations.linkBusy
+            actionEnabled: !!root.service && !root.service.controlWriting
+            onActionRequested: {
+              var name = String(account.account || root.currentAccount())
+              if (expired) {
+                if (account.main === true) root.service.accountOperations.linkMainAccount(name)
+                else root.service.accountOperations.linkAccount(name)
+              } else if (root.service.closed) root.service.launchApp()
+              else root.service.setOnline(true, name)
             }
           }
 

@@ -35,6 +35,6 @@ TestCase {
     compare(process.command[process.command.length - 1], "launch")
     finish(service, { ok: true, kind: "launch", closed: false })
     verify(!service.closed)
-    verify(service.syncActive)
+    verify(!service.syncActive, "starting a service is not a confirmed connection")
   }
 }

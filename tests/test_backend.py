@@ -174,6 +174,46 @@ class BackendTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def test_sync_health_scopes_logout_to_current_invocation(self) -> None:
+        invocation = "a" * 32
+        results = [subprocess.CompletedProcess([], 0, invocation + "\n", ""),
+                   subprocess.CompletedProcess([], 0,
+                       "Connected.\nLogged out of WhatsApp (401: logged out from another device). Stopping sync.\n", "")]
+        with mock.patch.object(backend_module, "run_bounded", side_effect=results) as run:
+            self.assertEqual(self.backend._sync_health(self.backend.active), "relink-required")
+        self.assertIn("_SYSTEMD_INVOCATION_ID=" + invocation, run.call_args.args[0])
+
+    def test_failed_relink_does_not_restart_a_revoked_session(self) -> None:
+        with mock.patch.object(self.backend, "_sync_health", return_value="relink-required"), \
+                mock.patch.object(self.backend, "_systemctl_user") as systemctl:
+            self.assertEqual(self.backend._finalize_link(self.backend.active, 1), 1)
+            systemctl.assert_not_called()
+
+    def test_sync_health_does_not_read_old_logs_without_invocation(self) -> None:
+        with mock.patch.object(backend_module, "run_bounded", return_value=
+                subprocess.CompletedProcess([], 0, "", "")) as run:
+            self.assertEqual(self.backend._sync_health(self.backend.active), "unknown")
+            self.assertEqual(run.call_count, 1)
+
+    def test_sync_health_tracks_disconnect_and_reconnect(self) -> None:
+        for logs, expected in [("Connected.\nDisconnected.\n", "unknown"),
+                               ("Disconnected.\nConnected.\n", "connected")]:
+            with self.subTest(logs=logs), mock.patch.object(backend_module, "run_bounded", side_effect=[
+                    subprocess.CompletedProcess([], 0, "b" * 32, ""),
+                    subprocess.CompletedProcess([], 0, logs, "")]):
+                self.assertEqual(self.backend._sync_health(self.backend.active), expected)
+
+    def test_revoked_link_keeps_archive_ready_without_claiming_authentication(self) -> None:
+        with mock.patch.object(self.backend, "_doctor_cached", return_value={"authenticated": True}), \
+                mock.patch.object(self.backend, "_sync_active", return_value=False), \
+                mock.patch.object(self.backend, "_sync_health", return_value="relink-required"):
+            status = self.backend.status()
+        self.assertFalse(status["authenticated"])
+        self.assertTrue(status["needs_relink"])
+        self.assertTrue(status["rail_ready"])
+        self.assertEqual(status["connection_state"], "relink-required")
+        self.assertNotIn("401", json.dumps(status))
+
     def test_chat_rail_contains_every_local_chat(self) -> None:
         result = self.backend.chats()
         self.assertEqual({chat["name"] for chat in result["chats"]},

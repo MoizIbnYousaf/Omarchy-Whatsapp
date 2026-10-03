@@ -380,12 +380,15 @@ Item {
     return output
   }
 
+  property string demoConnectionState: "connected"
+
   function open(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(String(payloadJson || "{}")) || ({}) } catch (error) {}
     var previousDemo = demoMode
     closingFromHost = false
     demoMode = payload.demo === true
+    demoConnectionState = demoMode && payload.connectionState === "relink-required" ? "relink-required" : "connected"
     // Opening a closed OmaWhatsApp starts it again.
     if (!demoMode && service && service.closed === true) service.launchApp()
     demoRailDensity = demoMode && payload.density === "compact" ? "compact" : ""
@@ -2920,6 +2923,36 @@ Item {
             }
           }
 
+          LinkStatus {
+            id: railSyncStatus
+            objectName: "railSyncStatus"
+            readonly property var account: root.accountEntries.find(function(entry) {
+              return String(entry.account || "") === String(root.accountScope || root.selectedAccount || (root.service ? root.service.defaultAccountName : ""))
+            }) || ({})
+            width: parent.width
+            state: root.demoMode ? root.demoConnectionState
+              : String((root.service && root.service.closed && account.connection_state !== "relink-required" && account.connection_state !== "unlinked" ? "closed" : account.connection_state) || (root.selectedStatusReady
+                ? (root.service.closed ? "closed" : root.service.offlineMode ? "offline" : root.service.syncActive ? "connecting" : "stopped") : "unknown"))
+            pauseReason: !account.account || String(account.account) === String(root.service ? root.service.statusAccount : "")
+              ? root.syncPauseReason : ""
+            foreground: root.foreground
+            accent: root.accent
+            dim: root.dim
+            urgent: root.urgent
+            fontFamily: root.fontFamily
+            demo: root.demoMode
+            busy: !!root.service && !!root.service.accountOperations && root.service.accountOperations.linkBusy
+            actionEnabled: !!root.service && !root.service.controlWriting
+            onActionRequested: {
+              var name = String(account.account || root.selectedAccount)
+              if (expired) {
+                if (account.main === true) root.service.accountOperations.linkMainAccount(name)
+                else root.service.accountOperations.linkAccount(name)
+              } else if (root.service.closed) root.service.launchApp()
+              else root.service.setOnline(true, name)
+            }
+          }
+
           AccountReadiness {
             id: appAccountReadiness
             width: parent.width
@@ -3310,66 +3343,7 @@ Item {
             }
           }
 
-          Item {
-            id: railSyncStatus
-            objectName: "railSyncStatus"
-            readonly property bool closedApp: !root.demoMode && !!root.service && root.service.closed === true
-            readonly property string label: root.demoMode ? ""
-              : closedApp ? "Closed · click to receive messages again"
-              : (!root.selectedStatusReady ? "Loading…"
-                : (root.offlineForSelectedAccount ? "Offline · local archive"
-                  : (root.service && root.service.syncActive ? ""
-                    : (root.syncPauseReason !== "" ? "Sync paused · " + root.syncPauseReason
-                      : "Reconnecting…"))))
-            width: parent.width
-            height: Style.space(18)
-            visible: label !== ""
-            opacity: 0.75
 
-            Row {
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(6)
-              Rectangle {
-                anchors.verticalCenter: parent.verticalCenter
-                width: Style.space(6)
-                height: width
-                radius: width / 2
-                color: root.offlineForSelectedAccount ? root.dim : root.urgent
-              }
-              Text {
-                textFormat: Text.PlainText
-                text: railSyncStatus.label
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-              }
-            }
-            MouseArea {
-              id: railSyncStatusMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: root.offlineForSelectedAccount || railSyncStatus.closedApp
-                ? Qt.PointingHandCursor : Qt.ArrowCursor
-              onClicked: {
-                if (!root.service || root.service.controlWriting) return
-                if (railSyncStatus.closedApp) root.service.launchApp()
-                else if (root.offlineForSelectedAccount) root.service.setOnline(true)
-              }
-            }
-            PanelToolTip {
-              visible: railSyncStatusMouse.containsMouse
-              text: railSyncStatus.closedApp
-                ? "OmaWhatsApp is closed: nothing arrives until it opens again. Click to open it."
-                : root.offlineForSelectedAccount
-                ? "Background sync is paused. Click to resume it."
-                : (railSyncStatus.label === "Loading…"
-                  ? "Reading the account state."
-                  : root.syncPauseReason !== ""
-                    ? "wacli can do this only with background sync stopped; it restarts right after. Messages that arrive in these seconds may not reach this computer."
-                    : "Background sync is not connected. Local history stays readable; new messages arrive once it reconnects.")
-            }
-          }
         }
       }
 

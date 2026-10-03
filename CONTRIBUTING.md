@@ -63,7 +63,7 @@ The paths the app uses at runtime are listed in
 
 This project follows [Conventional Commits](https://www.conventionalcommits.org).
 Pull requests are squash-merged, so the pull request title becomes the commit
-on `main`; a check keeps it in this form:
+on `main`; use this form:
 
 ```text
 <type>(<optional scope>): <what changes, in the imperative>
@@ -99,11 +99,7 @@ Versions follow [Semantic Versioning](https://semver.org):
 - **MINOR**: new features that keep existing setups working.
 - **PATCH**: fixes and performance.
 
-The version lives in `manifest.json`, `plugins/omawhatsapp/manifest.json` and
-`HELPER_VERSION` in `bin/omawhatsapp_core.py`, and `./scripts/test` fails if
-they disagree. Nobody edits them by hand: after each merge to `main`,
-[release-please](https://github.com/googleapis/release-please) keeps a release
-pull request up to date with the next version and the changelog written from
-the commit titles. Merging that pull request tags `vX.Y.Z` and publishes the
-GitHub release; the app's update check and the Omarchy plugin store then see
-it.
+The version lives in `manifest.json` and `HELPER_VERSION` in
+`bin/omawhatsapp_core.py`; `./scripts/test` fails if they disagree.
+Update both together with `CHANGELOG.md`, validate the final commit in CI,
+then tag and publish its GitHub release.

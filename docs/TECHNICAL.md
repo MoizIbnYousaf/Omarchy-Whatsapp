@@ -209,3 +209,14 @@ intent tests, account/avatar boundary tests, first-run setup tests, a simulated 
 hygiene, and a guard against browser/Electron runtime dependencies. Live
 verification also checks service health, picker cancellation, window
 breakpoints, shell logs, and coredump count without sending test messages.
+
+### Link and connection status
+
+`online` is an account preference, not proof of a live WhatsApp connection.
+Status checks the current systemd invocation’s bounded journal for wacli’s
+connection and logout events. It exposes only `connection_state` and
+`needs_relink`, never raw journal content. Missing diagnostics remain unknown;
+a running process alone is displayed as connecting. A remotely revoked link
+overrides stale local authentication markers. Cached archives remain readable,
+while WhatsApp writes require an authenticated account. Linking is always an
+explicit user action through the account status card.

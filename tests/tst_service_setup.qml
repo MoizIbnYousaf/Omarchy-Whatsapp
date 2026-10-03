@@ -38,6 +38,20 @@ TestCase {
     process.exited(0)
   }
 
+  function test_expired_link_keeps_the_cached_rail_accessible() {
+    var service = createTemporaryObject(serviceComponent, testCase)
+    status(service, setup({ complete: true, consented: true, units: "ok" }), {
+      authenticated: false, any_authenticated: false, any_database_ready: true,
+      rail_ready: true, connection_state: "relink-required", needs_relink: true,
+      sync_active: false
+    })
+    verify(!service.needsOnboarding)
+    verify(service.railReady)
+    verify(!service.ready)
+    verify(service.needsRelink)
+    compare(service.connectionState, "relink-required")
+  }
+
   function test_the_helper_comes_from_the_checkout() {
     var service = createTemporaryObject(serviceComponent, testCase)
     verify(service.helper.charAt(0) === "/", service.helper)

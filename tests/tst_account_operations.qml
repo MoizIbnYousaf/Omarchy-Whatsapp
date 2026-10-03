@@ -79,6 +79,18 @@ TestCase {
     verify(!operations.linkBusy)
   }
 
+  function test_an_expired_marker_cannot_report_a_successful_relink() {
+    var operations = createTemporaryObject(operationsComponent, testCase)
+    operations.linkPhase = "probing"
+    operations.linkTarget = "work"
+    operations.handleLinkProbeExit(0, false)
+    verify(operations.statusMessage.indexOf("Linking was not finished") === 0)
+    operations.linkPhase = "probing"
+    operations.linkTarget = "work"
+    operations.handleLinkProbeExit(0, true)
+    compare(operations.statusMessage, "work linked")
+  }
+
   function test_timeout_never_reuses_a_held_terminal_process() {
     var operations = createTemporaryObject(operationsComponent, testCase)
     operations.linkPhase = "running"

@@ -474,7 +474,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 # Bumped with manifest.json (scripts/test checks it). The app compares it with
 # the plugin it loaded: an update that replaced only the plugin says so.
-HELPER_VERSION = "0.15.0"  # x-release-please-version
+HELPER_VERSION = "0.15.1"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
@@ -1073,6 +1073,9 @@ class Backend:
 
     def _finalize_link(self, account: Account, result: int) -> int:
         """Reconcile one terminal auth result and enable its sync exactly once."""
+        if result != 0 and self._sync_health(account) == "relink-required":
+            # A failed relink must not promote an old session marker to success.
+            return result
         committed = (account.store_dir / "session.db").is_file()
         if not committed:
             if result == 0:
@@ -2499,6 +2502,40 @@ class Backend:
         unit = (account or self.active).unit
         return bool(unit) and self._unit_active(unit)
 
+    def _sync_health(self, account: Account) -> str:
+        """Read only the current service invocation; never expose journal text.
+
+        Local session files prove neither a valid link nor a live connection.
+        wacli reports remote logout before exiting, including with status zero.
+        """
+        try:
+            invocation = run_bounded(
+                [str(SYSTEMCTL), "--user", "show", account.unit,
+                 "--property=InvocationID", "--value"], timeout=2,
+                stdout_limit=1024, stderr_limit=1024,
+            ).stdout.strip()
+            if not re.fullmatch(r"[0-9a-f]{32}", invocation):
+                return "unknown"
+            result = run_bounded(
+                ["/usr/bin/journalctl", "--user",
+                 "_SYSTEMD_INVOCATION_ID=" + invocation,
+                 "--no-pager", "-o", "cat", "-n", "80"], timeout=2,
+                stdout_limit=32768, stderr_limit=1024,
+            )
+            if result.returncode != 0:
+                return "unknown"
+            state = "unknown"
+            for line in result.stdout.splitlines():
+                if "Logged out of WhatsApp" in line or "Stopping sync (logged out)" in line:
+                    state = "relink-required"
+                elif line.strip() == "Connected.":
+                    state = "connected"
+                elif line.strip() == "Disconnected.":
+                    state = "unknown"
+            return state
+        except (OSError, subprocess.TimeoutExpired, ProcessOutputLimitExceeded):
+            return "unknown"
+
     def _systemctl_user(
         self, parts: Sequence[str], *, require_success: bool = True
     ) -> subprocess.CompletedProcess[str]:
@@ -2963,6 +3000,18 @@ class Backend:
             authenticated = doctor.get("authenticated") is True
             state = self._account_state(preferences, account)
             online = state.get("online") is not False
+            sync_active = self._sync_active(account)
+            health = self._sync_health(account)
+            needs_relink = health == "relink-required"
+            if needs_relink:
+                authenticated = False
+            connection_state = (
+                "relink-required" if needs_relink else
+                "unlinked" if not authenticated else
+                "offline" if not online else
+                "connected" if sync_active and health == "connected" else
+                "connecting" if sync_active else "stopped"
+            )
             return {
                 "account": account.name,
                 "label": account.label,
@@ -2972,7 +3021,9 @@ class Backend:
                 "main": account.selector in {"implicit", "store"},
                 "active": account.key == active.key,
                 "authenticated": authenticated,
-                "sync_active": self._sync_active(account),
+                "sync_active": sync_active,
+                "needs_relink": needs_relink,
+                "connection_state": connection_state,
                 "online": online,
                 "offline_mode": not online,
                 "send_read_receipts": state.get("send_read_receipts") is True,
@@ -3013,10 +3064,11 @@ class Backend:
                 report["database_ready"] for report in reports
             ),
             "rail_ready": any(
-                report["authenticated"] and report["database_ready"]
-                for report in reports
+                report["database_ready"] for report in reports
             ),
             "sync_active": current["sync_active"],
+            "needs_relink": current["needs_relink"],
+            "connection_state": current["connection_state"],
             "online": current["online"],
             "offline_mode": current["offline_mode"],
             "account": active.name,

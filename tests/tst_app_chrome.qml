@@ -71,7 +71,9 @@ TestCase {
       property var messages: []
       property var members: []
       property var accountOperations: ({
-        linkBusy: false, avatarBusy: false, statusMessage: ""
+        linkBusy: false, avatarBusy: false, statusMessage: "", linkedName: "", mainLinked: false,
+        linkMainAccount: function(name) { this.linkedName = name; this.mainLinked = true },
+        linkAccount: function(name) { this.linkedName = name; this.mainLinked = false }
       })
       property var lastPreference: null
       property var lastDelete: null
@@ -746,11 +748,36 @@ TestCase {
   function test_the_rail_line_says_why_this_app_paused_sync() {
     var h = createHarness({ syncActive: false })
     var status = findChild(h.app, "railSyncStatus")
-    compare(status.label, "Reconnecting…")
+    compare(status.label, "Sync stopped")
     h.service.syncPauseReason = "deleting a message"
     compare(status.label, "Sync paused · deleting a message")
     h.service.syncActive = true
-    compare(status.label, "")
+    compare(status.label, "Sync paused · deleting a message")
+    h.service.syncPauseReason = ""
+    compare(status.label, "Connecting…")
+  }
+
+  function test_expired_link_is_visible_even_with_cached_chats() {
+    var h = createHarness({ accounts: [{ account: "work", label: "work", main: true,
+      connection_state: "relink-required", database_ready: true, authenticated: false }] })
+    h.app.accountScope = "work"
+    var status = findChild(h.app, "railSyncStatus")
+    compare(status.label, "Link expired")
+    compare(status.action, "Link again")
+    verify(status.visible)
+    verify(findChild(h.app, "railLinkAction").visible)
+    status.actionRequested()
+    compare(h.service.accountOperations.linkedName, "work")
+    compare(h.service.accountOperations.mainLinked, true)
+    h.service.accounts = [{ account: "personal", main: false, connection_state: "relink-required" }]
+    h.app.accountScope = "personal"
+    status.actionRequested()
+    compare(h.service.accountOperations.linkedName, "personal")
+    compare(h.service.accountOperations.mainLinked, false)
+    h.service.accounts = [{ account: "work", connection_state: "connected" }]
+    h.app.accountScope = "work"
+    compare(status.label, "Linked · connected")
+    compare(status.action, "")
   }
 
   function test_new_chat_is_a_rail_button_with_a_shortcut() {
@@ -818,18 +845,19 @@ TestCase {
     compare(findChild(app, "conversationSubtitle").text, AccountModel.labelOf(workChat))
   }
 
-  function test_sync_status_only_appears_when_not_connected() {
+  function test_sync_status_always_explains_the_connection() {
     var harness = createHarness()
     var status = findChild(harness.app, "railSyncStatus")
     verify(status !== null)
-    verify(!status.visible, "connected sync needs no status line")
+    verify(status.visible, "the account status is always visible")
+    compare(status.label, "Connecting…")
     harness.service.syncActive = false
-    compare(status.label, "Reconnecting…")
+    compare(status.label, "Sync stopped")
     verify(status.visible)
     harness.service.offlineMode = true
     compare(status.label, "Offline · local archive")
     harness.service.statusReady = false
-    compare(status.label, "Loading…")
+    compare(status.label, "Checking link…")
   }
 
   function test_ctrl_number_chat_jumps_are_gone() {

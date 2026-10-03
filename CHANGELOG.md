@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.1 (2026-10-03)
+
+- Show account linkage and actual sync state beneath the account switcher, with a direct relink action when WhatsApp revokes the session.
+- Keep cached chats readable while a link is expired; block remote changes until relinked.
+- Stop treating an online preference or a successful service start as a live WhatsApp connection.
+
 ## 0.15.0 (2026-10-03)
 
 - Add forwarding, message selection, favorites, emoji and text formatting.
