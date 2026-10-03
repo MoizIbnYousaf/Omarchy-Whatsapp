@@ -909,7 +909,7 @@ class AccountLifecycleTests(unittest.TestCase):
                 mock.patch.object(
                     self.backend, "_systemctl_user", return_value=completed
                 ) as systemctl, mock.patch.object(
-                    backend_module.subprocess, "run", return_value=completed
+                    self.backend, "_run_auth_terminal", return_value=completed
                 ) as run:
             code = self.backend.transport_interactive(
                 ["auth"], authorization="interactive", account="home"
@@ -930,13 +930,24 @@ class AccountLifecycleTests(unittest.TestCase):
                     self.backend, "_systemctl_user",
                     side_effect=[completed, backend_module.OmaWhatsAppError("start failed")],
                 ), mock.patch.object(
-                    backend_module.subprocess, "run", return_value=completed
+                    self.backend, "_run_auth_terminal", return_value=completed
                 ), self.assertRaises(backend_module.OmaWhatsAppPartialError) as raised:
             self.backend.transport_interactive(
                 ["auth"], authorization="interactive", account="home"
             )
         self.assertTrue(raised.exception.partial["committed"])
         self.assertEqual(raised.exception.partial["account"], "home")
+
+    def test_rejected_auth_does_not_restore_or_finalize_a_revoked_link(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(self.backend, "_unit_active", return_value=True), \
+                mock.patch.object(self.backend, "_systemctl_user", return_value=completed) as systemctl, \
+                mock.patch.object(self.backend, "_run_auth_terminal", side_effect=
+                    backend_module.OmaWhatsAppAuthRejected("Pairing did not finish")), \
+                self.assertRaises(backend_module.OmaWhatsAppAuthRejected):
+            self.backend.transport_interactive(["auth"], authorization="interactive", account="home")
+        systemctl.assert_called_once_with(["stop", "wacli-sync@home.service"])
+        self.assertEqual(self.backend._lifecycle_recovery_units(), [])
 
     def test_interrupted_terminal_link_always_restores_active_sync(self) -> None:
         self._online(self.home, True)
@@ -951,7 +962,7 @@ class AccountLifecycleTests(unittest.TestCase):
                 mock.patch.object(
                     self.backend, "_systemctl_user", return_value=completed
                 ) as systemctl, mock.patch.object(
-                    backend_module.subprocess, "run", side_effect=interrupt
+                    self.backend, "_run_auth_terminal", side_effect=interrupt
                 ), self.assertRaises(KeyboardInterrupt):
             self.backend.transport_interactive(
                 ["auth"], authorization="interactive", account="home"

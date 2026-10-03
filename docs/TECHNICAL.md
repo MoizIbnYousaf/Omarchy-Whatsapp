@@ -227,3 +227,9 @@ a zero auth exit code as proof of authentication. Pairing invalidates the
 app's doctor cache before reconciling its outcome. A 401 may leave a database
 file while clearing the device record; the next explicit pairing starts QR
 setup against that unlinked store. Saved message history is preserved.
+
+The interactive pairing monitor forwards stdout/stderr directly to the user's
+terminal, keeping only a bounded suffix in memory to detect explicit logout
+messages. It does not retain QR codes, attach raw output to JSON, or write
+logs. An explicit logout fails pairing even if wacli exits zero and leaves
+local credentials behind; a known rejected link is not restarted by recovery.

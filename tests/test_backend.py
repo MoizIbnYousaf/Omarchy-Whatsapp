@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 from importlib.machinery import SourceFileLoader
-from contextlib import closing
+from contextlib import closing, redirect_stdout, redirect_stderr
 import hashlib
 import json
+import io
 import os
 from pathlib import Path
 import sqlite3
@@ -182,12 +183,36 @@ class BackendTests(unittest.TestCase):
         with mock.patch.object(backend_module, "run_bounded", side_effect=results) as run:
             self.assertEqual(self.backend._sync_health(self.backend.active), "relink-required")
         self.assertIn("_SYSTEMD_INVOCATION_ID=" + invocation, run.call_args.args[0])
+        self.assertIn("--grep", run.call_args.args[0],
+                      "busy message logs must not evict the last connection event")
 
     def test_failed_relink_does_not_restart_a_revoked_session(self) -> None:
         with mock.patch.object(self.backend, "_sync_health", return_value="relink-required"), \
                 mock.patch.object(self.backend, "_systemctl_user") as systemctl:
             self.assertEqual(self.backend._finalize_link(self.backend.active, 1), 1)
             systemctl.assert_not_called()
+
+    def test_terminal_logout_wins_over_zero_exit_and_preserved_credentials(self) -> None:
+        output, error = io.StringIO(), io.StringIO()
+        command = [sys.executable, "-c",
+                   "import sys; print('Logged out of WhatsApp (401).', file=sys.stderr); "
+                   "print('Authenticated. Messages stored: 0')"]
+        with redirect_stdout(output), redirect_stderr(error), self.assertRaisesRegex(
+                backend_module.OmaWhatsAppAuthRejected, "Pairing did not finish"):
+            self.backend._run_auth_terminal(command)
+        self.assertIn("Logged out of WhatsApp", error.getvalue())
+        self.assertIn("Authenticated.", output.getvalue())
+
+    def test_terminal_pairing_output_is_forwarded_and_success_is_preserved(self) -> None:
+        output, error = io.StringIO(), io.StringIO()
+        with redirect_stdout(output), redirect_stderr(error):
+            result = self.backend._run_auth_terminal([sys.executable, "-c",
+                "import sys; print('Synthetic QR placeholder', file=sys.stderr); print('Connected.')"])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Synthetic QR placeholder", error.getvalue())
+        self.assertIn("Connected.", output.getvalue())
+        self.assertIsNone(result.stdout)
+        self.assertIsNone(result.stderr)
 
     def test_zero_exit_after_logout_cannot_report_success_or_start_sync(self) -> None:
         (self.store / "session.db").write_bytes(b"synthetic-expired-session")
@@ -2702,7 +2727,7 @@ class BackendTests(unittest.TestCase):
                  self.backend, "_systemctl_user", return_value=completed
              ) as systemctl, \
              mock.patch.object(
-                 backend_module.subprocess, "run", side_effect=authenticate
+                 self.backend, "_run_auth_terminal", side_effect=authenticate
              ) as run:
             code = self.backend.transport_interactive(
                 ["auth", "--qr-format", "terminal"], authorization="interactive"
@@ -2733,7 +2758,7 @@ class BackendTests(unittest.TestCase):
 
         with mock.patch.object(backend_module, "HOME", self.root), \
                 mock.patch.object(
-                backend_module.subprocess, "run", side_effect=authenticate
+                self.backend, "_run_auth_terminal", side_effect=authenticate
         ) as run, mock.patch.object(
                 self.backend, "_systemctl_user"
         ) as systemctl:

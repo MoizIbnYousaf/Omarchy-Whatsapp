@@ -5,6 +5,7 @@
 - Reject pairing success when wacli exits zero after a 401 logout; verify fresh local credentials and invalidate stale authentication status.
 - Keep unlinked accounts out of sync retry loops, even when a session database remains on disk.
 - Allow named accounts with expired credentials to start fresh pairing without deleting saved chats.
+- Detect explicit logout output even when local credentials remain, and retain connection status during busy logs.
 
 ## 0.15.1 (2026-10-03)
 

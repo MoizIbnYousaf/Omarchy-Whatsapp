@@ -770,6 +770,10 @@ class OmaWhatsAppError(RuntimeError):
     pass
 
 
+class OmaWhatsAppAuthRejected(OmaWhatsAppError):
+    """The terminal reported a logout, regardless of its exit status."""
+
+
 class OmaWhatsAppPartialError(OmaWhatsAppError):
     """A multi-step mutation delivered some items and must not be retried whole."""
 
@@ -2528,7 +2532,9 @@ class Backend:
             result = run_bounded(
                 ["/usr/bin/journalctl", "--user",
                  "_SYSTEMD_INVOCATION_ID=" + invocation,
-                 "--no-pager", "-o", "cat", "-n", "80"], timeout=2,
+                 "--grep", r"(?m)^\s*(?:Connected\.|Disconnected\.)\s*$|"
+                 r"Logged out of WhatsApp|Stopping sync \(logged out\)|not authenticated",
+                 "--case-sensitive=yes", "--no-pager", "-o", "cat", "-n", "12"], timeout=2,
                 stdout_limit=32768, stderr_limit=1024,
             )
             if result.returncode != 0:
@@ -7001,6 +7007,45 @@ class Backend:
             result, path, policy, include_events, sensitive
         )
 
+    @staticmethod
+    def _run_auth_terminal(command: list[str]) -> subprocess.CompletedProcess[str]:
+        """Forward QR/output to the user's terminal without storing it.
+
+        Only a bounded suffix in memory is inspected for fixed failure phrases.
+        QR codes and private diagnostics never enter JSON or persistent logs.
+        """
+        rejected = False
+        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+            with selectors.DefaultSelector() as selector:
+                assert process.stdout is not None and process.stderr is not None
+                selector.register(process.stdout, selectors.EVENT_READ, sys.stdout)
+                selector.register(process.stderr, selectors.EVENT_READ, sys.stderr)
+                suffixes: dict[int, bytes] = {}
+                while selector.get_map():
+                    for key, _ in selector.select():
+                        chunk = os.read(key.fd, 4096)
+                        if not chunk:
+                            selector.unregister(key.fileobj)
+                            continue
+                        stream = key.data
+                        if hasattr(stream, "buffer"):
+                            stream.buffer.write(chunk)
+                        else:
+                            stream.write(chunk.decode("utf-8", errors="replace"))
+                        stream.flush()
+                        sample = (suffixes.get(key.fd, b"") + chunk).lower()
+                        if b"logged out of whatsapp" in sample \
+                                or b"stopping sync (logged out)" in sample:
+                            rejected = True
+                        suffixes[key.fd] = sample[-128:]
+            code = process.wait()
+        if rejected:
+            raise OmaWhatsAppAuthRejected(
+                "WhatsApp rejected the linked session. Pairing did not finish. "
+                "Click Link again to pair afresh. Saved chats are kept."
+            )
+        return subprocess.CompletedProcess(command, code)
+
     def _transport_interactive(
         self,
         values: Sequence[str],
@@ -7058,13 +7103,19 @@ class Backend:
             operation_error: BaseException | None = None
             returncode: int | None = None
             try:
-                result = subprocess.run(
-                    [str(self.wacli), *global_args, *args], check=False
-                )
+                command = [str(self.wacli), *global_args, *args]
+                result = self._run_auth_terminal(command) if path in {
+                    ("auth",), ("accounts", "add")
+                } else subprocess.run(command, check=False)
                 returncode = result.returncode
             except BaseException as exc:
                 operation_error = exc
-            if active:
+            if path == ("auth",):
+                self._invalidate_doctor_cache(scoped)
+            if active and isinstance(operation_error, OmaWhatsAppAuthRejected):
+                # A known revoked link must not be restarted by crash recovery.
+                self._clear_lifecycle_recovery(scoped.unit)
+            elif active:
                 try:
                     self._restore_yielded_sync(scoped, active)
                 except OmaWhatsAppError as exc:
