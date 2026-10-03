@@ -759,6 +759,33 @@ Item {
       chatList.positionViewAtIndex(root.chatCursorIndex, ListView.Contain)
   }
 
+  function focusChatView(index) {
+    var chip = railViewRepeater.itemAt(index)
+    if (!chip) return
+    if (root.narrow) {
+      root.narrowConversation = false
+      root.narrowSearchOpen = false
+    } else root.sidebarCollapsed = false
+    chip.forceActiveFocus(Qt.TabFocusReason)
+  }
+
+  function cycleRailFocus(backwards) {
+    var focusedView = railViewRepeater.itemAt(keyboardNavigation.chatViewIndex)
+    if (root.keyboardContext === "chat-views" && focusedView && focusedView.activeFocus
+        && !root.textEntryActive) {
+      var next = keyboardNavigation.chatViewIndex + (backwards ? -1 : 1)
+      if (next < 0 || next >= root.chatViews.length) root.focusChats()
+      else root.focusChatView(next)
+      return true
+    }
+    if ((root.keyboardContext === "chats" && keyboardHome.activeFocus && !root.textEntryActive)
+        || chatSearchField.activeFocus) {
+      root.focusChatView(backwards ? root.chatViews.length - 1 : 0)
+      return true
+    }
+    return false
+  }
+
   function focusChatSearch() {
     if (root.narrow) {
       root.narrowConversation = false
@@ -2272,7 +2299,16 @@ Item {
       anchors.fill: parent
       focus: true
 
-      Item { id: keyboardHome; width: 1; height: 1 }
+      Item {
+        id: keyboardHome
+        width: 1; height: 1
+        Keys.onPressed: function(event) {
+          if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+              && (event.modifiers === Qt.NoModifier || event.modifiers === Qt.ShiftModifier))
+            event.accepted = root.cycleRailFocus(event.key === Qt.Key_Backtab
+              || (event.modifiers & Qt.ShiftModifier))
+        }
+      }
 
       Shortcut {
         sequence: "Ctrl+O"
@@ -2500,6 +2536,11 @@ Item {
         }
         if (event.key === Qt.Key_Escape) {
           root.goBack()
+          event.accepted = true
+        } else if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                   && (event.modifiers === Qt.NoModifier || event.modifiers === Qt.ShiftModifier)
+                   && root.cycleRailFocus(event.key === Qt.Key_Backtab
+                     || (event.modifiers & Qt.ShiftModifier))) {
           event.accepted = true
         } else if (!root.textEntryActive && root.pageConversation(event.key)) {
           event.accepted = true
@@ -2752,6 +2793,8 @@ Item {
             leftPadding: Style.space(30)
             rightPadding: Style.space(30)
             onActiveFocusChanged: if (activeFocus) keyboardNavigation.enterChatSearch()
+            Keys.onTabPressed: root.cycleRailFocus(false)
+            Keys.onBacktabPressed: root.cycleRailFocus(true)
             onTextChanged: root.chatCursorIndex = 0
             background: Rectangle {
               radius: Style.cornerRadius
@@ -2856,13 +2899,47 @@ Item {
                 y: railViews.inset
                 spacing: root.compactRail ? Style.space(12) : Style.space(2)
                 Repeater {
-                  model: root.chatViews
+                  id: railViewRepeater
+                  // Counts and selected views change live; a numeric model
+                  // keeps focused chips alive when their labels update.
+                  model: root.chatViews.length
+                  onCountChanged: if (root.keyboardContext === "chat-views")
+                    Qt.callLater(function() {
+                      root.focusChatView(Math.min(keyboardNavigation.chatViewIndex, railViewRepeater.count - 1))
+                    })
                   delegate: Rectangle {
                     id: viewChip
-                    required property var modelData
+                    readonly property var modelData: root.chatViews[index] || ({ id: "", label: "", count: 0 })
                     objectName: "railView-" + modelData.id
                     readonly property bool active: root.chatView === modelData.id
                     required property int index
+                    activeFocusOnTab: true
+                    Accessible.role: Accessible.PageTab
+                    Accessible.name: modelData.label
+                    Accessible.onPressAction: root.focusChatView(index)
+                    border.width: activeFocus ? 1 : 0
+                    border.color: root.accent
+                    onActiveFocusChanged: if (activeFocus) {
+                      keyboardNavigation.enterChatViews(root.chatViews.length, index)
+                      root.chatView = modelData.id
+                      root.chatCursorIndex = 0
+                      var left = x + railViews.inset
+                      var right = left + width
+                      if (left < railViews.contentX) railViews.contentX = left
+                      else if (right > railViews.contentX + railViews.width)
+                        railViews.contentX = right - railViews.width
+                    }
+                    Keys.onPressed: function(event) {
+                      if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                          && (event.modifiers === Qt.NoModifier || event.modifiers === Qt.ShiftModifier)) {
+                        event.accepted = root.cycleRailFocus(event.key === Qt.Key_Backtab
+                          || (event.modifiers & Qt.ShiftModifier))
+                      } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                           || event.key === Qt.Key_Space) && event.modifiers === Qt.NoModifier) {
+                        root.chatView = modelData.id
+                        event.accepted = true
+                      }
+                    }
                     width: Number(railViews.naturalWidths[index] || 0) + railViews.extraWidth
                     height: railViews.segmentHeight - railViews.inset * 2
                     radius: Style.cornerRadius - 2
@@ -2905,9 +2982,8 @@ Item {
                     HoverHandler { id: viewHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler {
                       onTapped: {
-                        root.chatView = viewChip.active && viewChip.modelData.id !== "all"
-                          ? "all" : viewChip.modelData.id
-                        root.chatCursorIndex = 0
+                        root.focusChatView(viewChip.active && viewChip.modelData.id !== "all"
+                          ? 0 : viewChip.index)
                       }
                     }
                   }

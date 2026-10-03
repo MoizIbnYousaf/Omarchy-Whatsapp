@@ -124,8 +124,10 @@ TestCase {
     var groups = findChild(app, "railView-groups")
     tryVerify(function() { return groups.x > all.x + all.width }, 2000, "the row has laid out")
     verify(!views.overflowing, "the four views fit a normal rail")
-    var end = groups.mapToItem(views, groups.width, 0).x
-    verify(Math.abs(views.width - end) <= 3 + views.inset, "the segments reach the rail's edge")
+    tryVerify(function() {
+      var end = groups.mapToItem(views, groups.width, 0).x
+      return Math.abs(views.width - end) <= 3 + views.inset
+    }, 2000, "the segments reach the rail's edge after live labels settle")
     verify(!findChild(all, "railViewUnderline").visible)
     app.demoRailDensity = "compact"
     tryVerify(function() { return findChild(all, "railViewUnderline").visible }, 1000,

@@ -8,6 +8,7 @@ QtObject {
   id: root
 
   property string context: "composer"
+  property int chatViewIndex: 0
   property int chatIndex: 0
   property int messageIndex: 0
 
@@ -24,6 +25,11 @@ QtObject {
   function enterMessages(count) {
     messageIndex = boundedIndex(messageIndex, count)
     context = "messages"
+  }
+
+  function enterChatViews(count, index) {
+    chatViewIndex = boundedIndex(index, count)
+    context = "chat-views"
   }
 
   function enterChats(count, preferredIndex) {
@@ -52,7 +58,7 @@ QtObject {
   }
 
   function wantsChatSearch(key, textEntryActive) {
-    return context === "chats" && textEntryActive !== true && key === Qt.Key_Slash
+    return (context === "chats" || context === "chat-views") && textEntryActive !== true && key === Qt.Key_Slash
   }
 
   function wantsMessageReply(key, modifiers, textEntryActive) {
@@ -64,7 +70,7 @@ QtObject {
 
   function backTarget() {
     if (context === "composer" || context === "message-search") return "messages"
-    if (context === "messages" || context === "chat-search") return "chats"
+    if (context === "messages" || context === "chat-search" || context === "chat-views") return "chats"
     return "close"
   }
 }

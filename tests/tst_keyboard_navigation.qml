@@ -70,6 +70,16 @@ TestCase {
     verify(!navigation.wantsChatSearch(Qt.Key_Slash, false))
   }
 
+  function test_filter_focus_preserves_search_and_returns_to_chats() {
+    var navigation = createTemporaryObject(navigationComponent, testCase)
+    navigation.enterChatViews(4, 2)
+    compare(navigation.context, "chat-views")
+    compare(navigation.chatViewIndex, 2)
+    verify(navigation.wantsChatSearch(Qt.Key_Slash, false))
+    verify(!navigation.wantsChatSearch(Qt.Key_Slash, true))
+    compare(navigation.backTarget(), "chats")
+  }
+
   function test_r_replies_only_from_message_navigation() {
     var navigation = createTemporaryObject(navigationComponent, testCase)
     navigation.enterMessages(3)

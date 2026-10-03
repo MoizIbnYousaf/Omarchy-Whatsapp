@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.4
+
+- Tab through All, Unread, To reply and Groups, then into the chat list for J/K navigation. Shift+Tab reverses the path; Archived joins when present. Each focused filter activates immediately and has a visible focus outline.
+- Keep `/` search available from the filters and chats. Focus survives live unread-count updates, and overflowed filters scroll into view. No new dependencies.
+
 ## 0.15.3
 
 - Show a compact connection indicator beside Chats in the full app. Healthy sync no longer takes up a full status card; recovery details and actions remain visible when needed.

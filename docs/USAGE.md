@@ -175,7 +175,8 @@ them keeps the chat list warm in the resident service.
 | `Ctrl+K` | Go to a chat by name |
 | `Ctrl+F` | Find in this conversation |
 | `Ctrl+B` | Hide or show the chat list (bold on a selection) |
-| `/` | Search chats |
+| `Tab` · `Shift+Tab` | From the sidebar, cycle All → Unread → To reply → Groups → chats (reverse with Shift); Archived joins when present. Focus activates each filter. |
+| `/` | Search chats from the list or filters |
 | `C` | Write a message |
 | `R` | Reply to the selected message |
 | `Space` | Open the selected media; play or pause in the viewer |

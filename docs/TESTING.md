@@ -145,3 +145,13 @@ against other contacts.
 ## Store refresh regression
 
 `tests/test_store_watcher.py` runs the event mask from the resident service against disposable SQLite databases and a real `inotifywait`. It checks that read-only queries settle without another refresh, both with and without a persistent WAL writer, while committed writes, checkpoints, atomic replacement, deletion, and rollback-journal commits still produce relevant events. Repeated write/read cycles must show fresh rows and then go quiet. These tests reproduce the feedback loop against the pre-0.13.1 mask without using a private chat store.
+
+### Sidebar keyboard route
+
+Using synthetic/demo chats, focus the sidebar (Esc back from the conversation)
+and press Tab through All, Unread, To reply and Groups, then into chats. Verify
+that each filter activates with a visible focus outline, J/K moves the chat
+cursor, and Shift+Tab reverses the route. `/` opens search from either filters
+or chats; typing there must not move chat selection. Include empty lists,
+Archived when present, live unread-count updates, and a narrow rail with
+overflowing filters; keyboard focus must stay visible and stable.

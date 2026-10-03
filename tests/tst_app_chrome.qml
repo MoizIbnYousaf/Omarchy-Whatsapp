@@ -745,6 +745,91 @@ TestCase {
     compare(h.service.appConversationVisible, true)
   }
 
+  function test_tab_walks_filters_then_enters_j_k_chat_navigation() {
+    var h = createHarness({ chats: [
+      { account: "work", jid: "group-one@example", name: "First group", kind: "group", unread: 1 },
+      { account: "work", jid: "group-two@example", name: "Second group", kind: "group", unread: 2 }
+    ] })
+    h.app.focusChats()
+    for (var view of ["all", "unread", "reply", "groups"]) {
+      keyClick(Qt.Key_Tab)
+      compare(h.app.chatView, view)
+      compare(h.app.keyboardContext, "chat-views")
+      verify(findChild(h.app, "railView-" + view).activeFocus)
+    }
+    keyClick(Qt.Key_Tab)
+    compare(h.app.keyboardContext, "chats")
+    compare(h.app.visibleChats.length, 2)
+    compare(h.app.chatCursorIndex, 0)
+    keyClick(Qt.Key_J)
+    compare(h.app.chatCursorIndex, 1)
+    keyClick(Qt.Key_K)
+    compare(h.app.chatCursorIndex, 0)
+    keyClick(Qt.Key_Slash)
+    compare(h.app.keyboardContext, "chat-search")
+    keyClick(Qt.Key_J)
+    compare(h.app.chatCursorIndex, 0, "typing in search must not move the chat cursor")
+  }
+
+  function test_shift_tab_reverses_the_rail_path_and_search_can_enter_it() {
+    var h = createHarness()
+    h.app.focusChats()
+    for (var view of ["groups", "reply", "unread", "all"]) {
+      keyClick(Qt.Key_Tab, Qt.ShiftModifier)
+      compare(h.app.chatView, view)
+      verify(findChild(h.app, "railView-" + view).activeFocus)
+    }
+    keyClick(Qt.Key_Tab, Qt.ShiftModifier)
+    compare(h.app.keyboardContext, "chats")
+    h.app.focusChatSearch()
+    keyClick(Qt.Key_Tab)
+    compare(h.app.chatView, "all")
+    compare(h.app.keyboardContext, "chat-views")
+    keyClick(Qt.Key_Slash)
+    compare(h.app.keyboardContext, "chat-search")
+  }
+
+  function test_focused_filter_survives_live_counts_and_scrolls_into_view() {
+    var h = createHarness()
+    h.app.railWidthChoice = 300
+    h.app.focusChatView(1)
+    var chip = findChild(h.app, "railView-unread")
+    verify(chip.activeFocus)
+    h.service.chats = [workChat, { account: "work", jid: "unread@example",
+      name: "New unread", kind: "dm", unread: 12 }]
+    verify(chip.activeFocus)
+    keyClick(Qt.Key_Tab)
+    compare(h.app.chatView, "reply")
+    keyClick(Qt.Key_Tab)
+    compare(h.app.chatView, "groups")
+    var rail = findChild(h.app, "railViews")
+    var groups = findChild(h.app, "railView-groups")
+    verify(groups.activeFocus)
+    verify(groups.x + groups.width <= rail.contentX + rail.width + 1)
+    keyClick(Qt.Key_Escape)
+    compare(h.app.keyboardContext, "chats")
+  }
+
+  function test_tab_includes_archived_and_handles_empty_chats() {
+    var h = createHarness({ chats: [{ account: "work", jid: "archive@example",
+      name: "Saved group", kind: "group", archived: true, unread: 0 }] })
+    h.app.focusChatView(3)
+    keyClick(Qt.Key_Tab)
+    compare(h.app.chatView, "archived")
+    verify(findChild(h.app, "railView-archived").activeFocus)
+    keyClick(Qt.Key_Tab)
+    compare(h.app.keyboardContext, "chats")
+    h.app.focusChatView(1)
+    compare(h.app.visibleChats.length, 0)
+    h.service.chats = []
+    wait(0)
+    for (var i = 0; i < h.app.chatViews.length - 1; i++) keyClick(Qt.Key_Tab)
+    compare(h.app.keyboardContext, "chats")
+    keyClick(Qt.Key_J)
+    keyClick(Qt.Key_K)
+    compare(h.app.chatCursorIndex, 0)
+  }
+
   function test_the_rail_line_says_why_this_app_paused_sync() {
     var h = createHarness({ syncActive: false })
     var status = findChild(h.app, "railSyncStatus")
