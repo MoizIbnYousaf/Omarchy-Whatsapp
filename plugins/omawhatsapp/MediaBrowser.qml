@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "MediaModel.js" as MediaModel
 import "LinkModel.js" as LinkModel
@@ -15,9 +16,9 @@ Rectangle {
   property var items: []
   property string kind: "media"
   property bool loading: false
-  property color foreground: Color.foreground
-  property color surface: Color.background
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color surface: Commons.Color.background
+  property color accent: Commons.Color.accent
   property color muted: foreground
   property string fontFamily: Style.font.family
   readonly property var mediaItems: kind === "media" ? items : []

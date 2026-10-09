@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // New chat. It searches the people this account's mirror knows and, for a
@@ -15,10 +16,10 @@ Popup {
   property bool demoMode: false
   property var demoPeople: []
   property string accountLabel: ""
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   // Popup already owns `background`.
-  property color surface: Color.background
-  property color accent: Color.accent
+  property color surface: Commons.Color.background
+  property color accent: Commons.Color.accent
   property color muted: foreground
   property color urgent: "#e06c75"
   property string fontFamily: Style.font.family

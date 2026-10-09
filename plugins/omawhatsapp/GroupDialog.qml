@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // New group and joining one by link, as on the phone's new chat screen.
@@ -13,9 +14,9 @@ Popup {
   property var service: null
   property bool demoMode: false
   property var demoPeople: []
-  property color foreground: Color.foreground
-  property color surface: Color.background
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color surface: Commons.Color.background
+  property color accent: Commons.Color.accent
   property color muted: foreground
   property string fontFamily: Style.font.family
   property bool showAvatars: true

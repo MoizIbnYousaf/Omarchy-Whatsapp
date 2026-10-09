@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // First run after `omarchy plugin add`: install wacli if it is missing, set up
@@ -10,9 +11,9 @@ Rectangle {
 
   property var service: null
   property bool demoMode: false
-  property color foreground: Color.foreground
-  property color background: Color.background
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color background: Commons.Color.background
+  property color accent: Commons.Color.accent
   property color dim: foreground
   property string fontFamily: Style.font.family
   readonly property var operations: service ? service.accountOperations : null

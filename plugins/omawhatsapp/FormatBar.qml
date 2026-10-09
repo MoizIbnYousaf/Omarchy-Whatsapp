@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // WhatsApp formatting over a selection in the composer, as on Telegram or
@@ -14,9 +15,9 @@ Popup {
   property Item editor: null
   property Item anchorItem: parent
   property bool enabledHere: true
-  property color foreground: Color.foreground
-  property color surface: Color.background
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color surface: Commons.Color.background
+  property color accent: Commons.Color.accent
   property color muted: foreground
   property string fontFamily: Style.font.family
   signal chosen(string kind)

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.5 (2026-10-09)
+
+- Restore readable text and theme surfaces on Qt 6.12 by explicitly resolving Omarchy’s theme color singleton. Fixes the app, dropdown, settings, dialogs and media UI across themes. No new dependencies.
+
 ## 0.15.4
 
 - Tab through All, Unread, To reply and Groups, then into the chat list for J/K navigation. Shift+Tab reverses the path; Archived joins when present. Each focused filter activates immediately and has a visible focus outline.
