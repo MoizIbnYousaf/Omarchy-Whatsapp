@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "AccountModel.js" as AccountModel
 
@@ -12,9 +13,9 @@ Popup {
 
   property var chats: []
   property bool showAvatars: true
-  property color foreground: Color.foreground
-  property color surface: Color.background
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color surface: Commons.Color.background
+  property color accent: Commons.Color.accent
   property color muted: foreground
   property string fontFamily: Style.font.family
   property string query: ""

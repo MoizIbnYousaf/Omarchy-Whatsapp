@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import "AccountModel.js" as AccountModel
 import "VoiceRecorderModel.js" as VoiceModel
 
@@ -11,10 +12,10 @@ Item {
   property string account: ""
   property string jid: ""
   property bool offline: false
-  property color foreground: Color.foreground
-  property color background: Color.background
-  property color accent: Color.accent
-  property color urgent: Color.urgent
+  property color foreground: Commons.Color.foreground
+  property color background: Commons.Color.background
+  property color accent: Commons.Color.accent
+  property color urgent: Commons.Color.urgent
   property color muted: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.62)
   property string fontFamily: Style.font.family
   property bool compact: false

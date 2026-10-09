@@ -3,6 +3,7 @@ import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "EmojiModel.js" as EmojiModel
 
@@ -15,10 +16,10 @@ Popup {
   objectName: "emojiPicker"
 
   property var target: null
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   // Named surface, because Popup already owns `background`.
-  property color surface: Color.background
-  property color accent: Color.accent
+  property color surface: Commons.Color.background
+  property color accent: Commons.Color.accent
   // Popup already owns `dim` too.
   property color muted: foreground
   property string fontFamily: Style.font.family

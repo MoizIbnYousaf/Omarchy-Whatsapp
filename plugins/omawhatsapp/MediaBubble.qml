@@ -1,6 +1,7 @@
 import QtQuick
 import QtMultimedia
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui as Ui
 import "MediaModel.js" as MediaModel
 
@@ -90,7 +91,7 @@ Item {
   // theme's alert color, as on the phone).
   function kindColor(ext) {
     var value = String(ext || "")
-    if (value === "PDF") return Color.urgent
+    if (value === "PDF") return Commons.Color.urgent
     var turns = { DOC: 0, DOCX: 0, ODT: 0, TXT: 0, XLS: 0.3, XLSX: 0.3, CSV: 0.3, ODS: 0.3,
       PPT: 0.1, PPTX: 0.1, ODP: 0.1, ZIP: 0.15, RAR: 0.15, "7Z": 0.15, MP3: 0.75, M4A: 0.75, WAV: 0.75 }
     var turn = turns[value]

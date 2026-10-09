@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Tint.js" as Tint
 
@@ -17,12 +18,12 @@ Rectangle {
   property var updates: null
   property bool demoMode: false
   property bool narrow: false
-  property color foreground: Color.foreground
-  property color background: Color.background
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color background: Commons.Color.background
+  property color accent: Commons.Color.accent
   property color dim: foreground
   property color dimmer: foreground
-  property color urgent: Color.urgent
+  property color urgent: Commons.Color.urgent
   property string fontFamily: Style.font.family
   signal closeRequested()
 

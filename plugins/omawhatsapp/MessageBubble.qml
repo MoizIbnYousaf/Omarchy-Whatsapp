@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui as Ui
 import "FormatModel.js" as FormatModel
 import "MediaModel.js" as MediaModel
@@ -825,7 +826,7 @@ Item {
         objectName: "messagePending"
         visible: root.pending
         text: root.sendFailed ? "󰀦" : "󰅐"
-        color: root.sendFailed ? Color.urgent : root.metaColor
+        color: root.sendFailed ? Commons.Color.urgent : root.metaColor
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         HoverHandler { id: pendingHover }
@@ -857,7 +858,7 @@ Item {
           : root.deliveryStatus === "pending" ? "󰅐"
           : root.deliveryStatus === "error" ? "󰀦" : "󰄭"
         color: root.deliveryStatus === "read" || root.deliveryStatus === "played" ? root.accent
-          : root.deliveryStatus === "error" ? Color.urgent : root.metaColor
+          : root.deliveryStatus === "error" ? Commons.Color.urgent : root.metaColor
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         HoverHandler { id: ticksHover }
@@ -1030,7 +1031,7 @@ Item {
               anchors.leftMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
               text: modelData.label
-              color: modelData.action.indexOf("delete") === 0 ? Color.urgent : root.foreground
+              color: modelData.action.indexOf("delete") === 0 ? Commons.Color.urgent : root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
             }

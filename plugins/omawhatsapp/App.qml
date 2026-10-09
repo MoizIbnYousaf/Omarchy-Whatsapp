@@ -4,6 +4,7 @@ import QtQuick.Window
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "SettingsPolicy.js" as SettingsPolicy
 import "AccountModel.js" as AccountModel
@@ -211,10 +212,10 @@ Item {
   readonly property bool notifyOn: !!root.service && root.service.notificationsEnabled
   readonly property bool notifyPreviewOn: !root.service || root.service.notificationsPreview
   readonly property bool notifyAvailable: !root.service || root.service.notifyAvailable
-  readonly property color foreground: Color.foreground
-  readonly property color background: Color.background
-  readonly property color accent: Color.accent
-  readonly property color urgent: Color.urgent
+  readonly property color foreground: Commons.Color.foreground
+  readonly property color background: Commons.Color.background
+  readonly property color accent: Commons.Color.accent
+  readonly property color urgent: Commons.Color.urgent
   readonly property string fontFamily: Style.font.family
   readonly property color dim: Qt.rgba(
     foreground.r * 0.68 + background.r * 0.32,
@@ -3273,7 +3274,7 @@ Item {
                       && !chatRow.typing ? String(chatRow.modelData.last_status || "") : ""
                     text: root.tickGlyph(status)
                     color: status === "read" || status === "played" ? root.accent
-                      : status === "error" ? Color.urgent : root.dim
+                      : status === "error" ? Commons.Color.urgent : root.dim
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
                   }
