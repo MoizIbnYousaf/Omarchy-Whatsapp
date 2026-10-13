@@ -33,8 +33,14 @@ else. Checking for updates
 asks the repository's git remote for its latest commit; no chat data is sent.
 
 Marking a chat read, automatically or from the chat list, sends WhatsApp an
-app-state change that syncs the read state to the user's own devices. wacli
-has no path that sends a read receipt, so the other side is not told.
+app-state change that syncs the read state to the user's own devices by default.
+Settings → Reading → Send read receipts to contacts is a separate per-account
+opt-in, off by default even for users who enabled automatic reading. When on,
+all mark-read paths request `wacli chats mark-read --receipts` (wacli 0.19.0+),
+which dispatches receipts for stored unread incoming messages instead of an
+app-state patch. WhatsApp privacy settings still apply: receipts may be
+self-only, and a successful command does not guarantee sender-visible blue ticks.
+Mark-unread and local badge acknowledgement never send sender receipts.
 
 With a wacli build that keeps receipts, the mirror also records when each
 recipient received, read, or played the messages you sent, as WhatsApp

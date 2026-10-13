@@ -99,8 +99,10 @@ them keeps the chat list warm in the resident service.
 
 - Automatic marking as read on open or reply is opt-in in Settings → Reading.
   Existing private-reading choices are preserved during upgrades.
-- Marking read only syncs your phone and your other linked devices. The app
-  never sends a read receipt, so contacts are not told.
+- Marking read syncs only your own devices by default. **Send read receipts
+  to contacts** is a separate per-account opt-in for automatic reading, replies
+  and manual mark-read. It requires wacli 0.19.0+ and follows WhatsApp privacy
+  settings; a successful dispatch does not guarantee blue ticks.
 - Ticks for what you send (sent, delivered, read) and a contact's online, last
   seen and typing need a wacli that records them; see
   [wacli: official and richer builds](../README.md#wacli-official-and-richer-builds).

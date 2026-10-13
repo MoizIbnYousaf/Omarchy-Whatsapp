@@ -1497,6 +1497,7 @@ class Backend:
         return {
             "online": item.get("online") is not False,
             "send_read_receipts": item.get("send_read_receipts") is True,
+            "sender_read_receipts": item.get("sender_read_receipts") is True,
             "signature": cls._signature(item.get("signature")),
             # Popups off for this account only; the badge still counts it.
             "notifications_muted": item.get("notifications_muted") is True,
@@ -1617,6 +1618,7 @@ class Backend:
                 raise OmaWhatsAppError("Settings must be a JSON object.")
             allowed = {
                 "send_read_receipts",
+                "sender_read_receipts",
                 "signature",
                 "account_notifications",
                 "show_unread_count",
@@ -1631,6 +1633,8 @@ class Backend:
                 raise OmaWhatsAppError("That OmaWhatsApp setting is not supported.")
             if "send_read_receipts" in update and not isinstance(update["send_read_receipts"], bool):
                 raise OmaWhatsAppError("Read receipts must be on or off.")
+            if "sender_read_receipts" in update and not isinstance(update["sender_read_receipts"], bool):
+                raise OmaWhatsAppError("Sender read receipts must be on or off.")
             if "account_notifications" in update and not isinstance(update["account_notifications"], bool):
                 raise OmaWhatsAppError("This account's notifications must be on or off.")
             if "signature" in update:
@@ -1672,7 +1676,7 @@ class Backend:
 
             def apply(value: dict[str, Any]) -> None:
                 for name, setting in update.items():
-                    if name in {"send_read_receipts", "signature", "account_notifications"}:
+                    if name in {"send_read_receipts", "sender_read_receipts", "signature", "account_notifications"}:
                         state = value["stores"].get(key)
                         if state is None:
                             state = self._store_state({})
@@ -1682,7 +1686,7 @@ class Backend:
                         elif name == "account_notifications":
                             state["notifications_muted"] = not bool(setting)
                         else:
-                            state["send_read_receipts"] = bool(setting)
+                            state[name] = bool(setting)
                     else:
                         value[name] = setting
 
@@ -1695,6 +1699,7 @@ class Backend:
             "kind": "settings",
             "account": self.active.name,
             "send_read_receipts": state.get("send_read_receipts") is True,
+            "sender_read_receipts": state.get("sender_read_receipts") is True,
             "signature": self._signature(state.get("signature")),
             "account_notifications": state.get("notifications_muted") is not True,
             "show_unread_count": value.get("show_unread_count") is not False,
@@ -3052,6 +3057,7 @@ class Backend:
                 "online": online,
                 "offline_mode": not online,
                 "send_read_receipts": state.get("send_read_receipts") is True,
+                "sender_read_receipts": state.get("sender_read_receipts") is True,
                 "signature": self._signature(state.get("signature")),
                 "notifications_muted": state.get("notifications_muted") is True,
                 "fts_enabled": doctor.get("fts_enabled") is True,
@@ -3101,6 +3107,7 @@ class Backend:
             "notifications": preferences["notifications"],
             "notify_available": self._notify_send_ready(),
             "send_read_receipts": current["send_read_receipts"],
+            "sender_read_receipts": current["sender_read_receipts"],
             "signature": current["signature"],
             "show_unread_count": preferences.get("show_unread_count") is not False,
             "check_updates_on_launch": preferences.get("check_updates_on_launch") is True,
@@ -5904,6 +5911,13 @@ class Backend:
         if suffix is None:
             raise OmaWhatsAppError("That chat action is not supported.")
         command = ["--json", *suffix, "--chat", chat["jid"]]
+        # This preference belongs to the command's account, not the UI's
+        # current selection. Existing automatic-reading choices never opt in.
+        if action_clean == "read" and self._account_state().get("sender_read_receipts") is True:
+            version = self._wacli_version()
+            if not version or version_tuple(version) < (0, 19, 0):
+                raise OmaWhatsAppError("Sender read receipts require wacli 0.19.0 or newer.")
+            command.append("--receipts")
         self._envelope(self._write(command, timeout=45))
         return {"ok": True, "kind": "chat-action", "action": action}
 

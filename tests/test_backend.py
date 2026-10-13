@@ -2139,6 +2139,71 @@ class BackendTests(unittest.TestCase):
             "--json", "chats", "mark-read", "--chat", "team@g.us"
         ])
 
+    def test_sender_receipts_require_separate_opt_in(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        self.assertFalse(self.backend.settings()["sender_read_receipts"])
+        # Existing automatic-reading opt-in must never notify contacts.
+        self.backend.settings({"send_read_receipts": True})
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.chat_action("team@g.us", "read")
+        self.assertNotIn("--receipts", write.call_args.args[0])
+        self.backend.settings({"sender_read_receipts": True})
+        with mock.patch.object(self.backend, "_wacli_version", return_value="0.19.0"), \
+                mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.chat_action("team@g.us", "read")
+            self.assertEqual(write.call_args.args[0], [
+                "--json", "chats", "mark-read", "--chat", "team@g.us", "--receipts"
+            ])
+            for action in ("unread", "pin", "mute"):
+                self.backend.chat_action("team@g.us", action)
+                self.assertNotIn("--receipts", write.call_args.args[0])
+        self.backend.settings({"sender_read_receipts": False})
+        with mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            self.backend.chat_action("team@g.us", "read")
+        self.assertNotIn("--receipts", write.call_args.args[0])
+
+    def test_sender_receipts_reject_unsupported_backend_and_unknown_target(self) -> None:
+        self.backend.settings({"sender_read_receipts": True})
+        for version in ("0.17.1", "0.18.3", ""):
+            with self.subTest(version=version), \
+                    mock.patch.object(self.backend, "_wacli_version", return_value=version), \
+                    mock.patch.object(self.backend, "_write") as write:
+                with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "0.19.0"):
+                    self.backend.chat_action("team@g.us", "read")
+                write.assert_not_called()
+        with mock.patch.object(self.backend, "_write") as write:
+            with self.assertRaises(backend_module.OmaWhatsAppError):
+                self.backend.chat_action("unknown@g.us", "read")
+            write.assert_not_called()
+
+    def test_sender_receipts_preserve_offline_and_failure_guards(self) -> None:
+        self.backend.settings({"sender_read_receipts": True})
+        with mock.patch.object(self.backend, "_wacli_version", return_value="0.19.0"), \
+                mock.patch.object(self.backend, "online", return_value=False), \
+                mock.patch.object(backend_module, "run_bounded") as run:
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Offline mode"):
+                self.backend.chat_action("team@g.us", "read")
+            run.assert_not_called()
+        failure = subprocess.CompletedProcess([], 1,
+            '{"success":false,"error":"Receipt dispatch failed"}', "")
+        with mock.patch.object(self.backend, "_wacli_version", return_value="0.20.0"), \
+                mock.patch.object(self.backend, "_write", return_value=failure) as write:
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Receipt dispatch failed"):
+                self.backend.chat_action("team@g.us", "read")
+            self.assertEqual(write.call_count, 1, "never fall back or retry a partially dispatched receipt")
+
+    def test_sender_receipts_setting_is_boolean_and_persists_privately(self) -> None:
+        for invalid in ("true", 1, None, {}):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "on or off"):
+                    self.backend.settings({"sender_read_receipts": invalid})
+        self.backend.settings({"sender_read_receipts": True})
+        reloaded = backend_module.Backend(
+            store_dir=self.store, state_dir=self.root / "state", wacli=self.wacli
+        )
+        self.assertTrue(reloaded.settings()["sender_read_receipts"])
+        self.assertEqual((self.root / "state" / "preferences.json").stat().st_mode & 0o777, 0o600)
+
     def test_offline_mode_persists_and_blocks_whatsapp_writes(self) -> None:
         completed = subprocess.CompletedProcess([], 0, "", "")
         with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
@@ -3800,6 +3865,26 @@ sys.exit(0)
         self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["version"], 4)
         self.assertFalse(self.backend.settings()["send_read_receipts"])
 
+    def test_sender_receipts_follow_the_target_account(self) -> None:
+        self.backend.use_account("work")
+        self.backend.settings({"sender_read_receipts": True})
+        self.backend.use_account("home")
+        self.assertFalse(self.backend.settings()["sender_read_receipts"])
+        completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
+        with mock.patch.object(self.backend, "_wacli_version", return_value="0.19.0"), \
+                mock.patch.object(self.backend, "_write", return_value=completed) as write:
+            # Same synthetic JID in both stores must not share preferences.
+            self.backend.chat_action("shared@s.whatsapp.net", "read")
+            self.assertNotIn("--receipts", write.call_args.args[0])
+            self.backend.use_account("work")
+            self.backend.chat_action("shared@s.whatsapp.net", "read")
+            self.assertIn("--receipts", write.call_args.args[0])
+        self.backend.use_account("home")
+        reports = {report["account"]: report for report in self.backend.status()["accounts"]}
+        self.assertTrue(reports["work"]["sender_read_receipts"])
+        self.assertFalse(reports["home"]["sender_read_receipts"])
+        self.assertFalse(self.backend.status()["sender_read_receipts"])
+
     def test_upgrade_preserves_each_accounts_reading_and_notification_choices(self) -> None:
         state = self.root / "state"
         state.mkdir(mode=0o700)
@@ -3822,6 +3907,8 @@ sys.exit(0)
                     self.assertEqual(preferences["notifications"]["enabled"], enabled)
                     self.assertEqual(preferences["read_on_reply"], enabled)
                     self.assertEqual(preferences["show_online"], enabled)
+                    self.assertFalse(preferences["stores"][str(self.work)]["sender_read_receipts"])
+                    self.assertFalse(preferences["stores"][str(self.home)]["sender_read_receipts"])
                     self.assertEqual(preferences["stores"][str(self.work)]["send_read_receipts"], enabled)
                     self.assertEqual(preferences["stores"][str(self.home)]["send_read_receipts"], not enabled)
 

@@ -32,6 +32,7 @@ Item {
   property bool writing: false
   property bool controlWriting: false
   property bool settingsWriting: false
+  property bool senderReadReceipts: false
   property bool sendReadReceipts: false
   property bool readOnReply: false
   property bool enterSends: true
@@ -1747,8 +1748,8 @@ Item {
   }
 
   // Replying shows you read the chat, so it clears the unread count the way
-  // the phone does. wacli's mark-read only syncs the read state to your own
-  // devices; it never sends the other side a read receipt.
+  // the phone does. The helper applies the target account's separate opt-in
+  // for sender receipts; by default this syncs only your own devices.
   readonly property var replyKinds: ["send", "files", "voice", "sticker", "poll"]
   function markReadAfterReply(chatRef) {
     if (!root.readOnReply || root.offlineMode) return false
@@ -2048,6 +2049,7 @@ Item {
         root.notifyAvailable = payload.notify_available !== false
         root.accounts = Array.isArray(payload.accounts) ? payload.accounts : []
         root.sendReadReceipts = payload.send_read_receipts === true
+        root.senderReadReceipts = payload.sender_read_receipts === true
         root.showUnreadCount = payload.show_unread_count !== false
         root.checkUpdatesOnLaunch = payload.check_updates_on_launch === true
         root.dropdownRows = [5, 7, 9].indexOf(Number(payload.dropdown_rows)) >= 0
@@ -2472,8 +2474,10 @@ Item {
       }
       // Receipt preference is account-scoped; badge visibility and dropdown
       // density are one global UI preference shared by every account.
-      if (account === String(root.selectedChatAccount || ""))
+      if (account === String(root.selectedChatAccount || "")) {
         root.sendReadReceipts = payload.send_read_receipts === true
+        root.senderReadReceipts = payload.sender_read_receipts === true
+      }
       // The composer shows the new signature, and Settings the account's
       // notifications, at once, before the next status.
       var savedAccount = String(payload.account || account || "")

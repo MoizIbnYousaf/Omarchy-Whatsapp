@@ -46,7 +46,8 @@ real layouts from a wide window down to 360 px. Quit with `Ctrl+Q`, and choose
 whether it starts with the system.
 
 **Private by design.** No account, server or telemetry of its own. Reading a
-chat never sends a read receipt. Screenshots and tests use synthetic demo data
+chat sends no sender receipt by default. A separate per-account opt-in
+requests receipts with wacli 0.19.0+; WhatsApp privacy settings still apply. Screenshots and tests use synthetic demo data
 only. See [privacy](docs/PRIVACY.md).
 
 **Ready for your agent.** An agent skill and an MCP server with 46 tools let
