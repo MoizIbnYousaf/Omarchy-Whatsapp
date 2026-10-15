@@ -48,8 +48,13 @@ finds new messages in it while a window is open, marks that exact chat read,
 throttled so a failing write cannot loop. Replying marks it read too. A chat
 the user marks unread stays unread until it is chosen again. wacli's
 `chats mark-read` sends only a WhatsApp app-state patch that syncs the read
-state to the user's own devices; it sends the other side no read receipt.
-Settings can turn automatic reading off per account. Dismissing a badge stays
+state to the user's own devices by default. The separate per-account
+`sender_read_receipts` preference defaults to false and adds `--receipts` to
+every read action on that account, including manual reads and reads after replies.
+The helper checks for wacli 0.19.0+ before requesting receipts and rejects
+unsupported or unknown versions without writing. Receipt mode dispatches stored
+unread incoming messages through wacli; WhatsApp privacy settings determine
+sender visibility. Settings can turn automatic reading off per account. Dismissing a badge stays
 local.
 
 ## Accounts

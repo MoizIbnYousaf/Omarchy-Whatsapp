@@ -20,6 +20,7 @@ TestCase {
       property bool statusReady: true
       property bool offlineMode: false
       property bool multiAccount: false
+      property bool senderReadReceipts: false
       property bool sendReadReceipts: true
       property bool readOnReply: true
       property bool enterSends: true
@@ -113,6 +114,7 @@ TestCase {
     var h = create()
     var cases = [
       ["reading", "send_read_receipts", "setPreference", ["send_read_receipts", false]],
+      ["reading", "sender_read_receipts", "setPreference", ["sender_read_receipts", true]],
       ["reading", "read_on_reply", "setPreference", ["read_on_reply", false]],
       ["notifications", "notify", "setNotifications", [false, null, null]],
       ["notifications", "notify_sound", "setNotifications", [null, null, false]],
@@ -133,6 +135,23 @@ TestCase {
       compare(last(h.service).name, cases[i][2], cases[i][1])
       compare(last(h.service).args, cases[i][3], cases[i][1])
     }
+  }
+
+  function test_sender_receipts_default_off_and_demo_does_not_write() {
+    var h = create()
+    var row = h.view.rowsFor("reading").filter(function(item) {
+      return item.key === "sender_read_receipts"
+    })[0]
+    compare(row.checked, false)
+    h.service.senderReadReceipts = true
+    compare(h.view.rowsFor("reading").filter(function(item) {
+      return item.key === "sender_read_receipts"
+    })[0].checked, true)
+    var demo = create({ demoMode: true })
+    demo.view.openSection("reading")
+    wait(0)
+    findChild(demo.view, "setting-sender_read_receipts").toggled()
+    compare(demo.service.calls.length, 0)
   }
 
   function test_choices_write_their_value() {

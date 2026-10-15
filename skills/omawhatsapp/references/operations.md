@@ -132,7 +132,8 @@ printf '{}\n' | "$oma" settings
 ```
 
 The supported setting keys are `send_read_receipts` (mark the open chat read;
-default `true` since preferences version 3, per account), `read_on_reply`,
+per account), `sender_read_receipts` (request sender-facing receipts on every
+mark-read; default `false`, per account, requires wacli 0.19.0+), `read_on_reply`,
 `enter_sends`, `show_avatars`, `auto_refresh_avatars`, `rail_density`
 (`comfortable` or `compact`), `show_unread_count`, `dropdown_rows` (`5`, `7`, or `9`), and
 `composer_max_lines` (`4`, `6`, `8`, or `10`, default `6`), and `time_format`

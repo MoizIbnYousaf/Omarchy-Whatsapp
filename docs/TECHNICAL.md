@@ -62,7 +62,10 @@ bar badge visibility, dropdown density, and per-chat unread/timestamp
 acknowledgement snapshots. Acknowledgement affects the local notification
 delta, never `wacli.db`. The open chat, a reply, and the chat-list toggle use
 `wacli chats mark-read`/`mark-unread`, which only sync the read state to the
-user's own devices; no read receipt reaches the sender. Archived and currently muted chats retain their
+user's own devices by default. The separate per-account `sender_read_receipts`
+Boolean defaults to false. When enabled, read actions require wacli 0.19.0+
+and use `mark-read --receipts`; mark-unread is unchanged. Receipts follow
+WhatsApp privacy settings and do not guarantee sender-visible blue ticks. Archived and currently muted chats retain their
 true unread count inside the chat rail while contributing zero to the bar's
 local notification total.
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add a separate, off-by-default per-account choice to request sender-facing read receipts with wacli 0.19.0 or newer. Preserve existing automatic-reading choices and WhatsApp privacy settings. No new dependencies or change to the general wacli minimum.
+
 ## 0.15.5 (2026-10-09)
 
 - Restore readable text and theme surfaces on Qt 6.12 by explicitly resolving Omarchy’s theme color singleton. Fixes the app, dropdown, settings, dialogs and media UI across themes. No new dependencies.

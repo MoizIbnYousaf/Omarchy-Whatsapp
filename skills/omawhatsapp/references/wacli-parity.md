@@ -140,7 +140,11 @@ restores it afterward. It never overrides OmaWhatsApp's explicit offline mode.
 - Resolve existing chat/group/channel/message targets to exact identifiers
   before mutation. Never use `--pick` to guess an ambiguous result.
 - Treat mark-read as a visible change on the user's own devices (it sends no
-  receipt to the sender) and presence as visible activity.
+  receipt to the sender by default). If `sender_read_receipts` is enabled for
+  that account, helper mark-read requests sender-facing receipts. The raw wacli
+  `--receipts` flag also requests them. Both remain WhatsApp writes and require
+  explicit user authorization; never enable the setting or send a receipt as
+  a test without it. Treat presence as visible activity.
 - Status broadcasts, profile changes, group/channel membership and admin
   changes, logout, account removal, revoke/delete/purge, and cleanup require
   exact current authorization and no automatic retry.
