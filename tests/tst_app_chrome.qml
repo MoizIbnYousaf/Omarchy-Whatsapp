@@ -27,6 +27,7 @@ TestCase {
     id: serviceComponent
     Item {
       readonly property alias playback: playbackCoordinator
+      property var shortcuts: ({})
       property bool appOpen: false
       property bool writing: false
       property bool controlWriting: false
@@ -217,6 +218,32 @@ TestCase {
   Component {
     id: appComponent
     Oma.App { width: 1000; height: 700 }
+  }
+
+  function test_custom_window_shortcut_replaces_default_and_settings_capture_isolated() {
+    var h = createHarness({shortcuts: {sidebar: ["Alt+B"]}})
+    var composer = findChild(h.app, "composerInput")
+    composer.forceActiveFocus()
+    keyClick(Qt.Key_B, Qt.ControlModifier)
+    verify(!h.app.sidebarCollapsed)
+    keyClick(Qt.Key_B, Qt.AltModifier)
+    verify(h.app.sidebarCollapsed)
+    h.app.settingsOpen = true
+    keyClick(Qt.Key_B, Qt.AltModifier)
+    verify(h.app.sidebarCollapsed, "settings must not trigger conversation actions")
+  }
+
+  function test_custom_send_key_preserves_typing_and_dispatches_once() {
+    var h = createHarness({shortcuts: {send: ["Alt+S"]}})
+    var composer = findChild(h.app, "composerInput")
+    h.app.focusComposer()
+    tryVerify(function() { return composer.activeFocus })
+    composer.text = "Synthetic draft"
+    keyClick(Qt.Key_Return)
+    compare(h.service.sentTexts.length, 0)
+    verify(composer.text.indexOf("\n") >= 0)
+    keyClick(Qt.Key_S, Qt.AltModifier)
+    compare(h.service.sentTexts.length, 1)
   }
 
   function createHarness(overrides) {

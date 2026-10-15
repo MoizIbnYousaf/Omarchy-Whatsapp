@@ -2139,6 +2139,39 @@ class BackendTests(unittest.TestCase):
             "--json", "chats", "mark-read", "--chat", "team@g.us"
         ])
 
+    def test_custom_shortcuts_persist_globally_and_reset(self) -> None:
+        self.assertEqual(self.backend.settings()["shortcuts"], {})
+        bindings = {"newChat": ["Ctrl+Alt+N", "F6"], "record": [], "zoomIn": ["+"]}
+        self.backend.settings({"shortcuts": bindings})
+        reloaded = backend_module.Backend(store_dir=self.store, state_dir=self.root / "state", wacli=self.wacli)
+        self.assertEqual(reloaded.settings()["shortcuts"], bindings)
+        self.assertEqual(reloaded.status()["shortcuts"], bindings)
+        self.assertEqual((self.root / "state" / "preferences.json").stat().st_mode & 0o777, 0o600)
+        reloaded.settings({"shortcuts": {}})
+        self.assertEqual(self.backend.settings()["shortcuts"], {})
+
+    def test_invalid_or_conflicting_shortcuts_are_rejected_without_writes(self) -> None:
+        for value in (None, [], {"shell": ["Ctrl+Q"]}, {"newChat": "Ctrl+N"},
+                      {"newChat": ["N"]}, {"send": ["A"]}, {"send": ["Escape"]},
+                      {"find": ["Ctrl+F"] * 2}, {"find": ["Ctrl+Ctrl+F"]},
+                      {"find": ["Shift+Ctrl+F"]}, {"find": ["Tab"]},
+                      {"find": ["$(touch /tmp/no)"]}, {"find": ["Ctrl+N"]}):
+            with self.subTest(value=value):
+                with self.assertRaises(backend_module.OmaWhatsAppError):
+                    self.backend.settings({"shortcuts": value})
+                self.assertEqual(self.backend.settings()["shortcuts"], {})
+        # Disable the old owner before assigning its key, atomically.
+        self.backend.settings({"shortcuts": {"find": ["Ctrl+N"], "newChat": []}})
+        self.assertEqual(self.backend.settings()["shortcuts"]["find"], ["Ctrl+N"])
+
+    def test_shortcut_catalogs_match_the_public_source(self) -> None:
+        catalog = json.loads((SCRIPT.parent / "shortcuts.json").read_text())
+        qml = (SCRIPT.parent.parent / "plugins/omawhatsapp/ShortcutCatalog.js").read_text()
+        self.assertEqual(catalog, backend_module.SHORTCUT_CATALOG)
+        self.assertEqual(catalog, json.loads(qml.split("var actions = ", 1)[1]))
+        self.assertEqual(backend_module.shortcut_conflict({}, True), "")
+        self.assertEqual(backend_module.shortcut_conflict({}, False), "")
+
     def test_sender_receipts_require_separate_opt_in(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
         self.assertFalse(self.backend.settings()["sender_read_receipts"])

@@ -1,0 +1,383 @@
+[
+  {
+    "id": "find",
+    "title": "Find in conversation",
+    "group": "Everyday actions",
+    "scope": "window",
+    "keys": [
+      "Ctrl+F"
+    ],
+    "description": "Full app"
+  },
+  {
+    "id": "sidebar",
+    "title": "Show or hide chat list",
+    "group": "Everyday actions",
+    "scope": "window",
+    "keys": [
+      "Ctrl+B"
+    ],
+    "description": "Full app"
+  },
+  {
+    "id": "newChat",
+    "title": "Start a new chat",
+    "group": "Everyday actions",
+    "scope": "window",
+    "keys": [
+      "Ctrl+N"
+    ],
+    "description": "Full app"
+  },
+  {
+    "id": "switchChat",
+    "title": "Go to a chat by name",
+    "group": "Everyday actions",
+    "scope": "window",
+    "keys": [
+      "Ctrl+K"
+    ],
+    "description": "Full app"
+  },
+  {
+    "id": "documents",
+    "title": "Attach documents",
+    "group": "Everyday actions",
+    "scope": "window",
+    "keys": [
+      "Ctrl+O"
+    ],
+    "description": "Full app and mini client"
+  },
+  {
+    "id": "photos",
+    "title": "Attach photos and videos",
+    "group": "Everyday actions",
+    "scope": "window",
+    "keys": [
+      "Ctrl+Shift+O"
+    ],
+    "description": "Full app and mini client"
+  },
+  {
+    "id": "record",
+    "title": "Record or stop a voice note",
+    "group": "Everyday actions",
+    "scope": "window",
+    "keys": [
+      "Ctrl+Shift+V"
+    ],
+    "description": "Full app and mini client"
+  },
+  {
+    "id": "quit",
+    "title": "Quit OmaWhatsApp",
+    "group": "Everyday actions",
+    "scope": "window",
+    "keys": [
+      "Ctrl+Q"
+    ],
+    "description": "Full app"
+  },
+  {
+    "id": "search",
+    "title": "Search chats",
+    "group": "Navigation",
+    "scope": "navigation",
+    "keys": [
+      "/"
+    ],
+    "description": "When you are not typing. Arrow keys inside fields keep editing text."
+  },
+  {
+    "id": "next",
+    "title": "Move down",
+    "group": "Navigation",
+    "scope": "navigation",
+    "keys": [
+      "J",
+      "Down"
+    ],
+    "description": "When you are not typing. Arrow keys inside fields keep editing text."
+  },
+  {
+    "id": "previous",
+    "title": "Move up",
+    "group": "Navigation",
+    "scope": "navigation",
+    "keys": [
+      "K",
+      "Up"
+    ],
+    "description": "When you are not typing. Arrow keys inside fields keep editing text."
+  },
+  {
+    "id": "reply",
+    "title": "Reply to selected message",
+    "group": "Navigation",
+    "scope": "navigation",
+    "keys": [
+      "R",
+      "Shift+R"
+    ],
+    "description": "When you are not typing. Arrow keys inside fields keep editing text."
+  },
+  {
+    "id": "compose",
+    "title": "Write a message",
+    "group": "Navigation",
+    "scope": "navigation",
+    "keys": [
+      "C"
+    ],
+    "description": "When you are not typing. Arrow keys inside fields keep editing text."
+  },
+  {
+    "id": "openChat",
+    "title": "Open selected chat",
+    "group": "Navigation",
+    "scope": "navigation",
+    "keys": [
+      "Enter"
+    ],
+    "description": "When you are not typing. Arrow keys inside fields keep editing text."
+  },
+  {
+    "id": "openMedia",
+    "title": "Open selected media",
+    "group": "Navigation",
+    "scope": "navigation",
+    "keys": [
+      "Space"
+    ],
+    "description": "When you are not typing. Arrow keys inside fields keep editing text."
+  },
+  {
+    "id": "back",
+    "title": "Step back",
+    "group": "Navigation",
+    "scope": "navigation",
+    "keys": [
+      "Escape"
+    ],
+    "description": "When you are not typing. Arrow keys inside fields keep editing text."
+  },
+  {
+    "id": "pageUp",
+    "title": "Scroll conversation up",
+    "group": "Navigation",
+    "scope": "navigation",
+    "keys": [
+      "PageUp"
+    ],
+    "description": "When you are not typing. Arrow keys inside fields keep editing text."
+  },
+  {
+    "id": "pageDown",
+    "title": "Scroll conversation down",
+    "group": "Navigation",
+    "scope": "navigation",
+    "keys": [
+      "PageDown"
+    ],
+    "description": "When you are not typing. Arrow keys inside fields keep editing text."
+  },
+  {
+    "id": "send",
+    "title": "Send message",
+    "group": "Writing",
+    "scope": "composer",
+    "keys": [
+      "Enter",
+      "Ctrl+Enter"
+    ],
+    "description": "Full app and mini client"
+  },
+  {
+    "id": "paste",
+    "title": "Paste text, image or file",
+    "group": "Writing",
+    "scope": "composer",
+    "keys": [
+      "Ctrl+V"
+    ],
+    "description": "Full app and mini client"
+  },
+  {
+    "id": "bold",
+    "title": "Bold selected text",
+    "group": "Writing",
+    "scope": "composer",
+    "keys": [
+      "Ctrl+B"
+    ],
+    "description": "Full app and mini client. Bold uses Ctrl+B only with selected text."
+  },
+  {
+    "id": "italic",
+    "title": "Italic text",
+    "group": "Writing",
+    "scope": "composer",
+    "keys": [
+      "Ctrl+I"
+    ],
+    "description": "Full app and mini client"
+  },
+  {
+    "id": "strike",
+    "title": "Strikethrough text",
+    "group": "Writing",
+    "scope": "composer",
+    "keys": [
+      "Ctrl+Shift+X"
+    ],
+    "description": "Full app and mini client"
+  },
+  {
+    "id": "mono",
+    "title": "Monospace text",
+    "group": "Writing",
+    "scope": "composer",
+    "keys": [
+      "Ctrl+Shift+M"
+    ],
+    "description": "Full app and mini client"
+  },
+  {
+    "id": "dropdownRefresh",
+    "title": "Refresh mini client",
+    "group": "Mini client",
+    "scope": "dropdown",
+    "keys": [
+      "R",
+      "Shift+R"
+    ],
+    "description": "When the mini-client list has focus"
+  },
+  {
+    "id": "expand",
+    "title": "Open full app from mini client",
+    "group": "Mini client",
+    "scope": "dropdown",
+    "keys": [
+      "O",
+      "Shift+O"
+    ],
+    "description": "When the mini-client list has focus"
+  },
+  {
+    "id": "dropdownCompose",
+    "title": "Write in mini client",
+    "group": "Mini client",
+    "scope": "dropdown",
+    "keys": [
+      "I",
+      "Shift+I"
+    ],
+    "description": "When the mini-client list has focus"
+  },
+  {
+    "id": "panelNext",
+    "title": "Next mini-client panel",
+    "group": "Mini client",
+    "scope": "dropdown",
+    "keys": [
+      "Right",
+      "L"
+    ],
+    "description": "When the mini-client list has focus"
+  },
+  {
+    "id": "panelPrevious",
+    "title": "Previous mini-client panel",
+    "group": "Mini client",
+    "scope": "dropdown",
+    "keys": [
+      "Left",
+      "H"
+    ],
+    "description": "When the mini-client list has focus"
+  },
+  {
+    "id": "viewerClose",
+    "title": "Close media viewer",
+    "group": "Media viewer",
+    "scope": "viewer",
+    "keys": [
+      "Escape",
+      "Backspace"
+    ],
+    "description": "While the media viewer is open"
+  },
+  {
+    "id": "viewerPrevious",
+    "title": "Previous media",
+    "group": "Media viewer",
+    "scope": "viewer",
+    "keys": [
+      "Left"
+    ],
+    "description": "While the media viewer is open"
+  },
+  {
+    "id": "viewerNext",
+    "title": "Next media",
+    "group": "Media viewer",
+    "scope": "viewer",
+    "keys": [
+      "Right"
+    ],
+    "description": "While the media viewer is open"
+  },
+  {
+    "id": "zoomIn",
+    "title": "Zoom in",
+    "group": "Media viewer",
+    "scope": "viewer",
+    "keys": [
+      "+",
+      "="
+    ],
+    "description": "While the media viewer is open"
+  },
+  {
+    "id": "zoomOut",
+    "title": "Zoom out",
+    "group": "Media viewer",
+    "scope": "viewer",
+    "keys": [
+      "-"
+    ],
+    "description": "While the media viewer is open"
+  },
+  {
+    "id": "zoomReset",
+    "title": "Reset zoom",
+    "group": "Media viewer",
+    "scope": "viewer",
+    "keys": [
+      "0"
+    ],
+    "description": "While the media viewer is open"
+  },
+  {
+    "id": "play",
+    "title": "Play or pause media",
+    "group": "Media viewer",
+    "scope": "viewer",
+    "keys": [
+      "Space"
+    ],
+    "description": "While the media viewer is open"
+  },
+  {
+    "id": "forwardSend",
+    "title": "Send forwarded messages",
+    "group": "Forwarding",
+    "scope": "forward",
+    "keys": [
+      "Ctrl+Enter"
+    ],
+    "description": "Only inside the forwarding dialog, after you select recipients."
+  }
+]

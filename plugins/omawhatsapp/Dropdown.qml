@@ -12,6 +12,7 @@ import "ComposerModel.js" as ComposerModel
 import "FormatModel.js" as FormatModel
 import "PresenceModel.js" as PresenceModel
 import "Tint.js" as Tint
+import "ShortcutModel.js" as Shortcuts
 
 // A complete, bar-anchored mini client. The resident service stays the single
 // source of truth; this surface only owns transient navigation and draft state.
@@ -24,6 +25,20 @@ Panel {
   property var hostWidget: null
   property var service: null
   property bool demoMode: false
+  property var demoShortcuts: ({})
+  readonly property var shortcutOverrides: demoMode ? demoShortcuts : service && service.shortcuts ? service.shortcuts : ({})
+  function shortcutBindings(id) { return Shortcuts.bindings(id, shortcutOverrides, root.enterSends) }
+  function shortcutSequences(id) {
+    var result = []
+    root.shortcutBindings(id).forEach(function(sequence) {
+      result.push(sequence)
+      if (sequence.endsWith("Enter")) result.push(sequence.slice(0, -5) + "Return")
+    })
+    return result
+  }
+  function shortcutLabel(id) { return root.shortcutBindings(id).map(Shortcuts.label).join(" / ") || "Not assigned" }
+  function shortcutMatches(id, event) { return Shortcuts.matches(id, event, shortcutOverrides, root.enterSends) }
+
   property int maxRows: 7
   property int selectedIndex: 0
   property int messageIndex: 0
@@ -277,8 +292,8 @@ Panel {
 
   readonly property bool enterSends: demoMode || !service || service.enterSends !== false
   readonly property bool showAvatars: demoMode || !service || service.showAvatars !== false
-  readonly property string composerHint: enterSends
-    ? "Enter sends · Shift+Enter adds a line" : "Ctrl+Enter sends · Enter adds a line"
+  readonly property string composerHint: (root.shortcutBindings("send").length ? Shortcuts.label(root.shortcutBindings("send")[0]) : "No shortcut") + " sends · "
+    + (root.shortcutBindings("send").indexOf("Enter") >= 0 ? "Shift+Enter" : "Enter") + " adds a line"
 
   // Open on a conversation, the dropdown shows the account online like the
   // window does, and the chat's typing, online or last seen.
@@ -906,8 +921,9 @@ Panel {
     contentWidth: panel.fittedContentWidth(Style.space(460))
     contentHeight: panel.fittedContentHeight(root.desiredHeight, Style.space(680))
 
-    PanelKeyCatcher {
+    ShortcutKeyCatcher {
       id: keyCatcher
+      shortcuts: root.shortcutOverrides
       anchors.fill: parent
       blocked: searchField.activeFocus || composer.activeFocus
         || root.clearConfirmOpen
@@ -928,15 +944,15 @@ Panel {
         if (root.viewMode === "chats") root.switchPanel(direction)
         else root.focusComposer()
       }
-      onTextKey: function(text) {
-        if (text === "/") root.focusSearch()
-        else if (text === "r" || text === "R") root.refresh()
-        else if (text === "o" || text === "O") root.openFullApp()
-        else if (text === "i" || text === "I") root.focusComposer()
+      onActionRequested: function(action) {
+        if (action === "search") root.focusSearch()
+        else if (action === "dropdownRefresh") root.refresh()
+        else if (action === "expand") root.openFullApp()
+        else if (action === "dropdownCompose") root.focusComposer()
       }
 
       Shortcut {
-        sequence: "Ctrl+Shift+V"
+        sequences: root.shortcutSequences("record")
         context: Qt.WindowShortcut
         autoRepeat: false
         enabled: root.opened && root.viewMode === "conversation"
@@ -1538,18 +1554,17 @@ Panel {
           }
 
           // Each key next to what it does; the owner found bare keys cryptic.
-          Row {
+          Flow {
             id: dropdownKeys
             objectName: "dropdownKeys"
             x: Style.space(4)
-            height: Style.space(26)
+            width: parent.width - Style.space(8)
             spacing: Style.space(14)
             Repeater {
-              model: [{ key: "↑↓", label: "move" }, { key: "Enter", label: "reply" },
-                { key: "O", label: "full app" }, { key: "Esc", label: "close" }]
+              model: [{ key: root.shortcutBindings("next").indexOf("Down") >= 0 && root.shortcutBindings("previous").indexOf("Up") >= 0 ? "↑↓" : Shortcuts.label(root.shortcutBindings("next")[0] || "—") + "/" + Shortcuts.label(root.shortcutBindings("previous")[0] || "—"), label: "move" }, { key: Shortcuts.label(root.shortcutBindings("openChat")[0] || "—"), label: "reply" },
+                { key: Shortcuts.label(root.shortcutBindings("expand")[0] || "—"), label: "full app" }, { key: Shortcuts.label(root.shortcutBindings("back")[0] || "—"), label: "close" }]
               delegate: Row {
                 required property var modelData
-                anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.space(4)
                 Text {
                   textFormat: Text.PlainText
@@ -2051,7 +2066,7 @@ Panel {
                   anchors.bottom: parent.bottom
                   size: composerRowItem.controlSize
                   iconText: "󰏢"
-                  tooltipText: "Attach files · Ctrl+O"
+                  tooltipText: "Attach files · " + root.shortcutLabel("documents")
                   foreground: root.muted
                   hoverColor: root.foreground
                   fontFamily: root.fontFamily
@@ -2122,8 +2137,8 @@ Panel {
                     visible: sendHover.hovered && (!sendButton.busy || root.sendQueued)
                     text: root.sendQueued ? "Sends as soon as the current WhatsApp action finishes"
                       : String(composer.text || "").trim() !== "" || root.pendingAttachments.length > 0
-                      ? (root.enterSends ? "Send · Enter" : "Send · Ctrl+Enter")
-                      : "Record a voice note · Ctrl+Shift+V"
+                      ? ("Send · " + root.shortcutLabel("send"))
+                      : "Record a voice note · " + root.shortcutLabel("record")
                   }
                   TapHandler {
                     onTapped: {
@@ -2255,38 +2270,30 @@ Panel {
                     }
                     Keys.onPressed: function(event) {
                       root.noteComposerKey(event)
-                      if ((event.modifiers & Qt.ControlModifier)
-                          && (event.modifiers & Qt.ShiftModifier)
-                          && event.key === Qt.Key_V) {
+                      if (root.shortcutMatches("record", event)) {
                         root.toggleVoiceRecording()
                         event.accepted = true
-                      } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V) {
+                      } else if (root.shortcutMatches("paste", event)) {
                         root.pasteClipboard()
                         event.accepted = true
-                      } else if ((event.modifiers & Qt.ControlModifier)
-                                 && !(event.modifiers & Qt.ShiftModifier)
-                                 && (event.key === Qt.Key_B || event.key === Qt.Key_I)) {
-                        root.applyFormat(event.key === Qt.Key_B ? "bold" : "italic")
+                      } else if (root.shortcutMatches("bold", event) || root.shortcutMatches("italic", event)) {
+                        root.applyFormat(root.shortcutMatches("bold", event) ? "bold" : "italic")
                         event.accepted = true
-                      } else if ((event.modifiers & Qt.ControlModifier)
-                                 && (event.modifiers & Qt.ShiftModifier)
-                                 && (event.key === Qt.Key_X || event.key === Qt.Key_M)) {
-                        root.applyFormat(event.key === Qt.Key_X ? "strike" : "mono")
+                      } else if (root.shortcutMatches("strike", event) || root.shortcutMatches("mono", event)) {
+                        root.applyFormat(root.shortcutMatches("strike", event) ? "strike" : "mono")
                         event.accepted = true
-                      } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_O) {
+                      } else if (root.shortcutMatches("documents", event) || root.shortcutMatches("photos", event)) {
                         root.openFilePicker()
                         event.accepted = true
-                      } else if (event.key === Qt.Key_Escape) {
+                      } else if (root.shortcutMatches("back", event)) {
                         if (root.replyTarget) root.replyTarget = null
                         else {
                           focus = false
                           keyCatcher.forceActiveFocus()
                         }
                         event.accepted = true
-                      } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
-                                 && (root.enterSends
-                                   ? !(event.modifiers & Qt.ShiftModifier)
-                                   : !!(event.modifiers & Qt.ControlModifier))) {
+                      } else if (root.shortcutMatches("send", event)) {
+                    if (event.isAutoRepeat) { event.accepted = true; return }
                         root.sendDraft()
                         event.accepted = true
                       }
@@ -2300,7 +2307,7 @@ Panel {
                 visible: !root.voiceForCurrentChat && !root.offline && root.errorText === ""
                 x: composerFieldSurface.x + Style.space(2)
                 width: parent.width - x
-                text: root.composerHint + " · Esc goes back"
+                text: root.composerHint + " · " + root.shortcutLabel("back") + " goes back"
                 elide: Text.ElideRight
                 color: root.muted
                 font.family: root.fontFamily

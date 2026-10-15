@@ -13,6 +13,7 @@ import "TimeFormat.js" as TimeFormat
 import "FormatModel.js" as FormatModel
 import "PresenceModel.js" as PresenceModel
 import "Tint.js" as Tint
+import "ShortcutModel.js" as Shortcuts
 
 // OmaWhatsApp keeps chat state resident, renders a responsive native timeline,
 // and follows Omarchy's semantic theme. All chats come from wacli's local mirror.
@@ -25,6 +26,20 @@ Item {
   property bool opened: false
   property bool closingFromHost: false
   property bool demoMode: false
+  property var demoShortcuts: ({})
+  readonly property var shortcutOverrides: demoMode ? demoShortcuts : service && service.shortcuts ? service.shortcuts : ({})
+  function shortcutBindings(id) { return Shortcuts.bindings(id, shortcutOverrides, root.enterSends) }
+  function shortcutSequences(id) {
+    var result = []
+    root.shortcutBindings(id).forEach(function(sequence) {
+      result.push(sequence)
+      if (sequence.endsWith("Enter")) result.push(sequence.slice(0, -5) + "Return")
+    })
+    return result
+  }
+  function shortcutLabel(id) { return root.shortcutBindings(id).map(Shortcuts.label).join(" / ") || "Not assigned" }
+  function shortcutMatches(id, event) { return Shortcuts.matches(id, event, shortcutOverrides, root.enterSends) }
+
   // Tell the service when the selected conversation is really on screen.
   Binding {
     target: root.service
@@ -207,8 +222,8 @@ Item {
   readonly property string listClock: TimeFormat.clockPattern(root.timeFormat,
     Qt.locale().timeFormat(Locale.ShortFormat))
   readonly property bool enterSends: root.demoMode || !root.service || root.service.enterSends !== false
-  readonly property string composerHint: root.enterSends
-    ? "Enter sends · Shift+Enter adds a line" : "Ctrl+Enter sends · Enter adds a line"
+  readonly property string composerHint: (root.shortcutBindings("send").length ? Shortcuts.label(root.shortcutBindings("send")[0]) : "No shortcut") + " sends · "
+    + (root.shortcutBindings("send").indexOf("Enter") >= 0 ? "Shift+Enter" : "Enter") + " adds a line"
   readonly property bool notifyOn: !!root.service && root.service.notificationsEnabled
   readonly property bool notifyPreviewOn: !root.service || root.service.notificationsPreview
   readonly property bool notifyAvailable: !root.service || root.service.notifyAvailable
@@ -2312,51 +2327,64 @@ Item {
       }
 
       Shortcut {
-        sequence: "Ctrl+O"
+        sequences: root.shortcutSequences("documents")
+        autoRepeat: false
+        enabled: root.opened && !root.settingsOpen && !mediaViewer.opened && !forwardPicker.opened
         context: Qt.WindowShortcut
         onActivated: root.openFilePicker("document")
       }
 
       Shortcut {
-        sequence: "Ctrl+Q"
+        sequences: root.shortcutSequences("quit")
+        autoRepeat: false
+        enabled: root.opened && !root.settingsOpen && !mediaViewer.opened && !forwardPicker.opened
         context: Qt.WindowShortcut
         onActivated: root.quitApp()
       }
 
       Shortcut {
-        sequence: "Escape"
+        sequences: root.shortcutSequences("back")
         context: Qt.WindowShortcut
-        enabled: root.selectingMessages && !forwardPicker.opened && !batchDeleteConfirm.opened
+        enabled: !root.settingsOpen && root.selectingMessages && !forwardPicker.opened && !batchDeleteConfirm.opened
         onActivated: root.cancelSelection()
       }
 
       Shortcut {
-        sequence: "Ctrl+Shift+O"
+        sequences: root.shortcutSequences("photos")
+        autoRepeat: false
+        enabled: root.opened && !root.settingsOpen && !mediaViewer.opened && !forwardPicker.opened
         context: Qt.WindowShortcut
         onActivated: root.openFilePicker("media")
       }
 
       Shortcut {
-        sequence: "Ctrl+Shift+V"
+        sequences: root.shortcutSequences("record")
+        enabled: root.opened && !root.settingsOpen && !mediaViewer.opened && !forwardPicker.opened
         context: Qt.WindowShortcut
         autoRepeat: false
         onActivated: root.toggleVoiceRecording()
       }
 
       Shortcut {
-        sequence: "Ctrl+B"
+        sequences: root.shortcutSequences("sidebar")
+        autoRepeat: false
+        enabled: root.opened && !root.settingsOpen && !mediaViewer.opened && !forwardPicker.opened
         context: Qt.WindowShortcut
         onActivated: root.toggleSidebar()
       }
 
       Shortcut {
-        sequence: "Ctrl+N"
+        sequences: root.shortcutSequences("newChat")
+        autoRepeat: false
+        enabled: root.opened && !root.settingsOpen && !mediaViewer.opened && !forwardPicker.opened
         context: Qt.WindowShortcut
         onActivated: root.openNewChat()
       }
 
       Shortcut {
-        sequence: "Ctrl+K"
+        sequences: root.shortcutSequences("switchChat")
+        autoRepeat: false
+        enabled: root.opened && !root.settingsOpen && !mediaViewer.opened && !forwardPicker.opened
         context: Qt.WindowShortcut
         onActivated: root.openQuickSwitcher()
       }
@@ -2529,13 +2557,13 @@ Item {
       }
 
       Keys.onPressed: function(event) {
-        if (mediaViewer.opened) return
+        if (mediaViewer.opened || forwardPicker.opened) return
         if (root.settingsOpen) {
           if (event.key === Qt.Key_Escape) root.settingsOpen = false
           event.accepted = true
           return
         }
-        if (event.key === Qt.Key_Escape) {
+        if (root.shortcutMatches("back", event)) {
           root.goBack()
           event.accepted = true
         } else if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
@@ -2543,37 +2571,38 @@ Item {
                    && root.cycleRailFocus(event.key === Qt.Key_Backtab
                      || (event.modifiers & Qt.ShiftModifier))) {
           event.accepted = true
-        } else if (!root.textEntryActive && root.pageConversation(event.key)) {
+        } else if (!root.textEntryActive && (root.shortcutMatches("pageUp", event) ? root.pageConversation(Qt.Key_PageUp)
+                    : root.shortcutMatches("pageDown", event) ? root.pageConversation(Qt.Key_PageDown) : false)) {
           event.accepted = true
-        } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_F) {
+        } else if (root.shortcutMatches("find", event)) {
           messageSearchField.forceActiveFocus()
           messageSearchField.selectAll()
           event.accepted = true
-        } else if (keyboardNavigation.wantsChatSearch(event.key, root.textEntryActive)) {
+        } else if ((root.shortcutMatches("search", event) && !root.textEntryActive
+                   && (root.keyboardContext === "chats" || root.keyboardContext === "chat-views"))) {
           root.focusChatSearch()
           event.accepted = true
-        } else if (keyboardNavigation.wantsMessageReply(
-                     event.key, event.modifiers, root.textEntryActive)) {
+        } else if ((root.shortcutMatches("reply", event) && !root.textEntryActive && root.keyboardContext === "messages")) {
           event.accepted = root.replyToCursor()
-        } else if (event.key === Qt.Key_C && !root.textEntryActive) {
+        } else if (root.shortcutMatches("compose", event) && !root.textEntryActive) {
           root.focusComposer()
           event.accepted = true
         } else if (!root.textEntryActive
-                   && (event.key === Qt.Key_J || event.key === Qt.Key_Down)) {
+                   && root.shortcutMatches("next", event)) {
           if (root.keyboardContext === "chats") root.moveChatCursor(1)
           else if (root.keyboardContext === "messages") root.moveCursor(1)
           event.accepted = true
         } else if (!root.textEntryActive
-                   && (event.key === Qt.Key_K || event.key === Qt.Key_Up)) {
+                   && root.shortcutMatches("previous", event)) {
           if (root.keyboardContext === "chats") root.moveChatCursor(-1)
           else if (root.keyboardContext === "messages") root.moveCursor(-1)
           event.accepted = true
         } else if (root.keyboardContext === "chats"
-                   && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+                   && root.shortcutMatches("openChat", event)) {
           root.openChatCursor()
           event.accepted = true
         } else if (!root.textEntryActive
-                   && root.keyboardContext === "messages" && event.key === Qt.Key_Space) {
+                   && root.keyboardContext === "messages" && root.shortcutMatches("openMedia", event)) {
           root.toggleCursorItem()
           event.accepted = true
         }
@@ -2748,7 +2777,7 @@ Item {
               PanelActionButton {
                 objectName: "railNewChatButton"
                 iconText: "󱐒"
-                tooltipText: "New chat · Ctrl+N"
+                tooltipText: "New chat · " + root.shortcutLabel("newChat")
                 foreground: newChatDialog.opened ? root.accent : root.dim
                 hoverColor: root.foreground
                 fontFamily: root.fontFamily
@@ -2771,7 +2800,7 @@ Item {
                 objectName: "railCollapseButton"
                 visible: !root.narrow
                 iconText: "󰁭"
-                tooltipText: "Hide chat list · Ctrl+B"
+                tooltipText: "Hide chat list · " + root.shortcutLabel("sidebar")
                 foreground: root.dim
                 hoverColor: root.foreground
                 fontFamily: root.fontFamily
@@ -3575,7 +3604,7 @@ Item {
               visible: !root.narrow && root.sidebarCollapsed
               width: visible ? implicitWidth : 0
               iconText: "󰵵"
-              tooltipText: "Show chat list · Ctrl+B"
+              tooltipText: "Show chat list · " + root.shortcutLabel("sidebar")
               foreground: root.dim
               hoverColor: root.foreground
               fontFamily: root.fontFamily
@@ -3682,7 +3711,7 @@ Item {
               visible: root.narrow && !root.narrowSearchOpen
               width: visible ? implicitWidth : 0
               iconText: "󰍉"
-              tooltipText: "Search messages · Ctrl+F"
+              tooltipText: "Search messages · " + root.shortcutLabel("find")
               foreground: root.dim
               hoverColor: root.foreground
               fontFamily: root.fontFamily
@@ -4561,7 +4590,7 @@ Item {
             anchors.bottomMargin: composerBar.edge
             size: composerBar.controlSize
             iconText: "󰏢"
-            tooltipText: attachmentTray.opened ? "" : "Attach · Ctrl+O files · Ctrl+Shift+O photos and videos"
+            tooltipText: attachmentTray.opened ? "" : "Attach · " + root.shortcutLabel("documents") + " files · " + root.shortcutLabel("photos") + " photos and videos"
             foreground: attachmentTray.opened ? root.accent : root.dim
             hoverColor: root.foreground
             fontFamily: root.fontFamily
@@ -4797,15 +4826,14 @@ Item {
                 Keys.priority: Keys.BeforeItem
                 // Ctrl+B bolds a selection here; without one it still hides the chat list.
                 Keys.onShortcutOverride: function(event) {
-                  if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_B
-                      && !(event.modifiers & Qt.ShiftModifier) && composer.selectedText !== "")
+                  if (root.shortcutMatches("bold", event) && composer.selectedText !== "")
                     event.accepted = true
                 }
                 Keys.onPressed: function(event) {
                   root.noteComposerKey(event)
                   // Page Up/Down scroll the conversation even while typing.
-                  if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
-                    event.accepted = root.pageConversation(event.key)
+                  if (root.shortcutMatches("pageUp", event) || root.shortcutMatches("pageDown", event)) {
+                    event.accepted = root.pageConversation(root.shortcutMatches("pageUp", event) ? Qt.Key_PageUp : Qt.Key_PageDown)
                     return
                   }
                   if (root.mentionCompletionVisible
@@ -4823,35 +4851,26 @@ Item {
                   } else if (root.mentionStart >= 0 && event.key === Qt.Key_Escape) {
                     root.closeMentionCompletion()
                     event.accepted = true
-                  } else if ((event.modifiers & Qt.ControlModifier)
-                             && (event.modifiers & Qt.ShiftModifier)
-                             && event.key === Qt.Key_V) {
+                  } else if (root.shortcutMatches("record", event)) {
                     root.toggleVoiceRecording()
                     event.accepted = true
-                  } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V) {
+                  } else if (root.shortcutMatches("paste", event)) {
                     root.pasteDraft()
                     event.accepted = true
-                  } else if ((event.modifiers & Qt.ControlModifier)
-                             && !(event.modifiers & Qt.ShiftModifier)
-                             && event.key === Qt.Key_B && composer.selectedText !== "") {
+                  } else if (root.shortcutMatches("bold", event) && composer.selectedText !== "") {
                     root.applyFormat("bold")
                     event.accepted = true
-                  } else if ((event.modifiers & Qt.ControlModifier)
-                             && !(event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_I) {
+                  } else if (root.shortcutMatches("italic", event)) {
                     root.applyFormat("italic")
                     event.accepted = true
-                  } else if ((event.modifiers & Qt.ControlModifier)
-                             && (event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_X) {
+                  } else if (root.shortcutMatches("strike", event)) {
                     root.applyFormat("strike")
                     event.accepted = true
-                  } else if ((event.modifiers & Qt.ControlModifier)
-                             && (event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_M) {
+                  } else if (root.shortcutMatches("mono", event)) {
                     root.applyFormat("mono")
                     event.accepted = true
-                  } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
-                             && (root.enterSends
-                               ? !(event.modifiers & Qt.ShiftModifier)
-                               : !!(event.modifiers & Qt.ControlModifier))) {
+                  } else if (root.shortcutMatches("send", event)) {
+                    if (event.isAutoRepeat) { event.accepted = true; return }
                     root.sendDraft()
                     event.accepted = true
                   } else if (event.key === Qt.Key_Up && composer.text === "") {
@@ -4922,8 +4941,8 @@ Item {
               visible: sendButtonMouse.containsMouse
               text: root.sendQueued ? "Sends as soon as the current WhatsApp action finishes"
                 : composer.text.trim() !== "" || root.pendingAttachments.length > 0
-                ? (root.enterSends ? "Send · Enter" : "Send · Ctrl+Enter")
-                : "Record a voice note · Ctrl+Shift+V"
+                ? ("Send · " + root.shortcutLabel("send"))
+                : "Record a voice note · " + root.shortcutLabel("record")
             }
           }
 
@@ -5393,7 +5412,8 @@ Item {
           border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
         }
         Shortcut {
-          sequences: ["Ctrl+Return", "Ctrl+Enter"]
+          sequences: root.shortcutSequences("forwardSend")
+        autoRepeat: false
           context: Qt.WindowShortcut
           enabled: forwardPicker.opened
           onActivated: root.sendForward()
@@ -5758,7 +5778,7 @@ Item {
                 textFormat: Text.PlainText
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Ctrl+Enter sends"
+                text: root.shortcutLabel("forwardSend") + " sends"
                 color: root.dimmer
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
@@ -6186,6 +6206,7 @@ Item {
       }
 
       MediaViewer {
+        shortcuts: root.shortcutOverrides
         id: mediaViewer
         objectName: "mediaViewer"
         timeFormat: root.timeFormat

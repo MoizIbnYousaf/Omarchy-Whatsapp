@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.0 (2026-10-15)
+
+- Make Settings → Shortcuts editable: search and group 37 actions, click to record keys, add alternatives, detect conflicts, remove bindings, and reset one action or all defaults.
+- Apply private device-wide shortcuts to the full app, mini client, composers, forwarding and media viewer, with matching hints and protected typing/navigation. Preserve custom keys on save failures and ignore stale status responses after a save. Demo edits stay local to the preview.
+- Keep the desktop-wide launch binding under Omarchy/Hyprland ownership. No new dependencies or WhatsApp transport capabilities.
+
 ## 0.16.0 (2026-10-15)
 
 - Add a separate, off-by-default per-account choice to request sender-facing read receipts with wacli 0.19.0 or newer. Preserve existing automatic-reading choices and WhatsApp privacy settings. No new dependencies or change to the general wacli minimum. Thanks to @marcos-antonio (Marcos Junior) for PR #20.

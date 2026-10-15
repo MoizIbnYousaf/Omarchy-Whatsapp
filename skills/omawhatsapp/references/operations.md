@@ -207,3 +207,11 @@ For calls, channels, contacts, group administration, history/backfill, media
 recovery, poll voting, presence, profiles, accounts, status broadcasts,
 exports, or store maintenance, use the complete classified gateway in
 [wacli-parity.md](wacli-parity.md).
+
+The global `shortcuts` setting is a map of known keyboard action IDs to lists
+of up to three canonical key strings (for example `{"find":["Ctrl+Alt+F"]}`).
+An omitted action inherits its default; `[]` disables it; `{}` restores the
+entire default map. The helper rejects invalid keys, unknown actions and
+context conflicts. This is a local preference write; it does not change the
+Hyprland launcher binding or perform any WhatsApp operation. Prefer the
+Settings → Shortcuts editor for interactive capture and conflict feedback.

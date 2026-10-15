@@ -153,7 +153,7 @@ Rectangle {
     if (section === "chats") return [
       { kind: "signature", key: "signature", busy: busy, multi: multi },
       { kind: "toggle", key: "enter_sends", title: "Enter sends messages",
-        subtitle: value("enterSends", true) ? "Shift+Enter adds a line." : "Ctrl+Enter sends; Enter adds a line.",
+        subtitle: "Default send behavior. A custom Send message binding in Shortcuts takes precedence.",
         checked: value("enterSends", true), busy: busy },
       { kind: "toggle", key: "show_avatars", title: "Chat photos",
         subtitle: "Show contact and group photos in the list and the conversation header.",
@@ -253,26 +253,7 @@ Rectangle {
       return list
     }
     if (section === "updates") return [ { kind: "updates" } ]
-    if (section === "shortcuts") return [
-      { kind: "info", title: "Super+Shift+W", value: "Open or close OmaWhatsApp" },
-      { kind: "info", title: "Ctrl+F", value: "Find in this conversation" },
-      { kind: "info", title: "Ctrl+B", value: "Hide or show the chat list" },
-      { kind: "info", title: "Ctrl+N", value: "Start a new chat" },
-      { kind: "info", title: "Ctrl+K", value: "Go to a chat by name" },
-      { kind: "info", title: "Ctrl+B · Ctrl+I", value: "Bold or italic for the selected text (Ctrl+B without a selection hides the chat list)" },
-      { kind: "info", title: "Ctrl+Shift+X · Ctrl+Shift+M", value: "Strikethrough or monospace; the formatting button has lists, quotes and code" },
-      { kind: "info", title: "/", value: "Search chats" },
-      { kind: "info", title: "J · K", value: "Move through messages or chats" },
-      { kind: "info", title: "R", value: "Reply to the selected message" },
-      { kind: "info", title: "C", value: "Write a message" },
-      { kind: "info", title: value("enterSends", true) ? "Enter · Shift+Enter" : "Ctrl+Enter · Enter",
-        value: "Send · new line" },
-      { kind: "info", title: "Ctrl+V", value: "Paste text, an image or a file" },
-      { kind: "info", title: "Ctrl+O · Ctrl+Shift+O", value: "Attach documents · photos and videos" },
-      { kind: "info", title: "Ctrl+Shift+V", value: "Record a voice note" },
-      { kind: "info", title: "Space", value: "Open the selected media" },
-      { kind: "info", title: "Esc", value: "Step back" }
-    ]
+    if (section === "shortcuts") return [{ kind: "shortcuts" }]
     if (section === "about") return [
       { kind: "info", title: "OmaWhatsApp", value: (about.app_version || "—") + (about.install_mode ? " · " + about.install_mode : "") },
       { kind: "info", title: "wacli", value: (about.wacli_version || "—") + " · supports "
@@ -506,6 +487,7 @@ Rectangle {
             : modelData.kind === "action" ? actionRow
             : modelData.kind === "link" ? linkRow
             : modelData.kind === "updates" ? updatesRow
+            : modelData.kind === "shortcuts" ? shortcutsRow
             : modelData.kind === "signature" ? signatureRow
             : modelData.kind === "account" ? accountRow
             : noteRow
@@ -515,6 +497,17 @@ Rectangle {
   }
 
   // --------------------------------------------------------- row kinds
+
+  Component {
+    id: shortcutsRow
+    ShortcutSettings {
+      width: parent ? parent.width : 0
+      service: settings.service
+      demoMode: settings.demoMode
+      overlayHost: settings
+      app: settings.app
+    }
+  }
 
   Component {
     id: toggleRow

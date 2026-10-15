@@ -1,4 +1,5 @@
 import QtQuick
+import "ShortcutModel.js" as Shortcuts
 import QtQuick.Controls
 import qs.Commons
 import qs.Ui
@@ -10,6 +11,7 @@ import "TimeFormat.js" as TimeFormat
 // client. The chat timeline stays mounted underneath, so closing is instant.
 FocusScope {
   id: root
+  property var shortcuts: ({})
 
   required property color foreground
   required property color background
@@ -110,25 +112,25 @@ FocusScope {
 
   Keys.onPressed: function(event) {
     if (!root.opened) return
-    if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace) {
+    if (Shortcuts.matches("viewerClose", event, root.shortcuts, true)) {
       root.closeViewer()
       event.accepted = true
-    } else if (event.key === Qt.Key_Left) {
+    } else if (Shortcuts.matches("viewerPrevious", event, root.shortcuts, true)) {
       root.navigate(-1)
       event.accepted = true
-    } else if (event.key === Qt.Key_Right) {
+    } else if (Shortcuts.matches("viewerNext", event, root.shortcuts, true)) {
       root.navigate(1)
       event.accepted = true
-    } else if (event.key === Qt.Key_Plus || event.key === Qt.Key_Equal) {
+    } else if (Shortcuts.matches("zoomIn", event, root.shortcuts, true)) {
       root.setZoom(root.zoom + 0.25)
       event.accepted = true
-    } else if (event.key === Qt.Key_Minus) {
+    } else if (Shortcuts.matches("zoomOut", event, root.shortcuts, true)) {
       root.setZoom(root.zoom - 0.25)
       event.accepted = true
-    } else if (event.key === Qt.Key_0) {
+    } else if (Shortcuts.matches("zoomReset", event, root.shortcuts, true)) {
       root.setZoom(1)
       event.accepted = true
-    } else if (event.key === Qt.Key_Space) {
+    } else if (Shortcuts.matches("play", event, root.shortcuts, true)) {
       root.togglePlayback()
       event.accepted = true
     }

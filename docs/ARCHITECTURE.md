@@ -218,3 +218,22 @@ kind and name from the @lid, so a person's chat with messages and kind
 
 OmaWhatsApp has no special chat names, task semantics, or personal capture
 configuration. Personal workflows belong in separate, user-owned extensions.
+
+## Custom keyboard bindings
+
+`bin/shortcuts.json` is the bounded action catalog. `scripts/generate-shortcuts`
+generates the embedded Python and QML catalogs; a regression checks that all
+three agree. Only known action IDs and up to three canonical key strings per
+action are accepted. There are no command strings or executable passthroughs.
+The helper validates the complete map, rejects conflicts in overlapping contexts,
+and saves it through the existing locked, atomic private preferences path.
+Absent entries inherit defaults; an empty list disables a binding. Preferences
+are device-wide. Status and settings responses publish `shortcuts` to the
+resident service so both surfaces use the same acknowledged map.
+
+`ShortcutModel.js` owns event normalization, defaults, context overlap and
+conflict messages. In-app QML Shortcuts, navigation handlers, composers, the
+media viewer, forwarding dialog and their hints resolve against that model.
+Settings suspends full-app actions while keys are recorded. Capturing keys
+never invokes an action; the editor waits for helper success before dismissing,
+and preserves the proposed change on failure. Demo edits stay in memory.

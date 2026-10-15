@@ -216,3 +216,31 @@ The helper is also a command line tool for scripts and agents; `omawhatsapp
 --help` lists its commands. Its guarded wacli gateway, the agent skill and the
 MCP server are described in the [README](../README.md#let-your-agent-use-whatsapp)
 and in the [agent gateway reference](../skills/omawhatsapp/references/wacli-parity.md).
+
+### Customize your keyboard
+
+Open **Settings → Shortcuts**. Search by action or key, choose a group, or show
+only customized actions. Click a key badge, press a new combination, then click
+**Save shortcut**. A conflict names the other action and prevents saving;
+change or remove that action's binding first. Use **+** for up to three
+alternatives, **Remove binding** to disable a key, **Reset** for one action,
+or **Reset all…** to restore the defaults after confirmation. Escape cancels
+capture. Tab moves between controls and into the save/cancel buttons.
+
+Bindings apply immediately to every account and every open app/mini-client
+window on this device, persist privately, and survive upgrades. Media viewer
+and forwarding bindings have their own contexts. Ordinary letters navigate
+only when you are not typing. Writing and window actions require a modifier
+or function key, so assigning a shortcut cannot turn ordinary typing into a
+send or another action. Copy, cut, undo, select-all, Tab navigation, and dialog
+confirmation/cancellation retain their standard behavior. Ctrl+B retains its
+context rule: selected text becomes bold; otherwise it toggles the sidebar.
+The **Send message** binding overrides the default **Enter sends** preference;
+new lines remain Enter or Shift+Enter as appropriate. Visible hints follow the
+active bindings. Disabled actions can still be used by clicking their controls.
+
+The desktop-wide launcher (Super+Shift+W by default) belongs to Omarchy's
+Hyprland configuration. It is separate from in-app bindings; desktop shortcuts
+may intercept keys before OmaWhatsApp sees them. This page does not rewrite
+desktop configuration. Demo mode lets you try edits without saving preferences
+or performing WhatsApp operations.

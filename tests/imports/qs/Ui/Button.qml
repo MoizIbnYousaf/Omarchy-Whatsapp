@@ -5,6 +5,7 @@ Controls.Button {
   property color foreground: "white"
   property color accent: "green"
   property string fontFamily: "sans"
+  property bool selected: false
   property bool focusable: false
   property bool bordered: false
   property string iconText: ""

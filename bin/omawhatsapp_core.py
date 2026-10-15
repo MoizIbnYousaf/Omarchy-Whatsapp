@@ -86,6 +86,285 @@ def locate_wacli() -> Path:
 WACLI = locate_wacli()
 
 
+# Local action IDs and key sequences only; never commands or executable paths.
+SHORTCUT_CATALOG = [{'id': 'find',
+  'title': 'Find in conversation',
+  'group': 'Everyday actions',
+  'scope': 'window',
+  'keys': ['Ctrl+F'],
+  'description': 'Full app'},
+ {'id': 'sidebar',
+  'title': 'Show or hide chat list',
+  'group': 'Everyday actions',
+  'scope': 'window',
+  'keys': ['Ctrl+B'],
+  'description': 'Full app'},
+ {'id': 'newChat',
+  'title': 'Start a new chat',
+  'group': 'Everyday actions',
+  'scope': 'window',
+  'keys': ['Ctrl+N'],
+  'description': 'Full app'},
+ {'id': 'switchChat',
+  'title': 'Go to a chat by name',
+  'group': 'Everyday actions',
+  'scope': 'window',
+  'keys': ['Ctrl+K'],
+  'description': 'Full app'},
+ {'id': 'documents',
+  'title': 'Attach documents',
+  'group': 'Everyday actions',
+  'scope': 'window',
+  'keys': ['Ctrl+O'],
+  'description': 'Full app and mini client'},
+ {'id': 'photos',
+  'title': 'Attach photos and videos',
+  'group': 'Everyday actions',
+  'scope': 'window',
+  'keys': ['Ctrl+Shift+O'],
+  'description': 'Full app and mini client'},
+ {'id': 'record',
+  'title': 'Record or stop a voice note',
+  'group': 'Everyday actions',
+  'scope': 'window',
+  'keys': ['Ctrl+Shift+V'],
+  'description': 'Full app and mini client'},
+ {'id': 'quit',
+  'title': 'Quit OmaWhatsApp',
+  'group': 'Everyday actions',
+  'scope': 'window',
+  'keys': ['Ctrl+Q'],
+  'description': 'Full app'},
+ {'id': 'search',
+  'title': 'Search chats',
+  'group': 'Navigation',
+  'scope': 'navigation',
+  'keys': ['/'],
+  'description': 'When you are not typing. Arrow keys inside fields keep editing text.'},
+ {'id': 'next',
+  'title': 'Move down',
+  'group': 'Navigation',
+  'scope': 'navigation',
+  'keys': ['J', 'Down'],
+  'description': 'When you are not typing. Arrow keys inside fields keep editing text.'},
+ {'id': 'previous',
+  'title': 'Move up',
+  'group': 'Navigation',
+  'scope': 'navigation',
+  'keys': ['K', 'Up'],
+  'description': 'When you are not typing. Arrow keys inside fields keep editing text.'},
+ {'id': 'reply',
+  'title': 'Reply to selected message',
+  'group': 'Navigation',
+  'scope': 'navigation',
+  'keys': ['R', 'Shift+R'],
+  'description': 'When you are not typing. Arrow keys inside fields keep editing text.'},
+ {'id': 'compose',
+  'title': 'Write a message',
+  'group': 'Navigation',
+  'scope': 'navigation',
+  'keys': ['C'],
+  'description': 'When you are not typing. Arrow keys inside fields keep editing text.'},
+ {'id': 'openChat',
+  'title': 'Open selected chat',
+  'group': 'Navigation',
+  'scope': 'navigation',
+  'keys': ['Enter'],
+  'description': 'When you are not typing. Arrow keys inside fields keep editing text.'},
+ {'id': 'openMedia',
+  'title': 'Open selected media',
+  'group': 'Navigation',
+  'scope': 'navigation',
+  'keys': ['Space'],
+  'description': 'When you are not typing. Arrow keys inside fields keep editing text.'},
+ {'id': 'back',
+  'title': 'Step back',
+  'group': 'Navigation',
+  'scope': 'navigation',
+  'keys': ['Escape'],
+  'description': 'When you are not typing. Arrow keys inside fields keep editing text.'},
+ {'id': 'pageUp',
+  'title': 'Scroll conversation up',
+  'group': 'Navigation',
+  'scope': 'navigation',
+  'keys': ['PageUp'],
+  'description': 'When you are not typing. Arrow keys inside fields keep editing text.'},
+ {'id': 'pageDown',
+  'title': 'Scroll conversation down',
+  'group': 'Navigation',
+  'scope': 'navigation',
+  'keys': ['PageDown'],
+  'description': 'When you are not typing. Arrow keys inside fields keep editing text.'},
+ {'id': 'send',
+  'title': 'Send message',
+  'group': 'Writing',
+  'scope': 'composer',
+  'keys': ['Enter', 'Ctrl+Enter'],
+  'description': 'Full app and mini client'},
+ {'id': 'paste',
+  'title': 'Paste text, image or file',
+  'group': 'Writing',
+  'scope': 'composer',
+  'keys': ['Ctrl+V'],
+  'description': 'Full app and mini client'},
+ {'id': 'bold',
+  'title': 'Bold selected text',
+  'group': 'Writing',
+  'scope': 'composer',
+  'keys': ['Ctrl+B'],
+  'description': 'Full app and mini client. Bold uses Ctrl+B only with selected text.'},
+ {'id': 'italic',
+  'title': 'Italic text',
+  'group': 'Writing',
+  'scope': 'composer',
+  'keys': ['Ctrl+I'],
+  'description': 'Full app and mini client'},
+ {'id': 'strike',
+  'title': 'Strikethrough text',
+  'group': 'Writing',
+  'scope': 'composer',
+  'keys': ['Ctrl+Shift+X'],
+  'description': 'Full app and mini client'},
+ {'id': 'mono',
+  'title': 'Monospace text',
+  'group': 'Writing',
+  'scope': 'composer',
+  'keys': ['Ctrl+Shift+M'],
+  'description': 'Full app and mini client'},
+ {'id': 'dropdownRefresh',
+  'title': 'Refresh mini client',
+  'group': 'Mini client',
+  'scope': 'dropdown',
+  'keys': ['R', 'Shift+R'],
+  'description': 'When the mini-client list has focus'},
+ {'id': 'expand',
+  'title': 'Open full app from mini client',
+  'group': 'Mini client',
+  'scope': 'dropdown',
+  'keys': ['O', 'Shift+O'],
+  'description': 'When the mini-client list has focus'},
+ {'id': 'dropdownCompose',
+  'title': 'Write in mini client',
+  'group': 'Mini client',
+  'scope': 'dropdown',
+  'keys': ['I', 'Shift+I'],
+  'description': 'When the mini-client list has focus'},
+ {'id': 'panelNext',
+  'title': 'Next mini-client panel',
+  'group': 'Mini client',
+  'scope': 'dropdown',
+  'keys': ['Right', 'L'],
+  'description': 'When the mini-client list has focus'},
+ {'id': 'panelPrevious',
+  'title': 'Previous mini-client panel',
+  'group': 'Mini client',
+  'scope': 'dropdown',
+  'keys': ['Left', 'H'],
+  'description': 'When the mini-client list has focus'},
+ {'id': 'viewerClose',
+  'title': 'Close media viewer',
+  'group': 'Media viewer',
+  'scope': 'viewer',
+  'keys': ['Escape', 'Backspace'],
+  'description': 'While the media viewer is open'},
+ {'id': 'viewerPrevious',
+  'title': 'Previous media',
+  'group': 'Media viewer',
+  'scope': 'viewer',
+  'keys': ['Left'],
+  'description': 'While the media viewer is open'},
+ {'id': 'viewerNext',
+  'title': 'Next media',
+  'group': 'Media viewer',
+  'scope': 'viewer',
+  'keys': ['Right'],
+  'description': 'While the media viewer is open'},
+ {'id': 'zoomIn',
+  'title': 'Zoom in',
+  'group': 'Media viewer',
+  'scope': 'viewer',
+  'keys': ['+', '='],
+  'description': 'While the media viewer is open'},
+ {'id': 'zoomOut',
+  'title': 'Zoom out',
+  'group': 'Media viewer',
+  'scope': 'viewer',
+  'keys': ['-'],
+  'description': 'While the media viewer is open'},
+ {'id': 'zoomReset',
+  'title': 'Reset zoom',
+  'group': 'Media viewer',
+  'scope': 'viewer',
+  'keys': ['0'],
+  'description': 'While the media viewer is open'},
+ {'id': 'play',
+  'title': 'Play or pause media',
+  'group': 'Media viewer',
+  'scope': 'viewer',
+  'keys': ['Space'],
+  'description': 'While the media viewer is open'},
+ {'id': 'forwardSend',
+  'title': 'Send forwarded messages',
+  'group': 'Forwarding',
+  'scope': 'forward',
+  'keys': ['Ctrl+Enter'],
+  'description': 'Only inside the forwarding dialog, after you select recipients.'}]
+SHORTCUT_ACTIONS = {item["id"]: item for item in SHORTCUT_CATALOG}
+SHORTCUT_SEQUENCE = re.compile(
+    r"(?:(?:Ctrl|Alt|Shift|Meta)\+)*(?:[!-~]|Enter|Escape|Space|"
+    r"Backspace|Delete|Up|Down|Left|Right|PageUp|PageDown|Home|End|Insert|F(?:[1-9]|[12][0-9]|3[0-5]))")
+
+
+def valid_shortcuts(value: Any) -> bool:
+    if not isinstance(value, dict) or len(value) > len(SHORTCUT_ACTIONS):
+        return False
+    for name, sequences in value.items():
+        if name not in SHORTCUT_ACTIONS or not isinstance(sequences, list) or len(sequences) > 3:
+            return False
+        if any(not isinstance(seq, str) or len(seq) > 64 or not SHORTCUT_SEQUENCE.fullmatch(seq)
+               for seq in sequences) or len(set(sequences)) != len(sequences):
+            return False
+        for seq in sequences:
+            key_name = re.sub(r"^(?:(?:Ctrl|Alt|Shift|Meta)\+)*", "", seq)
+            if len(key_name) == 1 and key_name.islower():
+                return False
+            parts = [part for part in re.match(r"(?:(?:Ctrl|Alt|Shift|Meta)\+)*", seq).group(0).split("+") if part]
+            if len(set(parts)) != len(parts) or parts != sorted(parts, key=lambda x: ["Ctrl", "Alt", "Shift", "Meta"].index(x)):
+                return False
+            if seq in {"Ctrl+A", "Ctrl+C", "Ctrl+X", "Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+Y"}:
+                return False
+            if seq == "Escape" and name not in {"back", "viewerClose"}:
+                return False
+            if SHORTCUT_ACTIONS[name]["scope"] in {"window", "composer"} and not (
+                    re.search(r"(?:Ctrl|Alt|Meta)\+", seq) or re.search(r"(?:^|\+)F[0-9]+$", seq)
+                    or (name == "send" and seq == "Enter")):
+                return False
+    return True
+
+
+def shortcut_conflict(value: dict[str, Any], enter_sends: bool = True) -> str:
+    def bindings(item):
+        return value.get(item["id"], ["Ctrl+Enter"] if item["id"] == "send" and not enter_sends else item["keys"])
+
+    def overlap(a, b):
+        if a["scope"] == b["scope"]:
+            return True
+        if a["scope"] in {"viewer", "forward"} or b["scope"] in {"viewer", "forward"}:
+            return False
+        if {a["scope"], b["scope"]} == {"navigation", "dropdown"}:
+            nav = a if a["scope"] == "navigation" else b
+            return nav["id"] in {"next", "previous", "openChat", "openMedia", "back", "search"}
+        return a["scope"] == "window" or b["scope"] == "window"
+
+    for index, a in enumerate(SHORTCUT_CATALOG):
+        for b in SHORTCUT_CATALOG[index + 1:]:
+            if {a["id"], b["id"]} == {"bold", "sidebar"} or not overlap(a, b):
+                continue
+            if set(bindings(a)) & set(bindings(b)):
+                return f'Shortcut conflict between {a["title"]} and {b["title"]}.'
+    return ""
+
+
 def version_tuple(text: str) -> tuple[int, ...]:
     return tuple(int(part) for part in re.findall(r"[0-9]+", text)[:3])
 # wacli keeps the account config in the XDG state directory even when
@@ -474,7 +753,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 # Bumped with manifest.json (scripts/test checks it). The app compares it with
 # the plugin it loaded: an update that replaced only the plugin says so.
-HELPER_VERSION = "0.16.0"  # x-release-please-version
+HELPER_VERSION = "0.17.0"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
@@ -1550,6 +1829,7 @@ class Backend:
             "dropdown_rows": dropdown_rows,
             "composer_max_lines": composer_max_lines,
             "time_format": time_format,
+            "shortcuts": value.get("shortcuts", {}) if valid_shortcuts(value.get("shortcuts", {})) else {},
             **{name: ui_preference(value, name) for name in UI_PREFERENCES},
             # The desktop popup is a separate surface from the bar badge, so it
             # keeps its own settings. Its watermark is per account, next to the
@@ -1619,6 +1899,7 @@ class Backend:
             allowed = {
                 "send_read_receipts",
                 "sender_read_receipts",
+                "shortcuts",
                 "signature",
                 "account_notifications",
                 "show_unread_count",
@@ -1672,6 +1953,9 @@ class Backend:
                 if name in update and not valid_ui_preference(name, update[name]):
                     raise OmaWhatsAppError(f"The {name.replace('_', ' ')} setting has an unsupported value.")
 
+            if "shortcuts" in update and not valid_shortcuts(update["shortcuts"]):
+                raise OmaWhatsAppError("Choose valid keyboard shortcuts for known app actions (up to three per action).")
+
             key = self.active.key
 
             def apply(value: dict[str, Any]) -> None:
@@ -1689,6 +1973,10 @@ class Backend:
                             state[name] = bool(setting)
                     else:
                         value[name] = setting
+                if "shortcuts" in update or "enter_sends" in update:
+                    conflict = shortcut_conflict(value.get("shortcuts", {}), value.get("enter_sends", True))
+                    if conflict:
+                        raise OmaWhatsAppError(conflict)
 
             value = self._update_preferences(apply)
             if "start_at_login" in update:
@@ -1708,6 +1996,7 @@ class Backend:
             "dropdown_rows": value.get("dropdown_rows", 7),
             "composer_max_lines": value.get("composer_max_lines", 6),
             "time_format": value.get("time_format", "auto"),
+            "shortcuts": value.get("shortcuts", {}),
             **{name: ui_preference(value, name) for name in UI_PREFERENCES},
             "auto_download_media": self.auto_download_media(),
         }
@@ -3117,6 +3406,7 @@ class Backend:
             "dropdown_rows": preferences.get("dropdown_rows", 7),
             "composer_max_lines": preferences.get("composer_max_lines", 6),
             "time_format": preferences.get("time_format", "auto"),
+            "shortcuts": preferences.get("shortcuts", {}),
             **{name: ui_preference(preferences, name) for name in UI_PREFERENCES},
             "auto_download_media": self.auto_download_media(),
             "fts_enabled": current["fts_enabled"],

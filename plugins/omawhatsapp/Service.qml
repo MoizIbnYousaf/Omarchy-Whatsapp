@@ -35,6 +35,8 @@ Item {
   property bool senderReadReceipts: false
   property bool sendReadReceipts: false
   property bool readOnReply: false
+  property var shortcuts: ({})
+  property int shortcutsGeneration: 0
   property bool enterSends: true
   property bool showAvatars: true
   // Off by default: a photo batch pauses sync, and what arrives meanwhile is lost.
@@ -654,6 +656,7 @@ Item {
       statusPending = true
       return
     }
+    statusProcess.requestedShortcutsGeneration = root.shortcutsGeneration
     statusProcess.requestedAccount = account
     statusProcess.command = [helper, "status", "--account", account]
     statusProcess.running = true
@@ -1734,7 +1737,9 @@ Item {
     controlProcess.running = true
     return true
   }
-  function applyInterfacePreferences(payload) {
+  function applyInterfacePreferences(payload, includeShortcuts) {
+    if (includeShortcuts !== false)
+      root.shortcuts = payload.shortcuts && typeof payload.shortcuts === "object" ? payload.shortcuts : ({})
     if (payload.auto_download_media !== undefined)
       root.autoDownloadMedia = payload.auto_download_media !== false
     root.readOnReply = payload.read_on_reply === true
@@ -1994,6 +1999,7 @@ Item {
     id: statusProcess
     objectName: "statusProcess"
     property string requestedAccount: ""
+    property int requestedShortcutsGeneration: 0
     command: [root.helper, "status", "--account", ""]
     stdout: StdioCollector { id: statusOutput }
     stderr: StdioCollector { id: statusError }
@@ -2058,7 +2064,7 @@ Item {
           ? Number(payload.composer_max_lines) : 6
         root.timeFormat = ["auto", "12h", "24h"].indexOf(payload.time_format) >= 0
           ? payload.time_format : "auto"
-        root.applyInterfacePreferences(payload)
+        root.applyInterfacePreferences(payload, requestedShortcutsGeneration === root.shortcutsGeneration)
         root.ready = readiness.accountReady
         if (root.ready) root.errorText = root.helperOutdated ? root.helperOutdatedText : ""
         root.maybeSendAutomaticReceipt()
@@ -2498,6 +2504,7 @@ Item {
         ? Number(payload.composer_max_lines) : 6
       root.timeFormat = ["auto", "12h", "24h"].indexOf(payload.time_format) >= 0
         ? payload.time_format : "auto"
+      root.shortcutsGeneration += 1
       root.applyInterfacePreferences(payload)
       root.errorText = ""
       root.settingsCompleted()

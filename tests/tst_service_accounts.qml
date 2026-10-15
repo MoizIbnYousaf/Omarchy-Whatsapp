@@ -34,6 +34,19 @@ TestCase {
     return service.accounts.find(function(item) { return item.account === name })
   }
 
+  function test_shortcuts_publish_after_save_and_stale_status_cannot_undo_them() {
+    var service = create()
+    var status = findChild(service, "statusProcess")
+    var oldGeneration = status.requestedShortcutsGeneration
+    verify(service.setPreference("shortcuts", {find:["Alt+F"]}))
+    var settings = findChild(service, "settingsProcess")
+    finish(settings, {ok:true, account:"work", shortcuts:{find:["Alt+F"]}})
+    compare(service.shortcuts.find, ["Alt+F"])
+    compare(service.shortcutsGeneration, oldGeneration + 1)
+    finish(status, {ok:true, account:"work", accounts:accounts(), shortcuts:{}, authenticated:true, database_ready:true})
+    compare(service.shortcuts.find, ["Alt+F"], "late status must not restore old bindings")
+  }
+
   function test_sync_pauses_the_named_account_only() {
     var service = create()
     verify(service.multiAccount)
