@@ -15,6 +15,9 @@ TestCase {
   Component {
     id: serviceComponent
     Item {
+      property var shortcuts: ({})
+      signal settingsCompleted()
+      signal settingsFailed(string message)
       property bool settingsWriting: false
       property bool controlWriting: false
       property bool statusReady: true
@@ -135,6 +138,28 @@ TestCase {
       compare(last(h.service).name, cases[i][2], cases[i][1])
       compare(last(h.service).args, cases[i][3], cases[i][1])
     }
+  }
+
+  function test_shortcut_editor_survives_save_busy_and_failure_transitions() {
+    var h = create()
+    h.view.openSection("shortcuts")
+    wait(0)
+    var editor = findChild(h.view, "shortcutSettings")
+    verify(editor !== null)
+    editor.edit("find", 0)
+    editor.candidate = "Alt+F"
+    verify(editor.save())
+    h.service.settingsWriting = true
+    wait(0)
+    compare(findChild(h.view, "shortcutSettings"), editor)
+    compare(editor.pending, true)
+    h.service.settingsWriting = false
+    h.service.settingsFailed("Synthetic save failure")
+    wait(0)
+    compare(findChild(h.view, "shortcutSettings"), editor)
+    compare(editor.candidate, "Alt+F")
+    compare(editor.error, "Synthetic save failure")
+    compare(editor.editing, "find")
   }
 
   function test_sender_receipts_default_off_and_demo_does_not_write() {
