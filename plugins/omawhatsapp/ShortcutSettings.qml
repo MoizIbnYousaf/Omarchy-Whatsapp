@@ -91,15 +91,8 @@ Column {
 
   Text {
     textFormat: Text.PlainText
-    width: parent.width
-    text: "Make it feel like yours"
-    color: Commons.Color.foreground
-    font.family: Style.font.family; font.pixelSize: Style.font.title
-  }
-  Text {
-    textFormat: Text.PlainText
     width: parent.width; wrapMode: Text.Wrap
-    text: "Click a key to change it. Add an alternative, remove a binding, or restore its default. Changes apply to every account on this device."
+    text: "Click a key to change it, or + to add an alternative. Your shortcuts apply to every account on this device."
     color: Commons.Color.foreground; opacity: 0.65
     font.family: Style.font.family; font.pixelSize: Style.font.bodySmall
   }
@@ -113,12 +106,12 @@ Column {
   }
   Flow {
     width: parent.width; spacing: Style.space(8)
-    Ui.Button {
+    ShortcutButton {
       text: root.modifiedOnly ? "✓ Customized only" : "Customized only"
       focusable: true; bordered: true; selected: root.modifiedOnly
       onClicked: root.modifiedOnly = !root.modifiedOnly
     }
-    Ui.Button {
+    ShortcutButton {
       objectName: "resetAllShortcuts"
       text: "Reset all…"; focusable: true; bordered: true
       enabled: Object.keys(root.overrides).length > 0 && !root.pending
@@ -129,7 +122,7 @@ Column {
     width: parent.width; spacing: Style.space(6)
     Repeater {
       model: ["All", "Everyday actions", "Navigation", "Writing", "Mini client", "Media viewer", "Forwarding"]
-      delegate: Ui.Button {
+      delegate: ShortcutButton {
         required property string modelData
         text: modelData
         focusable: true; bordered: true; selected: root.groupFilter === modelData
@@ -168,29 +161,42 @@ Column {
         color: Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent)
         border.width: actionRow.modified ? 1 : 0
         border.color: Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.25)
-        Column {
+        Item {
           id: actionContent
+          readonly property bool compact: width >= Style.space(500)
+          implicitHeight: compact ? Math.max(actionLabels.implicitHeight, keyButtons.implicitHeight)
+            : actionLabels.implicitHeight + Style.space(10) + keyButtons.implicitHeight
           anchors.left: parent.left; anchors.right: parent.right; anchors.margins: Style.space(14)
-          y: Style.space(12); spacing: Style.space(8)
-          Text {
-            textFormat: Text.PlainText
-            width: parent.width; wrapMode: Text.Wrap
-            text: actionRow.modelData.title + (actionRow.modified ? "  ·  Customized" : "")
-            color: Commons.Color.foreground
-            font.family: Style.font.family; font.pixelSize: Style.font.body
-          }
-          Text {
-            textFormat: Text.PlainText
-            width: parent.width; wrapMode: Text.Wrap
-            text: actionRow.modelData.description
-            color: Commons.Color.foreground; opacity: 0.6
-            font.family: Style.font.family; font.pixelSize: Style.font.caption
+          y: Style.space(12)
+          Column {
+            id: actionLabels
+            width: actionContent.compact ? Math.max(Style.space(180), actionContent.width - Style.space(260)) : actionContent.width
+            y: actionContent.compact ? (actionContent.implicitHeight - implicitHeight) / 2 : 0
+            spacing: Style.space(4)
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width; wrapMode: Text.Wrap
+              text: actionRow.modelData.title + (actionRow.modified ? "  ·  Customized" : "")
+              color: Commons.Color.foreground
+              font.family: Style.font.family; font.pixelSize: Style.font.body
+            }
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width; wrapMode: Text.Wrap
+              text: actionRow.modelData.description
+              color: Commons.Color.foreground; opacity: 0.6
+              font.family: Style.font.family; font.pixelSize: Style.font.caption
+            }
           }
           Flow {
-            width: parent.width; spacing: Style.space(6)
+            id: keyButtons
+            width: actionContent.compact ? Style.space(240) : actionContent.width
+            x: actionContent.compact ? actionContent.width - width : 0
+            y: actionContent.compact ? (actionContent.implicitHeight - implicitHeight) / 2 : actionLabels.implicitHeight + Style.space(10)
+            spacing: Style.space(6)
             Repeater {
               model: root.keys(actionRow.modelData.id)
-              delegate: Ui.Button {
+              delegate: ShortcutButton {
                 required property string modelData
                 required property int index
                 objectName: "shortcut-" + actionRow.modelData.id + "-" + index
@@ -201,17 +207,19 @@ Column {
                 Accessible.name: actionRow.modelData.title + ": " + text + ". Change shortcut"
               }
             }
-            Ui.Button {
+            ShortcutButton {
               objectName: "addShortcut-" + actionRow.modelData.id
               text: root.keys(actionRow.modelData.id).length === 0 ? "Set shortcut" : "+"
               visible: root.keys(actionRow.modelData.id).length < 3
               bordered: true; focusable: true
               tooltipText: "Add an alternative shortcut"
+              Accessible.name: "Add shortcut for " + actionRow.modelData.title
               onClicked: root.edit(actionRow.modelData.id, root.keys(actionRow.modelData.id).length)
             }
-            Ui.Button {
+            ShortcutButton {
               text: "Reset"; visible: actionRow.modified
               focusable: true; enabled: !root.pending
+              Accessible.name: "Reset " + actionRow.modelData.title + " shortcut"
               onClicked: root.reset(actionRow.modelData.id)
             }
           }
@@ -280,6 +288,9 @@ Column {
           visible: root.editing !== "__reset__"
           width: parent.width; height: Style.space(84)
           activeFocusOnTab: true
+          Accessible.role: Accessible.EditableText
+          Accessible.name: "Record shortcut"
+          Accessible.description: root.candidate ? Shortcuts.label(root.candidate) : "Press a key combination. Escape cancels; Tab moves to Save."
           Keys.onShortcutOverride: function(event) { if (event.key !== Qt.Key_Tab && event.key !== Qt.Key_Backtab) event.accepted = true }
           Keys.onPressed: function(event) {
             if (event.key === Qt.Key_Escape) { root.cancel(); event.accepted = true; return }
@@ -316,7 +327,7 @@ Column {
         }
         Flow {
           width: parent.width; spacing: Style.space(8)
-          Ui.Button {
+          ShortcutButton {
             id: resetConfirm
             objectName: "saveShortcut"
             text: root.pending ? "Saving…" : root.editing === "__reset__" ? "Restore defaults" : "Save shortcut"
@@ -324,8 +335,8 @@ Column {
             enabled: !root.pending && (root.editing === "__reset__" || !!root.candidate && !root.candidateError && !root.conflict)
             onClicked: root.editing === "__reset__" ? root.commit(({})) : root.save()
           }
-          Ui.Button { text: "Cancel"; focusable: true; enabled: !root.pending; onClicked: root.cancel() }
-          Ui.Button {
+          ShortcutButton { text: "Cancel"; focusable: true; enabled: !root.pending; onClicked: root.cancel() }
+          ShortcutButton {
             text: "Remove binding"; focusable: true
             visible: root.editing !== "__reset__" && root.editingIndex < root.proposed.length
             enabled: !root.pending
