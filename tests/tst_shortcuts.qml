@@ -56,6 +56,8 @@ TestCase {
     compare(Model.conflict("bold", ["Ctrl+B"], {}, true), "")
     verify(Model.captureError("send", "S") !== "")
     verify(Model.captureError("forwardSend", "F") !== "")
+    verify(Model.conflict("back", ["Alt+S"], {send:["Alt+S"]}, true) !== "")
+    verify(Model.conflict("pageUp", ["Alt+S"], {send:["Alt+S"]}, true) !== "")
     verify(Model.captureError("find", "Tab") !== "")
     verify(Model.captureError("find", "Escape") !== "")
   }

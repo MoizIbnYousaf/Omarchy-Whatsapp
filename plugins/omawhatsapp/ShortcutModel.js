@@ -43,6 +43,8 @@ function overlap(a, b) {
   // Full-app-only navigation and mini-client-only actions do not compete.
   if ((a.scope === "navigation" && b.scope === "dropdown") || (b.scope === "navigation" && a.scope === "dropdown"))
     return ["next", "previous", "openChat", "back", "search", "openMedia"].indexOf(a.scope === "navigation" ? a.id : b.id) >= 0
+  if ((a.scope === "navigation" && b.scope === "composer") || (b.scope === "navigation" && a.scope === "composer"))
+    return ["back", "pageUp", "pageDown"].indexOf(a.scope === "navigation" ? a.id : b.id) >= 0
   return a.scope === "window" || b.scope === "window"
 }
 function conflict(id, sequences, overrides, enterSends) {

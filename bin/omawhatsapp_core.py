@@ -354,6 +354,9 @@ def shortcut_conflict(value: dict[str, Any], enter_sends: bool = True) -> str:
         if {a["scope"], b["scope"]} == {"navigation", "dropdown"}:
             nav = a if a["scope"] == "navigation" else b
             return nav["id"] in {"next", "previous", "openChat", "openMedia", "back", "search"}
+        if {a["scope"], b["scope"]} == {"navigation", "composer"}:
+            nav = a if a["scope"] == "navigation" else b
+            return nav["id"] in {"back", "pageUp", "pageDown"}
         return a["scope"] == "window" or b["scope"] == "window"
 
     for index, a in enumerate(SHORTCUT_CATALOG):
