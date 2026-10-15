@@ -2285,7 +2285,7 @@ Panel {
                       } else if (root.shortcutMatches("documents", event) || root.shortcutMatches("photos", event)) {
                         root.openFilePicker()
                         event.accepted = true
-                      } else if (root.shortcutMatches("back", event)) {
+                      } else if (Shortcuts.safeWhileTyping(event) && root.shortcutMatches("back", event)) {
                         if (root.replyTarget) root.replyTarget = null
                         else {
                           focus = false

@@ -246,6 +246,20 @@ TestCase {
     compare(h.service.sentTexts.length, 1)
   }
 
+  function test_letter_scroll_binding_never_consumes_composer_text() {
+    var h = createHarness({shortcuts: {pageUp: ["A"]}, messages: [
+      {id:"synthetic-scroll",text:"A populated conversation",sender:"Synthetic",timestamp:1787540100,from_me:false,media_type:"",reactions:[]}
+    ]})
+    tryVerify(function() { return findChild(h.app, "messageList").count > 0 })
+    var composer = findChild(h.app, "composerInput")
+    h.app.focusComposer()
+    tryVerify(function() { return composer.activeFocus })
+    composer.text = ""
+    keyClick(Qt.Key_A)
+    compare(composer.text, "a")
+    compare(h.service.sentTexts.length, 0)
+  }
+
   function createHarness(overrides) {
     var service = createTemporaryObject(serviceComponent, testCase)
     verify(service !== null)

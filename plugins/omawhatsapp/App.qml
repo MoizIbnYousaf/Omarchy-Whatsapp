@@ -2345,7 +2345,7 @@ Item {
       Shortcut {
         sequences: root.shortcutSequences("back")
         context: Qt.WindowShortcut
-        enabled: !root.settingsOpen && root.selectingMessages && !forwardPicker.opened && !batchDeleteConfirm.opened
+        enabled: !root.settingsOpen && !mediaViewer.opened && root.selectingMessages && !forwardPicker.opened && !batchDeleteConfirm.opened
         onActivated: root.cancelSelection()
       }
 
@@ -4832,7 +4832,8 @@ Item {
                 Keys.onPressed: function(event) {
                   root.noteComposerKey(event)
                   // Page Up/Down scroll the conversation even while typing.
-                  if (root.shortcutMatches("pageUp", event) || root.shortcutMatches("pageDown", event)) {
+                  if (Shortcuts.safeWhileTyping(event)
+                      && (root.shortcutMatches("pageUp", event) || root.shortcutMatches("pageDown", event))) {
                     event.accepted = root.pageConversation(root.shortcutMatches("pageUp", event) ? Qt.Key_PageUp : Qt.Key_PageDown)
                     return
                   }

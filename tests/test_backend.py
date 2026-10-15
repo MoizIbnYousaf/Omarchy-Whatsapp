@@ -2152,7 +2152,7 @@ class BackendTests(unittest.TestCase):
 
     def test_invalid_or_conflicting_shortcuts_are_rejected_without_writes(self) -> None:
         for value in (None, [], {"shell": ["Ctrl+Q"]}, {"newChat": "Ctrl+N"},
-                      {"newChat": ["N"]}, {"send": ["A"]}, {"send": ["Escape"]},
+                      {"forwardSend": ["F"]}, {"newChat": ["N"]}, {"send": ["A"]}, {"send": ["Escape"]},
                       {"find": ["Ctrl+F"] * 2}, {"find": ["Ctrl+Ctrl+F"]},
                       {"find": ["Shift+Ctrl+F"]}, {"find": ["Tab"]},
                       {"find": ["$(touch /tmp/no)"]}, {"find": ["Ctrl+N"]}):

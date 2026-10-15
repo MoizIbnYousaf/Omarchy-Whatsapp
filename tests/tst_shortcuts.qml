@@ -42,6 +42,10 @@ TestCase {
     verify(!Model.matches("newChat", {key:Qt.Key_N, modifiers:Qt.ControlModifier}, {newChat:[]}, true))
     compare(Model.bindings("send", {}, false), ["Ctrl+Enter"])
     compare(Model.bindings("send", {send:["Alt+S"]}, false), ["Alt+S"])
+    verify(!Model.safeWhileTyping({key:Qt.Key_A, modifiers:Qt.NoModifier}))
+    verify(!Model.safeWhileTyping({key:Qt.Key_Space, modifiers:Qt.NoModifier}))
+    verify(Model.safeWhileTyping({key:Qt.Key_Escape, modifiers:Qt.NoModifier}))
+    verify(Model.safeWhileTyping({key:Qt.Key_G, modifiers:Qt.ControlModifier}))
     compare(Model.configurationError({}, true), "")
     compare(Model.configurationError({}, false), "")
   }
@@ -51,6 +55,7 @@ TestCase {
     compare(Model.conflict("dropdownRefresh", ["R"], {}, true), "")
     compare(Model.conflict("bold", ["Ctrl+B"], {}, true), "")
     verify(Model.captureError("send", "S") !== "")
+    verify(Model.captureError("forwardSend", "F") !== "")
     verify(Model.captureError("find", "Tab") !== "")
     verify(Model.captureError("find", "Escape") !== "")
   }

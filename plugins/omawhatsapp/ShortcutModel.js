@@ -67,7 +67,7 @@ function captureError(id, sequence) {
     return "This key stays available for standard text editing."
   var item = action(id)
   if (!item) return ""
-  if ((item.scope === "window" || item.scope === "composer") && !/(Ctrl|Alt|Meta)\+/.test(sequence)
+  if ((item.scope === "window" || item.scope === "composer" || item.scope === "forward") && !/(Ctrl|Alt|Meta)\+/.test(sequence)
       && !(id === "send" && sequence === "Enter") && !/(^|\+)F\d+$/.test(sequence))
     return "Use Ctrl, Alt or Super with a key so typing stays safe."
   return ""
@@ -80,4 +80,12 @@ function configurationError(overrides, enterSends) {
     if (error) return error
   }
   return ""
+}
+
+// Navigation letters are commands only outside text entry. Escape and paging
+// retain their existing meaning; explicit modified/function keys are deliberate.
+function safeWhileTyping(event) {
+  return !!(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+    || event.key === Qt.Key_Escape || event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown
+    || (event.key >= Qt.Key_F1 && event.key <= Qt.Key_F35)
 }

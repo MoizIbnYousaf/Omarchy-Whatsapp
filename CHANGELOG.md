@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.1 (2026-10-15)
+
+- Require a modified key or function key for forwarding shortcuts, so typing recipient names cannot trigger forwarding. Keep custom letter-based navigation inactive in composers, where letters always enter text, and isolate media-viewer cancellation from message selection.
+
 ## 0.17.0 (2026-10-15)
 
 - Make Settings → Shortcuts editable: search and group 37 actions, click to record keys, add alternatives, detect conflicts, remove bindings, and reset one action or all defaults.

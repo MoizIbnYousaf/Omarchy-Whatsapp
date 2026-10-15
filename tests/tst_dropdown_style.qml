@@ -41,6 +41,18 @@ TestCase {
     return found
   }
 
+  function test_custom_navigation_letter_remains_text_in_the_composer() {
+    var dropdown = openDropdown()
+    dropdown.demoShortcuts = {back:["A"]}
+    dropdown.openConversation(dropdown.demoChats[0])
+    var composer = findChild(dropdown, "composerInput")
+    dropdown.focusComposer()
+    tryVerify(function() { return composer.activeFocus })
+    composer.text = ""
+    keyClick(Qt.Key_A)
+    compare(composer.text, "a")
+  }
+
   function test_the_header_counts_unread_and_clears_on_request() {
     var dropdown = openDropdown()
     var badge = findChild(dropdown, "notificationBadge")

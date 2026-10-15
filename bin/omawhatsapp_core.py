@@ -335,7 +335,7 @@ def valid_shortcuts(value: Any) -> bool:
                 return False
             if seq == "Escape" and name not in {"back", "viewerClose"}:
                 return False
-            if SHORTCUT_ACTIONS[name]["scope"] in {"window", "composer"} and not (
+            if SHORTCUT_ACTIONS[name]["scope"] in {"window", "composer", "forward"} and not (
                     re.search(r"(?:Ctrl|Alt|Meta)\+", seq) or re.search(r"(?:^|\+)F[0-9]+$", seq)
                     or (name == "send" and seq == "Enter")):
                 return False
@@ -753,7 +753,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 # Bumped with manifest.json (scripts/test checks it). The app compares it with
 # the plugin it loaded: an update that replaced only the plugin says so.
-HELPER_VERSION = "0.17.0"  # x-release-please-version
+HELPER_VERSION = "0.17.1"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts

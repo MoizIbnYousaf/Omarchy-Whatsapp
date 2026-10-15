@@ -230,7 +230,7 @@ capture. Tab moves between controls and into the save/cancel buttons.
 Bindings apply immediately to every account and every open app/mini-client
 window on this device, persist privately, and survive upgrades. Media viewer
 and forwarding bindings have their own contexts. Ordinary letters navigate
-only when you are not typing. Writing and window actions require a modifier
+only when you are not typing. Writing, forwarding and window actions require a modifier
 or function key, so assigning a shortcut cannot turn ordinary typing into a
 send or another action. Copy, cut, undo, select-all, Tab navigation, and dialog
 confirmation/cancellation retain their standard behavior. Ctrl+B retains its
