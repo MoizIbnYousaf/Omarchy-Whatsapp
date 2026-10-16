@@ -1167,12 +1167,12 @@ Rectangle {
           }
         }
         Text {
+          textFormat: Text.PlainText
           id: linkError
           objectName: "settingsLinkError"
           visible: text !== ""
           width: parent.width
           wrapMode: Text.Wrap
-          textFormat: Text.PlainText
           color: settings.urgent
           font.family: settings.fontFamily
           font.pixelSize: Style.font.caption
