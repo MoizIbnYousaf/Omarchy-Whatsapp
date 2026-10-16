@@ -74,7 +74,7 @@ jobs:
     container: archlinux:base
     steps:
       - name: Install build prerequisites
-        run: pacman -Syu --noconfirm git go gcc python
+        run: pacman -Syu --noconfirm git go gcc python shadow util-linux
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Check out audited dependency source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -84,6 +84,8 @@ jobs:
           path: .wacli-source
       - name: Test and build the private input extension
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE/.wacli-source"
-          python scripts/build-private-wacli .wacli-source /tmp/wacli-private --test
-          python tests/private_wacli_smoke.py /tmp/wacli-private
+          # Permission regressions must run as an ordinary Unix account.
+          useradd --create-home --uid 1001 oma-ci
+          chown -R oma-ci:oma-ci "$GITHUB_WORKSPACE"
+          runuser -u oma-ci -- python scripts/build-private-wacli .wacli-source /tmp/wacli-private --test
+          runuser -u oma-ci -- python tests/private_wacli_smoke.py /tmp/wacli-private
