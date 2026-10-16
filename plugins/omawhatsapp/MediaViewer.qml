@@ -333,7 +333,7 @@ FocusScope {
         } else userPaused = !userPaused
       }
       onMediaIdentityChanged: userPaused = false
-      AnimatedImage {
+      SafeAnimatedImage {
         id: animation
         objectName: "viewerAnimatedMediaSurface"
         anchors.fill: parent

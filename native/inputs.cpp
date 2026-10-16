@@ -16,6 +16,11 @@
 #include <QtQuick/private/qquicktextcontrol_p.h>
 #include <QtQuick/private/qquicktextcontrol_p_p.h>
 #include <functional>
+#include <QQuickPaintedItem>
+#include <QImageReader>
+#include <QPainter>
+#include <QFileInfo>
+#include <memory>
 
 namespace {
 constexpr qsizetype byteLimit = 1024 * 1024;
@@ -269,12 +274,134 @@ signals:
  void clipboardCapabilityChanged();
 };
 
+// Own frame advancement rather than QQuickAnimatedImage/QMovie's recursive
+// finished-signal restart path. Every decode is separated by an event-loop turn.
+class SafeAnimatedImage : public QQuickPaintedItem {
+ Q_OBJECT
+ QML_NAMED_ELEMENT(AnimatedImage)
+ QML_ADDED_IN_VERSION(6, 0)
+ Q_PROPERTY(QUrl source READ source WRITE setSource NOTIFY sourceChanged)
+ Q_PROPERTY(bool mipmap READ mipmap WRITE setMipmap)
+ Q_PROPERTY(bool playing READ playing WRITE setPlaying NOTIFY playingChanged)
+ Q_PROPERTY(bool cache MEMBER cache)
+ Q_PROPERTY(bool asynchronous MEMBER asynchronous)
+ Q_PROPERTY(int fillMode MEMBER fillMode NOTIFY fillModeChanged)
+ Q_PROPERTY(int status READ status NOTIFY statusChanged)
+ Q_PROPERTY(int frameCount READ frameCount NOTIFY frameCountChanged)
+ Q_PROPERTY(int currentFrame READ currentFrame NOTIFY currentFrameChanged)
+ Q_PROPERTY(QSize sourceSize READ sourceSize NOTIFY sourceSizeChanged)
+ QUrl url;
+ std::unique_ptr<QImageReader> reader;
+ QImage frame;
+ QTimer advance;
+ bool requested = true, failed = false;
+ int state = 0, count = 0, index = -1, delay = 100;
+ QSize dimensions;
+ quint64 generation=0;
+ void setStatus(int value) { if(state!=value){state=value;emit statusChanged();} }
+ void fail() { failed=true;advance.stop();reader.reset();frame={};update();setStatus(3); }
+ bool openReader() {
+   const auto token=generation;
+   // Quickshell resolves bundled demo assets through its local qs: scheme.
+   const QString path=url.isLocalFile()?url.toLocalFile():
+     (url.scheme()==QStringLiteral("qs") && url.host().isEmpty()?url.path():QString());
+   if(path.isEmpty() || !QFileInfo(path).isAbsolute())return false;
+   QFileInfo info(path);
+   if(!info.isFile() || info.size()>64*1024*1024) return false;
+   auto nextReader=std::make_unique<QImageReader>(path);
+   nextReader->setAutoTransform(true);
+   auto size=nextReader->size();
+   if(size.isEmpty() || qint64(size.width())*size.height()>64*1024*1024) return false;
+   if(size.width()>2048 || size.height()>2048)
+     nextReader->setScaledSize(size.scaled(2048,2048,Qt::KeepAspectRatio));
+   int nextCount=qMax(1,nextReader->imageCount());
+   bool sizeChanged=dimensions!=size, countChanged=count!=nextCount;
+   dimensions=size;count=nextCount;index=-1;reader=std::move(nextReader);
+   if(sizeChanged)emit sourceSizeChanged();
+   if(generation!=token)return false;
+   if(countChanged)emit frameCountChanged();
+   return generation==token;
+ }
+ void decode() {
+   const auto token=generation;
+   if(!reader || failed) return;
+   QImage next=reader->read();
+   if(next.isNull()){fail();return;}
+   frame=next; ++index; delay=qBound(20,reader->nextImageDelay(),60000);
+   emit currentFrameChanged();
+   if(generation!=token)return;
+   update();setStatus(1);
+   if(generation!=token)return;
+   if(requested && count>1) advance.start(delay);
+ }
+ void tick() {
+   const auto token=generation;
+   if(!requested || failed || !reader) return;
+   if(index+1>=count && !openReader()) {
+     if(generation==token)fail();
+     return;
+   }
+   if(generation==token)decode();
+ }
+public:
+ bool cache=true, asynchronous=true;
+ int fillMode=1;
+ explicit SafeAnimatedImage(QQuickItem *parent=nullptr):QQuickPaintedItem(parent){
+   advance.setSingleShot(true);
+   connect(&advance,&QTimer::timeout,this,[this]{tick();});
+ }
+ QUrl source() const{return url;}
+ void setSource(const QUrl &value){
+   if(url==value)return;
+   const auto token=++generation;
+   url=value;advance.stop();reader.reset();frame={};failed=false;index=-1;
+   if(count){count=0;emit frameCountChanged();}
+   if(generation!=token)return;
+   if(!dimensions.isEmpty()){dimensions={};emit sourceSizeChanged();}
+   if(generation!=token)return;
+   update();emit sourceChanged();
+   if(generation!=token)return;
+   if(url.isEmpty()){setStatus(0);return;}
+   setStatus(2);
+   // Coalesce source replacements; never decode in a QML property setter.
+   QTimer::singleShot(0,this,[this,token]{
+     if(generation!=token)return;
+     if(!openReader()){if(generation==token)fail();return;}
+     if(generation==token)decode();
+   });
+ }
+ bool playing()const{return requested;}
+ void setPlaying(bool value){
+   if(requested==value)return;
+   requested=value;emit playingChanged();
+   if(!value)advance.stop();
+   else if(reader && !failed && count>1)advance.start(delay);
+ }
+ int status()const{return state;}
+ int frameCount()const{return count;}
+ int currentFrame()const{return index;}
+ QSize sourceSize()const{return dimensions;}
+ void paint(QPainter *p)override{
+   if(frame.isNull())return;
+   p->setRenderHint(QPainter::SmoothPixmapTransform,smooth());
+   QSizeF size=frame.size();
+   if(fillMode==1)size.scale(boundingRect().size(),Qt::KeepAspectRatio);
+   else if(fillMode==2)size.scale(boundingRect().size(),Qt::KeepAspectRatioByExpanding);
+   else size=boundingRect().size();
+   QRectF target(QPointF((width()-size.width())/2,(height()-size.height())/2),size);
+   p->setClipRect(boundingRect());p->drawImage(target,frame);
+ }
+signals:
+ void sourceChanged();void playingChanged();void fillModeChanged();
+ void statusChanged();void frameCountChanged();void currentFrameChanged();void sourceSizeChanged();
+};
+
 class InputsPlugin : public QQmlExtensionPlugin {
  Q_OBJECT
  Q_PLUGIN_METADATA(IID QQmlExtensionInterface_iid)
 public:
  void registerTypes(const char *) override {
-   qmlRegisterTypesAndRevisions<SafeTextField, SafeTextArea, SafeTextEdit>("OmaWhatsApp.Inputs", 6);
+   qmlRegisterTypesAndRevisions<SafeTextField, SafeTextArea, SafeTextEdit, SafeAnimatedImage>("OmaWhatsApp.Inputs", 6);
  }
 };
 #include "inputs.moc"

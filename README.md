@@ -83,8 +83,9 @@ omarchy plugin add https://github.com/MoizIbnYousaf/Omarchy-Whatsapp --enable
 
 The native clipboard-safe editors build locally against your installed Qt on first launch (and rebuild after a Qt update). No code is downloaded during that build. If the compiler or matching Qt headers are unavailable, the app keeps its editors unloaded and reports the problem.
 
-That is all on the command line. The first time the app opens it walks you
-through the rest:
+For sending and other mutations, also install the verified privacy-enabled
+wacli asset described under [Private command transport](#private-command-transport).
+The first time the app opens it walks you through the rest:
 
 1. **Set it up on this computer.** One click adds, in your home folder only,
    the background sync (a sandboxed user service), the `omawhatsapp` command,
@@ -95,7 +96,8 @@ through the rest:
 **Requirements.** Omarchy 4 (Quattro) and
 [wacli](https://github.com/openclaw/wacli) 0.17.1 or newer (tested with
 0.17.1, 0.18.3 and 0.19.0). The AUR `wacli-bin` package installs the official
-release, byte for byte the one the tests run against; a wacli of your own at
+release used by the read-compatibility tests. Sending and other mutations now
+require the accompanying privacy-enabled 0.19.0 build; a wacli of your own at
 `~/.local/bin/wacli` is used first. Choosing files to attach needs `zenity`,
 which the app offers to install the first time it is missing. Everything else
 comes with Omarchy.
@@ -127,13 +129,14 @@ them: anything you edited stays, and the app tells you which.
 
 ## wacli: official and richer builds
 
-Everything above works with official wacli releases. A few extras need wacli
-additions that are not in an official release yet. The app detects them and
-turns each one on by itself:
+Local reading works with the supported official wacli releases. Sending and
+other mutations require the privacy input extension described below. A few
+optional extras need additional wacli features; the app detects those separately:
 
 | Feature | Official wacli | With the additions |
 |---|---|---|
-| Chats, sending, media, groups, notifications, several accounts | ✓ | ✓ |
+| Local chats, cached media, notifications, several accounts | ✓ | ✓ |
+| Sending, edits and other mutations | Privacy extension required | Privacy extension required |
 | Showing the contact that you are typing | ✓ | ✓ |
 | Ticks for sent, delivered and read | no tick shown | ✓ |
 | A contact's online, last seen and typing | not shown | ✓ |
@@ -194,3 +197,30 @@ OmaWhatsApp is independent and not affiliated with WhatsApp or Meta.
 ## License
 
 [MIT](LICENSE).
+
+### Private command transport
+
+From 0.18.1, sending, editing, captions and other mutation commands require the
+OmaWhatsApp privacy-enabled **wacli 0.19.0** build. It keeps private command
+arguments in a bounded stdin pipe instead of the Unix process command line.
+This is a small maintained extension of upstream wacli, not an upstream release.
+An ordinary older binary still supports local reads; the app refuses affected
+operations with an upgrade message and never falls back to exposed arguments.
+
+Download the `wacli_0.19.0_omawhatsapp.1_linux_amd64.tar.gz` asset and
+`checksums.txt` from the same 0.18.1 GitHub release, verify the archive against
+the checksum file, extract it to a temporary directory, then install its `wacli`
+executable to `~/.local/bin/wacli`. Check `wacli --private-args-version` reports
+`protocol: 1` and `max_bytes: 65536`. This asset is for Linux x86-64; other
+architectures can build from the pinned source using the instructions in
+[dependencies/README.md](dependencies/README.md).
+
+Restart the app after upgrading. No relinking, account migration or chat-store
+change is required. Package-manager upgrades replacing wacli with an ordinary
+upstream build will safely disable these operations until the private build is
+restored. No binary is downloaded or installed automatically by the app.
+
+Animated GIF/WebP surfaces now use a frame reader instead of Qt's recursive
+movie restart path. Frames are limited to 2048 pixels on their longest edge;
+source files over 64 MiB or images over 64 megapixels fail safely. The original
+file is not modified. Malformed images display the existing unavailable state.

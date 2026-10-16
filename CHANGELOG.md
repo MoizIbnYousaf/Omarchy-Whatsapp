@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.1 — 2026-10-16
+
+- Keep outgoing message text, new-chat messages, edits, captions and all other mutation arguments out of process command lines. Send the complete command over a bounded private stdin protocol to the accompanying privacy-enabled wacli 0.19.0 build. Older binaries fail closed for these operations; local reads remain available.
+- Replace native Qt AnimatedImage/QMovie surfaces with a local, bounded frame reader. Advance GIF/WebP frames by timer, keep only one decoded frame, stop on decode errors, and avoid the recursive Qt movie signal path seen in shared-shell crashes. Apply this to stickers, the picker, timeline/album previews and the viewer.
+- Preserve the 0.18.0 clipboard protections. Add process-boundary, deadline, account-routing, malformed-animation and repeated-preview regression coverage. Thanks to HANCORE-linux for identifying the outgoing-message argv exposure.
+
 ## 0.18.0 (2026-10-16)
 
 - Protect every text editor from Qt’s automatic foreign-clipboard reads: full-app and mini-client search, composers, settings, emoji search and all dialogs use native clipboard-safe controls. Normal Unicode input, IME, selection and undo remain native.

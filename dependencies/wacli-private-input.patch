@@ -1,0 +1,136 @@
+diff --git i/cmd/wacli/main.go w/cmd/wacli/main.go
+index f83b8e8..257676f 100644
+--- i/cmd/wacli/main.go
++++ w/cmd/wacli/main.go
+@@ -3,0 +4 @@ import (
++	"fmt"
+@@ -14,0 +16,4 @@ func main() {
++	if len(os.Args) == 2 && os.Args[1] == "--private-args-version" {
++		fmt.Println(`{"protocol":1,"max_bytes":65536}`)
++		return
++	}
+@@ -16 +21,9 @@ func main() {
+-	if err := execute(os.Args[1:]); err != nil {
++	args, private, err := readPrivateArgs(os.Args[1:], os.Stdin)
++	if err != nil {
++		fmt.Fprintln(os.Stderr, "Invalid private command input.")
++		os.Exit(1)
++	}
++	if private {
++		privateInputMode = true
++	}
++	if err := execute(args); err != nil {
+diff --git i/cmd/wacli/private_args.go w/cmd/wacli/private_args.go
+new file mode 100644
+index 0000000..9d4f815
+--- /dev/null
++++ w/cmd/wacli/private_args.go
+@@ -0,0 +1,52 @@
++package main
++
++import (
++	"encoding/json"
++	"errors"
++	"io"
++	"strings"
++	"time"
++	"unicode/utf8"
++)
++
++// Private argument transport v1. The OS argv contains only the protocol flag.
++// Normal CLI parsing and all authorization/locking remain in execute().
++var privateInputMode bool
++
++const privateArgsFlag = "--private-args-stdin"
++const privateArgsLimit = 65536
++
++func readPrivateArgs(args []string, input io.Reader) ([]string, bool, error) {
++	if len(args) != 1 || args[0] != privateArgsFlag {
++		return args, false, nil
++	}
++	type result struct {
++		data []byte
++		err  error
++	}
++	done := make(chan result, 1)
++	go func() { data, err := io.ReadAll(io.LimitReader(input, privateArgsLimit+1)); done <- result{data, err} }()
++	var data []byte
++	select {
++	case r := <-done:
++		if r.err != nil {
++			return nil, true, errors.New("private input read failed")
++		}
++		data = r.data
++	case <-time.After(3 * time.Second):
++		return nil, true, errors.New("private input timed out")
++	}
++	if len(data) > privateArgsLimit || !utf8.Valid(data) {
++		return nil, true, errors.New("invalid private input")
++	}
++	var decoded []string
++	if json.Unmarshal(data, &decoded) != nil || len(decoded) == 0 || len(decoded) > 256 {
++		return nil, true, errors.New("invalid private command")
++	}
++	for _, arg := range decoded {
++		if strings.ContainsRune(arg, 0) || arg == privateArgsFlag || arg == "--private-args-version" {
++			return nil, true, errors.New("invalid private argument")
++		}
++	}
++	return decoded, true, nil
++}
+diff --git i/cmd/wacli/private_args_test.go w/cmd/wacli/private_args_test.go
+new file mode 100644
+index 0000000..cb04c04
+--- /dev/null
++++ w/cmd/wacli/private_args_test.go
+@@ -0,0 +1,32 @@
++package main
++
++import (
++	"strings"
++	"testing"
++)
++
++func TestPrivateArgs(t *testing.T) {
++	for _, tc := range []struct {
++		name, input string
++		valid       bool
++	}{
++		{"unicode", `["send","text","--message","Grüße 世界\nline"]`, true},
++		{"empty", `[]`, false}, {"object", `{}`, false}, {"null", `null`, false},
++		{"trailing", `["version"] []`, false}, {"nul", `["a\u0000"]`, false},
++		{"nested", `["--private-args-stdin"]`, false}, {"oversize", strings.Repeat(" ", 65537), false},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			args, private, err := readPrivateArgs([]string{privateArgsFlag}, strings.NewReader(tc.input))
++			if !private || (err == nil) != tc.valid {
++				t.Fatalf("private=%v err=%v", private, err)
++			}
++			if tc.valid && len(args) != 4 {
++				t.Fatal("arguments lost")
++			}
++		})
++	}
++	args, private, err := readPrivateArgs([]string{"--version"}, strings.NewReader(""))
++	if err != nil || private || args[0] != "--version" {
++		t.Fatal("ordinary CLI changed")
++	}
++}
+diff --git i/cmd/wacli/root.go w/cmd/wacli/root.go
+index bfe8f33..018e169 100644
+--- i/cmd/wacli/root.go
++++ w/cmd/wacli/root.go
+@@ -4,0 +5 @@ import (
++	"errors"
+@@ -112,0 +114,11 @@ func writeRootError(flags rootFlags, err error) {
++	if privateInputMode {
++		// Never reflect parser errors or content-bearing remote errors. The
++		// exact lock classification is retained for the caller's existing
++		// pre-dispatch lock handoff; other failures are never retried.
++		message := "Private WhatsApp command failed."
++		if errors.Is(err, lock.ErrLocked) {
++			message = "store is locked"
++		}
++		_ = out.WriteError(os.Stderr, flags.asJSON, fmt.Errorf("%s", message))
++		return
++	}

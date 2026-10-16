@@ -756,7 +756,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 # Bumped with manifest.json (scripts/test checks it). The app compares it with
 # the plugin it loaded: an update that replaced only the plugin says so.
-HELPER_VERSION = "0.18.0"  # x-release-please-version
+HELPER_VERSION = "0.18.1"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
@@ -1122,11 +1122,14 @@ def run_bounded(
     stdout_limit: int,
     stderr_limit: int = MAX_PROCESS_ERROR,
     text: bool = True,
+    input_bytes: bytes | None = None,
 ) -> subprocess.CompletedProcess[Any]:
     """Run a child while draining both pipes under hard in-memory byte caps."""
+    if input_bytes is not None and len(input_bytes) > 65_536:
+        raise OmaWhatsAppError("Private command input is too large.")
     process = subprocess.Popen(
         list(command),
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE if input_bytes is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         close_fds=True,
@@ -1146,6 +1149,13 @@ def run_bounded(
         for descriptor in streams:
             os.set_blocking(descriptor, False)
             selector.register(descriptor, selectors.EVENT_READ)
+        pending_input = memoryview(input_bytes or b"")
+        if process.stdin is not None:
+            if pending_input:
+                os.set_blocking(process.stdin.fileno(), False)
+                selector.register(process.stdin.fileno(), selectors.EVENT_WRITE)
+            else:
+                process.stdin.close()
         while selector.get_map():
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -1153,8 +1163,20 @@ def run_bounded(
             events = selector.select(remaining)
             if not events:
                 raise subprocess.TimeoutExpired(list(command), timeout)
-            for key, _ in events:
+            for key, mask in events:
                 descriptor = int(key.fd)
+                if mask & selectors.EVENT_WRITE:
+                    try:
+                        written = os.write(descriptor, pending_input[:4096])
+                        pending_input = pending_input[written:]
+                    except BrokenPipeError:
+                        pending_input = pending_input[len(pending_input):]
+                    except BlockingIOError:
+                        continue
+                    if not pending_input:
+                        selector.unregister(descriptor)
+                        process.stdin.close()
+                    continue
                 stream, limit, output = streams[descriptor]
                 try:
                     chunk = os.read(descriptor, min(65_536, limit - len(output) + 1))
@@ -1170,12 +1192,14 @@ def run_bounded(
                         f"Child output exceeded its {limit}-byte limit"
                     )
         returncode = process.wait(timeout=max(0.01, deadline - time.monotonic()))
-    except (ProcessOutputLimitExceeded, subprocess.TimeoutExpired):
+    except BaseException:
         process.kill()
         process.wait()
         raise
     finally:
         selector.close()
+        if process.stdin is not None and not process.stdin.closed:
+            process.stdin.close()
         for stream, _, _ in streams.values():
             if not stream.closed:
                 stream.close()
@@ -2119,6 +2143,24 @@ class Backend:
             return False
         return True
 
+    def _require_private_transport(self) -> None:
+        """Read-only capability probe; old binaries never receive private argv."""
+        info = self.wacli.stat()
+        identity = (str(self.wacli), info.st_ino, info.st_size, info.st_mtime_ns)
+        if getattr(self, "_private_transport_identity", None) == identity:
+            return
+        try:
+            result = run_bounded([str(self.wacli), "--private-args-version"],
+                                 timeout=5, stdout_limit=1024, stderr_limit=1024)
+            capability = json.loads(result.stdout)
+            supported = result.returncode == 0 and capability.get("protocol") == 1 \
+                and capability.get("max_bytes") == 65536
+        except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired, ProcessOutputLimitExceeded):
+            supported = False
+        if not supported:
+            raise OmaWhatsAppError("This action requires the privacy-enabled wacli build. See README → Private command transport; no message was sent.")
+        self._private_transport_identity = identity
+
     def _run(
         self,
         args: list[str],
@@ -2127,18 +2169,26 @@ class Backend:
         stdout_limit: int = MAX_WACLI_OUTPUT,
         stderr_limit: int = MAX_PROCESS_ERROR,
         account: Any = ACTIVE_ACCOUNT,
+        private_args: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         if not self.wacli.is_file() or not os.access(self.wacli, os.X_OK):
             raise OmaWhatsAppError("wacli is not installed.")
         if account is ACTIVE_ACCOUNT:
             account = self.active
         scope = account.cli_args if account is not None else []
+        private_options = {}
+        command = [str(self.wacli), *scope, *args]
+        if private_args:
+            self._require_private_transport()
+            private_options["input_bytes"] = json.dumps(command[1:], ensure_ascii=False).encode("utf-8")
+            command = [str(self.wacli), "--private-args-stdin"]
         try:
             return run_bounded(
-                [str(self.wacli), *scope, *args],
+                command,
                 timeout=timeout,
                 stdout_limit=stdout_limit,
                 stderr_limit=stderr_limit,
+                **private_options,
             )
         except ProcessOutputLimitExceeded as exc:
             raise OmaWhatsAppError("WhatsApp returned too much data.") from exc
@@ -2909,6 +2959,7 @@ class Backend:
         stdout_limit: int = MAX_WACLI_OUTPUT,
         stderr_limit: int = MAX_PROCESS_ERROR,
         account: Any = ACTIVE_ACCOUNT,
+        private_args: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         """Run after stopping sync, tolerating its bounded lock-release delay."""
         result: subprocess.CompletedProcess[str] | None = None
@@ -2916,6 +2967,7 @@ class Backend:
             result = self._run(
                 args, timeout=timeout, stdout_limit=stdout_limit,
                 stderr_limit=stderr_limit, account=account,
+                **({"private_args": True} if private_args else {}),
             )
             if not self._locked(result) or attempt == 4:
                 return result
@@ -2931,6 +2983,7 @@ class Backend:
         stdout_limit: int = MAX_WACLI_OUTPUT,
         stderr_limit: int = MAX_PROCESS_ERROR,
         account: Any = ACTIVE_ACCOUNT,
+        private_args: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         lifecycle_account = (
             self.active if account is ACTIVE_ACCOUNT or account is None else account
@@ -2945,6 +2998,7 @@ class Backend:
         result = self._run(
             args, timeout=timeout, stdout_limit=stdout_limit,
             stderr_limit=stderr_limit, account=account,
+            **({"private_args": True} if private_args else {}),
         )
         if not self._locked(result):
             return result
@@ -2956,6 +3010,7 @@ class Backend:
             result = self._run(
                 args, timeout=timeout, stdout_limit=stdout_limit,
                 stderr_limit=stderr_limit, account=account,
+                **({"private_args": True} if private_args else {}),
             )
             if not self._locked(result):
                 return result
@@ -2965,6 +3020,7 @@ class Backend:
                 result = self._run_after_sync_yield(
                     args, timeout=timeout, stdout_limit=stdout_limit,
                     stderr_limit=stderr_limit, account=account,
+                    **({"private_args": True} if private_args else {}),
                 )
             except BaseException as exc:
                 operation_error = exc
@@ -2994,7 +3050,7 @@ class Backend:
 
     def _write(self, args: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
         return self._mutate(
-            args, timeout=timeout, require_online=True
+            args, timeout=timeout, require_online=True, private_args=True
         )
 
     def _profile_picture_metadata(

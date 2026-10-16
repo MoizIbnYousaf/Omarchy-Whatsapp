@@ -213,7 +213,7 @@ Item {
             color: Qt.rgba(root.background.r, root.background.g, root.background.b, 0.72)
             clip: true
 
-            AnimatedImage {
+            SafeAnimatedImage {
               id: albumImage
               visible: root.albumItemIsImage(albumTile.modelData)
                 && String(albumTile.modelData.local_path || "") !== ""
@@ -339,7 +339,7 @@ Item {
     id: stickerComponent
     Item {
       implicitHeight: Style.space(160)
-      AnimatedImage {
+      SafeAnimatedImage {
         id: stickerImage
         objectName: "stickerSurface"
         width: Style.space(160)
@@ -369,7 +369,7 @@ Item {
     Item {
       implicitHeight: root.previewHeight
       clip: true
-      AnimatedImage {
+      SafeAnimatedImage {
         id: animatedPreview
         objectName: "animatedMediaSurface"
         anchors.fill: parent

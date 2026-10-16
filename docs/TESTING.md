@@ -183,3 +183,20 @@ The module is built into a private cache keyed by source and host Qt. The
 service must successfully load it before loading App.qml or Dropdown.qml.
 Compiler/cache errors must leave editors unloaded and show a clear status,
 never fall back to ordinary Qt editors.
+
+## Private commands and safe animations
+
+`test_private_transport.py` checks concurrent bounded stdin/stdout, early child
+exit, stalled readers, process argv/environment inspection, old-binary refusal
+and exact account scope through lock handoff. The synthetic MCP recorder now
+reads the same stdin protocol. `private_wacli_smoke.py BINARY` exercises the real
+patched dependency with read-only dispatch and no store or network access.
+The CI private-transport job builds the bundled patch against the exact audited
+upstream commit and runs plain/FTS dependency tests and vet.
+
+`tst_safe_animation.qml` plays synthetic multi-frame GIF/WebP files, pauses and
+resumes them, loads malformed files, replaces sources, and repeatedly creates
+and destroys stopped previews. `test_animation_inventory.py` prevents native
+AnimatedImage from reappearing in any app surface. All of these run without
+private media. Manual smoke testing should include repeated demo chat changes,
+media viewer opening/closing, and sticker playback in the installed shell.

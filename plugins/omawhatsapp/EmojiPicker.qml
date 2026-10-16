@@ -162,7 +162,7 @@ Popup {
         height: stickerGrid.cellHeight
         radius: Style.cornerRadius
         color: stickerHover.hovered ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
-        AnimatedImage {
+        SafeAnimatedImage {
           anchors.fill: parent
           anchors.margins: Style.space(4)
           source: "file://" + String(modelData.path || "").split("/").map(function(part) {

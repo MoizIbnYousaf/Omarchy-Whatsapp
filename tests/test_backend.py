@@ -3525,11 +3525,13 @@ sys.exit(0)
             [], 0, '{"success":true,"data":{}}', ""
         )
         with mock.patch.object(
-                backend_module, "run_bounded", return_value=completed) as run:
+                backend_module, "run_bounded", return_value=completed) as run, \
+                mock.patch.object(backend_module.Backend, "_require_private_transport"):
             backend.send("shared@s.whatsapp.net", "synthetic")
             backend.chat_action("shared@s.whatsapp.net", "read")
         for invocation in run.call_args_list:
-            self.assertEqual(invocation.args[0][:3], [
+            command = [str(self.wacli), *json.loads(invocation.kwargs["input_bytes"])]
+            self.assertEqual(command[:3], [
                 str(self.wacli), "--store", str(legacy.resolve())
             ])
 
@@ -3600,9 +3602,11 @@ sys.exit(0)
     def test_every_wacli_command_carries_its_account(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true,"data":{}}', "")
         self.backend.use_account("home")
-        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
+        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run, \
+                mock.patch.object(backend_module.Backend, "_require_private_transport"):
             self.backend.send("family@g.us", "hello")
-        command = run.call_args.args[0]
+        self.assertEqual(run.call_args.args[0], [str(self.wacli), "--private-args-stdin"])
+        command = [str(self.wacli), *json.loads(run.call_args.kwargs["input_bytes"])]
         self.assertEqual(command[:3], [str(self.wacli), "--account", "home"])
         self.assertIn("--to", command)
 
@@ -3780,9 +3784,11 @@ sys.exit(0)
         }
         with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "not an exact chat"):
             self.backend.transport(dict(request, account="work"))
-        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run:
+        with mock.patch.object(backend_module, "run_bounded", return_value=completed) as run, \
+                mock.patch.object(backend_module.Backend, "_require_private_transport"):
             self.backend.transport(dict(request, account="home"))
-        command = run.call_args.args[0]
+        self.assertEqual(run.call_args.args[0], [str(self.wacli), "--private-args-stdin"])
+        command = [str(self.wacli), *json.loads(run.call_args.kwargs["input_bytes"])]
         self.assertEqual(command.count("--account"), 1)
         self.assertEqual(command[command.index("--account") + 1], "home")
 

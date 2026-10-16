@@ -803,6 +803,11 @@ class SecondWaveTests(ToolCase):
 FAKE_WACLI = r'''#!/usr/bin/env python3
 import json, os, sys
 arguments = sys.argv[1:]
+if arguments == ["--private-args-version"]:
+    print(json.dumps({"protocol": 1, "max_bytes": 65536}))
+    raise SystemExit(0)
+if arguments == ["--private-args-stdin"]:
+    arguments = json.load(sys.stdin)
 with open(os.environ["FAKE_WACLI_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps(arguments) + "\n")
 if arguments and arguments[0] in ("version", "--version"):

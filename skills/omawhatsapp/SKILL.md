@@ -28,6 +28,14 @@ invoking `wacli` directly.
   Updates run `omarchy plugin update` in a terminal the user confirms; they
   need separate approval and are never started by the skill.
 
+## Private command transport
+
+Mutation commands require the accompanying privacy-enabled wacli build. The
+helper capability-checks it and passes complete arguments through bounded
+stdin. If the helper reports that the build is missing, stop and explain the
+upgrade requirement from the README; never bypass it by running private
+message text through ordinary wacli command-line arguments.
+
 ## Safety boundary
 
 - Local reads are read-only. Never inspect `session.db`, write `wacli.db`, or
