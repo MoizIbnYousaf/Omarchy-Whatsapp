@@ -1140,9 +1140,11 @@ Rectangle {
         }
         Row {
           spacing: Style.space(8)
-          TextField {
+          AccountNameField {
             id: accountName
             objectName: "settingsLinkName"
+            helper: settings.service && settings.service.helper ? settings.service.helper : "omawhatsapp"
+            onPasteFailed: message => { linkError.text = message }
             width: Style.space(220)
             placeholderText: "Account name, e.g. work"
             foreground: settings.foreground
@@ -1158,8 +1160,22 @@ Rectangle {
             accent: settings.accent
             fontFamily: settings.fontFamily
             bordered: true
-            onClicked: if (settings.runRow(row, accountName.text.trim())) accountName.text = ""
+            onClicked: if (settings.runRow(row, accountName.text.trim())) {
+              accountName.reset()
+              linkError.text = ""
+            }
           }
+        }
+        Text {
+          id: linkError
+          objectName: "settingsLinkError"
+          visible: text !== ""
+          width: parent.width
+          wrapMode: Text.Wrap
+          textFormat: Text.PlainText
+          color: settings.urgent
+          font.family: settings.fontFamily
+          font.pixelSize: Style.font.caption
         }
       }
     }

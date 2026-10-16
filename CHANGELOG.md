@@ -2,7 +2,7 @@
 
 ## 0.17.2 (2026-10-15)
 
-- Replace the editable account-name field with a bounded identifier control. Its native editor stays read-only, preventing Qt 6.12 from acquiring foreign clipboard text automatically. Typing, selection, copy/cut, undo/redo and explicit paste remain available.
+- Replace both editable account-name fields (the account switcher and Settings → Accounts) with one bounded identifier control. Its native editor stays read-only, preventing Qt 6.12 from acquiring foreign clipboard text automatically. Typing, selection, copy/cut, undo/redo and explicit paste remain available.
 - Route account-name paste through a separate bounded helper read (256 bytes, three-second total deadline), validate the 64-character ASCII identifier before returning it, and discard stale paste results. No new runtime dependencies or WhatsApp operations. Thanks to @HANCORE-linux for reporting the native clipboard path.
 
 ## 0.17.1 (2026-10-15)

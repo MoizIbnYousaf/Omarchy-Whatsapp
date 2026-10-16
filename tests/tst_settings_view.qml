@@ -293,6 +293,27 @@ TestCase {
     compare(last(h.service).args, ["account_notifications", false, "home"])
   }
 
+  function test_link_identifier_is_clipboard_safe_and_submits_typed_name() {
+    var h = create()
+    h.view.openSection("accounts")
+    wait(0)
+    var input = findChild(h.view, "settingsLinkName")
+    verify(input !== null)
+    compare(input.readOnly, true)
+    input.forceActiveFocus()
+    tryCompare(input, "activeFocus", true)
+    keyClick("w"); keyClick("o"); keyClick("r"); keyClick("k")
+    compare(input.text, "work")
+    input.applyPaste({ok:false}, input.revision)
+    compare(input.text, "work")
+    verify(findChild(h.view, "settingsLinkError").visible)
+    findChild(h.view, "setting-link").clicked()
+    compare(h.service.accountOperations.linked, "work")
+    compare(input.text, "")
+    compare(input.undoStates.length, 0)
+    compare(input.readOnly, true)
+  }
+
   function test_one_account_has_no_color_or_notification_switch() {
     var h = create()
     h.view.openSection("accounts")
