@@ -155,3 +155,16 @@ cursor, and Shift+Tab reverses the route. `/` opens search from either filters
 or chats; typing there must not move chat selection. Include empty lists,
 Archived when present, live unread-count updates, and a narrow rail with
 overflowing filters; keyboard focus must stay visible and stable.
+
+## Account-name clipboard regression
+
+The release gate builds `tests/clipboard_probe.cpp` with the Qt development
+headers and runs it offscreen. A synthetic QMimeData offer counts native
+payload reads: an ordinary editable field must reproduce the read, while
+AccountNameField must perform zero reads when created, focused, queried for
+canPaste, or notified repeatedly. No desktop clipboard is touched.
+
+`test_account_clipboard.py` uses disposable producer executables to verify the
+256-byte cap, three-second deadline, ASCII/length validation and failure paths.
+`tst_account_name.qml` checks actual typing, selection, editing, undo/redo,
+explicit paste, stale result rejection and preserved input after errors.

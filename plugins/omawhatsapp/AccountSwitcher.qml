@@ -16,6 +16,7 @@ Item {
   required property color urgent
   required property string fontFamily
   property string selectedScope: ""
+  property string helper: "omawhatsapp"
   property bool linkBusy: false
   property bool avatarBusy: false
   property bool allowAccountLink: true
@@ -148,7 +149,7 @@ Item {
       | Controls.Popup.CloseOnPressOutside
     padding: Style.space(14)
     onOpened: {
-      accountName.text = ""
+      accountName.reset()
       validation.text = ""
       accountName.forceActiveFocus()
     }
@@ -180,10 +181,12 @@ Item {
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }
-      TextField {
+      AccountNameField {
         id: accountName
         width: parent.width
         placeholderText: "Account name, e.g. work"
+        helper: root.helper
+        onPasteFailed: message => { validation.text = message }
         foreground: root.foreground
         accent: root.accent
         font.family: root.fontFamily

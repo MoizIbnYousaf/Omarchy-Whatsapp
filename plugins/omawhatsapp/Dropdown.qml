@@ -1181,6 +1181,7 @@ Panel {
 
           AccountSwitcher {
             id: accountSwitcher
+            helper: root.service && root.service.helper ? root.service.helper : "omawhatsapp"
             width: parent.width
             accounts: root.accountEntries
             selectedScope: root.accountScope

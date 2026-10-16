@@ -215,3 +215,11 @@ entire default map. The helper rejects invalid keys, unknown actions and
 context conflicts. This is a local preference write; it does not change the
 Hyprland launcher binding or perform any WhatsApp operation. Prefer the
 Settings → Shortcuts editor for interactive capture and conflict feedback.
+
+## Account-name clipboard
+
+`omawhatsapp paste-account-name` is a local clipboard read, only for an explicit
+paste request. It reads at most 256 bytes within three seconds and returns only
+a valid ASCII account identifier (1–64 characters). It does not select an
+account, recover services, link a device, or send anything to WhatsApp. Never
+invoke it to inspect the clipboard without a user request.

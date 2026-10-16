@@ -756,7 +756,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 # Bumped with manifest.json (scripts/test checks it). The app compares it with
 # the plugin it loaded: an update that replaced only the plugin says so.
-HELPER_VERSION = "0.17.1"  # x-release-please-version
+HELPER_VERSION = "0.17.2"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
@@ -6470,6 +6470,28 @@ class Backend:
         return {"ok": True, "kind": "open-media", "opener": opener}
 
     @staticmethod
+    def paste_account_name() -> dict[str, Any]:
+        """Read only on an explicit paste; never invoke Qt's clipboard reader."""
+        if not WL_PASTE.is_file():
+            raise OmaWhatsAppError("Clipboard support is not installed.")
+        try:
+            result = run_bounded(
+                [str(WL_PASTE), "--no-newline", "--type", "text/plain"],
+                timeout=3, stdout_limit=256, stderr_limit=1024, text=False,
+            )
+        except (ProcessOutputLimitExceeded, subprocess.TimeoutExpired, OSError) as exc:
+            raise OmaWhatsAppError("The account name could not be pasted.") from exc
+        if result.returncode != 0:
+            raise OmaWhatsAppError("The account name could not be pasted.")
+        try:
+            name = result.stdout.decode("ascii").strip()
+        except UnicodeDecodeError as exc:
+            raise OmaWhatsAppError("Account names use ASCII letters and numbers.") from exc
+        if not ACCOUNT_NAME.fullmatch(name):
+            raise OmaWhatsAppError("Use at most 64 letters, numbers, dots, underscores or hyphens.")
+        return {"ok": True, "kind": "account-name", "text": name}
+
+    @staticmethod
     def _clipboard_types() -> list[str]:
         if not WL_PASTE.is_file():
             raise OmaWhatsAppError("Clipboard support is not installed.")
@@ -7508,6 +7530,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("check-number")
     commands.add_parser("send-new")
     commands.add_parser("paste")
+    commands.add_parser("paste-account-name")
     commands.add_parser("discard-stage")
     commands.add_parser("files")
     commands.add_parser("voice-draft")
@@ -7563,6 +7586,12 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = parser().parse_args()
+    # This local clipboard read must not inspect accounts or recover services.
+    if args.command == "paste-account-name":
+        try:
+            return emit(Backend.paste_account_name())
+        except OmaWhatsAppError as exc:
+            return emit({"ok": False, "error": str(exc)}, 1)
     backend = Backend()
     if args.command != "session-ready":
         try:

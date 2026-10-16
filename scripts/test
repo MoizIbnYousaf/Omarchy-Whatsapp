@@ -7,7 +7,7 @@ set -euo pipefail
 repo_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
-for command_name in make qmllint jq omarchy rg; do
+for command_name in make qmllint jq omarchy rg g++ pkg-config; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "test: missing command: $command_name" >&2
     exit 1
@@ -36,6 +36,11 @@ trap cleanup_test_fixtures EXIT
 python3 tests/write_media_fixtures.py "$media_fixture_root"
 
 make validate
+# This uses only synthetic in-process offers on the offscreen platform. The
+# control must reproduce Qt's eager read, and the account field must avoid it.
+g++ -std=c++17 -fPIC tests/clipboard_probe.cpp -o "$plugin_home/clipboard-probe" \
+  $(pkg-config --cflags --libs Qt6Quick)
+QT_QPA_PLATFORM=offscreen "$plugin_home/clipboard-probe" "$repo_root"
 ./scripts/check-wacli-parity
 
 # What `omarchy plugin add` installs: the repository's files in the plugins
