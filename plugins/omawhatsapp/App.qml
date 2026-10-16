@@ -2090,7 +2090,7 @@ Item {
     }
     function onPasteFailed(message, chatRef, owner) {
       if (!ComposerModel.ownsOperation(owner, "app")) return
-      if (String(chatRef && chatRef.key || "") === root.composerChatKey) composer.paste()
+      if (String(chatRef && chatRef.key || "") === root.composerChatKey) root.showToast(message)
     }
     function onWritingChanged() {
       if (root.service && !root.service.writing && root.queuedSendKey !== "")
@@ -2811,7 +2811,7 @@ Item {
             }
           }
 
-          TextField {
+          SafeTextField {
             id: chatSearchField
             width: parent.width
             height: root.compactRail ? Style.space(30) : Style.space(34)
@@ -3687,7 +3687,7 @@ Item {
                 : root.openMediaBrowser("media")
             }
 
-            TextField {
+            SafeTextField {
               id: messageSearchField
               visible: !root.narrow || root.narrowSearchOpen
               width: root.narrow ? Style.space(190)
@@ -4797,7 +4797,7 @@ Item {
                   contentY = r.y + r.height - height
               }
 
-              TextEdit {
+              SafeTextEdit {
                 id: composer
                 objectName: "composerInput"
                 width: composerFlickable.width - Style.space(12)
@@ -5254,7 +5254,7 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
           }
-          TextField {
+          SafeTextField {
             id: pollQuestion
             width: parent.width
             placeholderText: "Ask something"
@@ -5276,7 +5276,7 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
           }
-          TextArea {
+          SafeTextArea {
             id: pollOptions
             width: parent.width
             height: Math.max(Style.space(130), pollComposer.height - Style.space(250))
@@ -5553,7 +5553,7 @@ Item {
                     HoverHandler { cursorShape: Qt.PointingHandCursor }
                   }
                 }
-                TextField {
+                SafeTextField {
                   id: forwardSearch
                   objectName: "forwardSearch"
                   width: Math.max(Style.space(140), forwardChipFlow.width
@@ -5755,7 +5755,7 @@ Item {
               height: 1
               color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.08)
             }
-            TextField {
+            SafeTextField {
               id: forwardNote
               objectName: "forwardNote"
               width: parent.width
@@ -6028,7 +6028,7 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
           }
-          TextField {
+          SafeTextField {
             id: contactDraftField
             objectName: "contactDraftField"
             anchors.left: parent.left

@@ -16,7 +16,7 @@ manifest:
 
 # Validate every shipped component, including future additions.
 lint:
-	qmllint -I "$(OMARCHY_SHELL_DIR)" $(wildcard plugins/omawhatsapp/*.qml plugins/omawhatsapp/*.js)
+	qmllint -I "$$(./scripts/build-inputs)" -I "$(OMARCHY_SHELL_DIR)" $(wildcard plugins/omawhatsapp/*.qml plugins/omawhatsapp/*.js)
 
 release-check:
 	./scripts/test

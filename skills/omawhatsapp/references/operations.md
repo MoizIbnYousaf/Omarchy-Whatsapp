@@ -223,3 +223,7 @@ paste request. It reads at most 256 bytes within three seconds and returns only
 a valid ASCII account identifier (1–64 characters). It does not select an
 account, recover services, link a device, or send anything to WhatsApp. Never
 invoke it to inspect the clipboard without a user request.
+
+`prepare-inputs` is a local preparation command used by the GUI. It compiles
+the bundled native input module into the private cache for the installed Qt,
+without downloading code, inspecting accounts, or contacting WhatsApp.

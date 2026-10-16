@@ -237,3 +237,23 @@ media viewer, forwarding dialog and their hints resolve against that model.
 Settings suspends full-app actions while keys are recorded. Capturing keys
 never invokes an action; the editor waits for helper success before dismissing,
 and preserves the proposed change on failure. Demo edits stay in memory.
+
+## Clipboard-safe native editors
+
+`SafeTextField`, `SafeTextArea` and `SafeTextEdit` use the small native module in
+`native/inputs.cpp`. Every product editor uses one of these wrappers. The native
+constructors remove only that editor's Qt clipboard-change connection, expose
+clipboard availability without reading its payload, and change read-only state
+without entering Qt's eager clipboard probe. Ordinary input and IME handling
+remain in Qt. Explicit paste uses a child `wl-paste` process, a 1 MiB byte limit,
+a three-second deadline and an editing-generation check. Native middle-button
+paste and native text drops are disabled. Existing attachment drops use the
+app's separately validated staging path.
+
+`prepare-inputs` compiles bundled source locally, without downloading code, into
+a private source/Qt-keyed cache. The module uses Qt's private input API and must
+match the installed Qt; it is rebuilt after Qt changes. The resident service
+loads that module before either application or mini-client loader becomes
+active. A compiler or module failure leaves those loaders inactive and reports
+the error in the bar tooltip. There is no ordinary-editor fallback. The CLI and
+background sync do not depend on this native UI module.

@@ -773,7 +773,7 @@ Panel {
     }
     function onPasteFailed(message, chatRef, owner) {
       if (!ComposerModel.ownsOperation(owner, "dropdown")) return
-      if (AccountModel.sameRef(chatRef, root.currentChatRef())) composer.paste()
+      if (AccountModel.sameRef(chatRef, root.currentChatRef())) root.errorText = message
     }
     function onWritingChanged() {
       if (root.service && !root.service.writing && root.queuedSendKey !== "")
@@ -1142,7 +1142,7 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
             }
-            TextField {
+            SafeTextField {
               id: searchField
               anchors.left: parent.left
               anchors.leftMargin: Style.space(30)
@@ -2236,7 +2236,7 @@ Panel {
                       contentY = r.y + r.height - height
                   }
 
-                  TextEdit {
+                  SafeTextEdit {
                     id: composer
                     objectName: "composerInput"
                     width: composerFlickable.width - Style.space(12)

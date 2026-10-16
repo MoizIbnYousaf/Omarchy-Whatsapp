@@ -457,7 +457,7 @@ Rectangle {
         Row {
           width: parent.width
           spacing: Style.space(6)
-          TextField {
+          SafeTextField {
             id: aliasField
             objectName: "chatDetailsAlias"
             width: parent.width - aliasSave.width - Style.space(6)
@@ -528,7 +528,7 @@ Rectangle {
               }
             }
           }
-          TextField {
+          SafeTextField {
             id: tagField
             objectName: "chatDetailsNewTag"
             width: Style.space(140)

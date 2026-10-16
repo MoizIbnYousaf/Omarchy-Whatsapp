@@ -96,7 +96,7 @@ Column {
     color: Commons.Color.foreground; opacity: 0.65
     font.family: Style.font.family; font.pixelSize: Style.font.bodySmall
   }
-  Ui.TextField {
+  SafeTextField {
     id: search
     objectName: "shortcutSearch"
     width: parent.width

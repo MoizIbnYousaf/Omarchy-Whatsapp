@@ -151,3 +151,10 @@ rather than touching a WhatsApp database directly.
 
 For screenshots, open `omawhatsapp` with `{"demo":true}`. Demo mode contains
 repository-owned sample data and performs no WhatsApp writes.
+
+Text editors do not subscribe to automatic clipboard payload reads. Pasting
+text is an explicit action: a separate process reads at most 1 MiB within three
+seconds, and a result is discarded if its editing target changed. Account IDs
+retain their stricter 256-byte/64-character validation. Failed attachment/text
+reads are reported rather than retried through Qt. Clipboard contents and built
+native modules are never stored in the source repository.

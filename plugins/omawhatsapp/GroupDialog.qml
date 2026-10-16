@@ -207,7 +207,7 @@ Popup {
       anchors.right: parent.right
       anchors.bottom: parent.bottom
 
-      TextField {
+      SafeTextField {
         id: searchField
         objectName: "groupSearch"
         anchors.top: parent.top
@@ -325,7 +325,7 @@ Popup {
       anchors.right: parent.right
       anchors.bottom: parent.bottom
 
-      TextField {
+      SafeTextField {
         id: nameField
         objectName: "groupName"
         anchors.top: parent.top
@@ -381,7 +381,7 @@ Popup {
       anchors.right: parent.right
       anchors.bottom: parent.bottom
 
-      TextField {
+      SafeTextField {
         id: inviteField
         objectName: "groupInvite"
         anchors.top: parent.top

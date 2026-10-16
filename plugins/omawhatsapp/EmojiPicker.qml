@@ -190,7 +190,7 @@ Popup {
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
     }
-    TextField {
+    SafeTextField {
       id: searchField
       objectName: "emojiSearch"
       visible: root.tab === "emoji"

@@ -17,6 +17,7 @@ TestCase {
     Item {
       property int notificationUnreadCount: 3
       property bool railReady: true
+      property bool inputsReady: true
       property bool showUnreadCount: true
       property bool notificationsMuted: false
       property int dropdownRows: 7

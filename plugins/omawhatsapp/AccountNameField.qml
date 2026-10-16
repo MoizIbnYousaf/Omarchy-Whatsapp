@@ -6,7 +6,7 @@ import qs.Ui as Ui
 // editor read-only permanently: even an idle editable TextInput asks the
 // native clipboard for text on dataChanged (before a paste or validation).
 // Navigation/selection/copy remain native; mutations are explicit and bounded.
-Ui.TextField {
+SafeTextField {
   id: root
   objectName: "accountNameField"
   readOnly: true
@@ -17,7 +17,6 @@ Ui.TextField {
   property int revision: 0
   property var undoStates: []
   property var redoStates: []
-  signal pasteFailed(string message)
 
   function reset() {
     pasteProcess.running = false

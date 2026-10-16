@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.0 (2026-10-16)
+
+- Protect every text editor from Qt’s automatic foreign-clipboard reads: full-app and mini-client search, composers, settings, emoji search and all dialogs use native clipboard-safe controls. Normal Unicode input, IME, selection and undo remain native.
+- Explicit text paste is asynchronous, capped at 1 MiB and three seconds, and discarded when the editing target changes. Failed media/text reads no longer trigger an automatic fallback read. Native middle-button and text-drop clipboard paths are disabled.
+- Build the small native input module locally for the installed Qt version; requires gcc and pkgconf. Editors remain unloaded if preparation fails. Thanks to @HANCORE-linux for identifying the remaining search-field path.
+
 ## 0.17.2 (2026-10-15)
 
 - Replace both editable account-name fields (the account switcher and Settings → Accounts) with one bounded identifier control. Its native editor stays read-only, preventing Qt 6.12 from acquiring foreign clipboard text automatically. Typing, selection, copy/cut, undo/redo and explicit paste remain available.

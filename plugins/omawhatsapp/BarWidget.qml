@@ -87,7 +87,7 @@ BarWidget {
 
   Loader {
     id: dropdownLoader
-    active: true
+    active: !!root.oma && root.oma.inputsReady === true
     source: Qt.resolvedUrl("Dropdown.qml")
     visible: false
     onLoaded: {

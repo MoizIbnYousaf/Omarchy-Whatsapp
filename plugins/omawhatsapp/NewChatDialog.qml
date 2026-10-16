@@ -285,7 +285,7 @@ Popup {
       anchors.right: parent.right
       anchors.bottom: parent.bottom
 
-      TextField {
+      SafeTextField {
         id: searchField
         objectName: "newChatSearch"
         anchors.top: parent.top
@@ -559,7 +559,7 @@ Popup {
         ScrollView {
           anchors.fill: parent
           anchors.margins: Style.space(4)
-          TextArea {
+          SafeTextArea {
             id: firstMessage
             objectName: "newChatMessage"
             placeholderText: "First message"

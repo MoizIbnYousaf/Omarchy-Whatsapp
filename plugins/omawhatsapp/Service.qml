@@ -491,6 +491,34 @@ Item {
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.moizibnyousaf.omawhatsapp"
   property string pendingAppPayload: ""
+  property bool inputsReady: false
+  property string inputError: ""
+  property var inputModule: null
+  function loadInputModule(path) {
+    if (!path || String(path).indexOf("/") !== 0) return false
+    try {
+      var url = "file://" + String(path + "/OmaWhatsApp/Inputs").split("/").map(encodeURIComponent).join("/")
+      inputModule = Qt.createQmlObject('import QtQuick; import "' + url + '" as Native; QtObject {}', root, "SafeInputBootstrap")
+      inputsReady = true
+      inputError = ""
+      return true
+    } catch (error) {
+      inputError = "Clipboard-safe inputs could not be loaded. Restart the shell after updating."
+      return false
+    }
+  }
+  Process {
+    id: inputBuildProcess
+    objectName: "inputBuildProcess"
+    command: [root.helper, "prepare-inputs"]
+    running: true
+    stdout: StdioCollector { id: inputBuildOutput }
+    onExited: code => {
+      var result = root.parseJson(inputBuildOutput.text)
+      if (code === 0 && result && result.ok && root.loadInputModule(result.imports)) return
+      root.inputError = result && result.error ? String(result.error) : "Clipboard-safe inputs are unavailable. Install gcc and pkgconf, then restart the shell."
+    }
+  }
   signal openDropdownRequested(var payload)
   signal toggleDropdownRequested(var payload)
   PlaybackCoordinator { id: playbackCoordinator }
@@ -564,6 +592,7 @@ Item {
     return total + Number(chat.notification_unread || 0)
   }, 0)
   readonly property string barTooltip: helperOutdated ? "OmaWhatsApp · restart the shell to finish updating"
+    : inputError !== "" ? inputError
     : closed ? "OmaWhatsApp is closed · click to open"
     : !railReady ? "OmaWhatsApp · reconnecting"
     : offlineMode ? "OmaWhatsApp · offline archive"
@@ -1847,7 +1876,7 @@ Item {
   // keeps a bar click on the compact surface.
   Loader {
     id: appLoader
-    active: true
+    active: root.inputsReady
     asynchronous: true
     source: Qt.resolvedUrl("App.qml")
     onLoaded: {

@@ -95,7 +95,7 @@ Column {
     Row {
       width: parent.width
       spacing: Style.space(6)
-      TextField {
+      SafeTextField {
         id: nameField
         objectName: "groupNameField"
         width: parent.width - saveName.width - Style.space(6)
@@ -136,7 +136,7 @@ Column {
       ScrollView {
         anchors.fill: parent
         anchors.margins: Style.space(4)
-        TextArea {
+        SafeTextArea {
           id: descriptionField
           objectName: "groupDescriptionField"
           text: String(root.settings.description || "")
@@ -280,7 +280,7 @@ Column {
       visible: root.admin
       width: parent.width
       spacing: Style.space(6)
-      TextField {
+      SafeTextField {
         id: addField
         objectName: "groupAddField"
         width: parent.width - addButton.width - Style.space(6)

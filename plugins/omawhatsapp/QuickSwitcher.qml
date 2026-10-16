@@ -62,7 +62,7 @@ Popup {
   }
 
   contentItem: Item {
-    TextField {
+    SafeTextField {
       id: field
       objectName: "quickSwitcherField"
       anchors.top: parent.top

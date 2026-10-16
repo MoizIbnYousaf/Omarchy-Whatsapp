@@ -597,23 +597,22 @@ TestCase {
     compare(h.service.pastes, 1, "Ctrl+V is never swallowed by a running send")
   }
 
-  function test_text_pastes_by_itself_when_the_helper_cannot() {
+  function test_failed_paste_preserves_draft_without_native_fallback() {
     var h = createHarness()
     var source = createTemporaryObject(copySourceComponent, testCase)
     source.selectAll()
     source.copy()
     h.service.pasteAccepts = false
     var composer = findChild(h.app, "composerInput")
-    composer.text = ""
+    composer.text = "Keep this draft"
     h.app.pasteDraft()
-    compare(composer.text, "clipboard words")
-    composer.text = ""
+    tryVerify(function() { return composer.clipboardError !== "" }, 4500)
+    compare(composer.text, "Keep this draft", "failed bounded read never uses Qt's clipboard reader")
     h.service.pasteAccepts = true
     h.app.pasteDraft()
     h.app.syncComposerToSelectedChat()
-    compare(h.app.composerChatKey, AccountModel.refOf(workChat).key)
     h.service.pasteFailed("wl-paste is missing", AccountModel.refOf(workChat), "app")
-    compare(composer.text, "clipboard words", "a failed helper paste falls back to plain text")
+    compare(composer.text, "Keep this draft", "a failed helper read does not retry")
   }
 
   Component { id: copySourceComponent; TextEdit { text: "clipboard words" } }

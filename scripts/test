@@ -35,12 +35,23 @@ cleanup_test_fixtures() {
 trap cleanup_test_fixtures EXIT
 python3 tests/write_media_fixtures.py "$media_fixture_root"
 
+inputs_import_root=$(./scripts/build-inputs)
+export QML_IMPORT_PATH="$inputs_import_root${QML_IMPORT_PATH:+:$QML_IMPORT_PATH}"
 make validate
 # This uses only synthetic in-process offers on the offscreen platform. The
 # control must reproduce Qt's eager read, and the account field must avoid it.
 g++ -std=c++17 -fPIC tests/clipboard_probe.cpp -o "$plugin_home/clipboard-probe" \
   $(pkg-config --cflags --libs Qt6Quick)
-QT_QPA_PLATFORM=offscreen "$plugin_home/clipboard-probe" "$repo_root"
+QT_QPA_PLATFORM=offscreen "$plugin_home/clipboard-probe" "$repo_root" "$inputs_import_root"
+qt_include=$(pkg-config --variable=includedir Qt6Core)
+qt_version=$(pkg-config --modversion Qt6Quick)
+native_flags=()
+for component in QtCore QtGui QtQml QtQmlModels QtQuick; do
+  native_flags+=("-I$qt_include/$component/$qt_version" "-I$qt_include/$component/$qt_version/$component")
+done
+"$(pkg-config --variable=libexecdir Qt6Core)/moc" $(pkg-config --cflags Qt6Quick) "${native_flags[@]}" native/inputs.cpp -o "$plugin_home/inputs.moc"
+g++ -std=c++17 -fPIC $(pkg-config --cflags Qt6Quick) "${native_flags[@]}" -I"$plugin_home" tests/paste_reader.cpp -o "$plugin_home/paste-reader" $(pkg-config --libs Qt6Quick)
+QT_QPA_PLATFORM=offscreen "$plugin_home/paste-reader"
 ./scripts/check-wacli-parity
 
 # What `omarchy plugin add` installs: the repository's files in the plugins
@@ -74,8 +85,9 @@ python3 bin/omawhatsapp capabilities \
   | jq -e --arg version "$(sed -nE 's/^WACLI_PARITY_VERSION = "([^"]+)".*/\1/p' bin/omawhatsapp_core.py)" \
     '.ok == true and .wacli_parity_version == $version and .operation_count == 108' >/dev/null
 while IFS= read -r -d '' qml_test; do
-  QT_QPA_PLATFORM=offscreen "$qml_test_runner" \
+  QT_QPA_PLATFORM=offscreen WAYLAND_DISPLAY=/nonexistent/omawhatsapp-test "$qml_test_runner" \
     -input "$qml_test" \
+    -import "$inputs_import_root" \
     -import "$repo_root/tests/imports" \
     -import "$repo_root/plugins/omawhatsapp" \
     -o -,txt

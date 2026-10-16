@@ -756,7 +756,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 # Bumped with manifest.json (scripts/test checks it). The app compares it with
 # the plugin it loaded: an update that replaced only the plugin says so.
-HELPER_VERSION = "0.17.2"  # x-release-please-version
+HELPER_VERSION = "0.18.0"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
@@ -7531,6 +7531,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("send-new")
     commands.add_parser("paste")
     commands.add_parser("paste-account-name")
+    commands.add_parser("prepare-inputs")
     commands.add_parser("discard-stage")
     commands.add_parser("files")
     commands.add_parser("voice-draft")
@@ -7586,6 +7587,17 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = parser().parse_args()
+    if args.command == "prepare-inputs":
+        try:
+            result = run_bounded(
+                [str(Path(__file__).resolve().parent.parent / "scripts" / "build-inputs")],
+                timeout=150, stdout_limit=16 * 1024, stderr_limit=16 * 1024,
+            )
+            if result.returncode != 0:
+                return emit({"ok": False, "error": "Clipboard-safe inputs could not be built. Install gcc and pkgconf, then restart the shell."}, 1)
+            return emit({"ok": True, "imports": result.stdout.strip()})
+        except (OSError, subprocess.TimeoutExpired, ProcessOutputLimitExceeded):
+            return emit({"ok": False, "error": "Clipboard-safe inputs could not be prepared."}, 1)
     # This local clipboard read must not inspect accounts or recover services.
     if args.command == "paste-account-name":
         try:

@@ -418,7 +418,7 @@ Item {
         onDownloadRequested: root.downloadMediaRequested()
       }
 
-      TextEdit {
+      SafeTextEdit {
         id: messageText
         objectName: "messageText"
         visible: root.bodyText.length > 0 && root.contactCards.length === 0

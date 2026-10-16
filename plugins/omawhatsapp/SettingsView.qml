@@ -633,7 +633,7 @@ Rectangle {
         }
         Row {
           spacing: Style.space(8)
-          TextField {
+          SafeTextField {
             id: signatureName
             objectName: "signatureName"
             width: Math.min(Style.space(260), signatureColumn.width - Style.space(180))

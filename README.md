@@ -76,9 +76,12 @@ conversation is included in this repository.
 ## Install
 
 ```bash
+omarchy pkg add gcc pkgconf
 omarchy pkg aur add wacli-bin
 omarchy plugin add https://github.com/MoizIbnYousaf/Omarchy-Whatsapp --enable
 ```
+
+The native clipboard-safe editors build locally against your installed Qt on first launch (and rebuild after a Qt update). No code is downloaded during that build. If the compiler or matching Qt headers are unavailable, the app keeps its editors unloaded and reports the problem.
 
 That is all on the command line. The first time the app opens it walks you
 through the rest:

@@ -168,3 +168,18 @@ canPaste, or notified repeatedly. No desktop clipboard is touched.
 256-byte cap, three-second deadline, ASCII/length validation and failure paths.
 `tst_account_name.qml` checks actual typing, selection, editing, undo/redo,
 explicit paste, stale result rejection and preserved input after errors.
+
+## Native editor clipboard boundary
+
+All editor constructors disconnect Qt’s automatic clipboard subscription before
+QML properties are applied. The native regression checks all three editor
+classes with pre-existing and changing synthetic offers, read-only transitions,
+canPaste queries and an international IME commit. The actual asynchronous
+reader is tested against valid, endless, stalled and failing local producers.
+All offscreen QML tests use a nonexistent Wayland display so explicit paste
+tests cannot read the developer’s real clipboard.
+
+The module is built into a private cache keyed by source and host Qt. The
+service must successfully load it before loading App.qml or Dropdown.qml.
+Compiler/cache errors must leave editors unloaded and show a clear status,
+never fall back to ordinary Qt editors.
