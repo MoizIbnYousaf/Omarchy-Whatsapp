@@ -2,6 +2,8 @@
 
 ## 0.18.2 — 2026-10-17
 
+- Keep media imports deferred until native bootstrap completes, including the resident voice recorder. Add a cold-start regression with native import paths absent.
+
 - Fix the PNG compressed-metadata blocker reported by @HANCORE-linux. Strip PNG ancillary metadata before decoding, and move every image decode out of the shared shell into a resource-limited worker that returns only bounded raw pixels.
 - Cover message/document images, albums, avatars, stickers, the media browser/viewer and outgoing attachment previews with the same boundary. Bound retained pixels and concurrent decoders; fail closed on malformed, unsupported, oversized or timed-out input.
 - Regenerate audio/video previews through limited FFmpeg workers, dropping original metadata, chapters, extra streams and artwork before Qt playback. Keep previews in anonymous memory files with a total size budget. Originals remain untouched for saving.
