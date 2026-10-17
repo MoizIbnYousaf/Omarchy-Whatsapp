@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QPointer>
 #include <QProcessEnvironment>
+#include <QQuickWindow>
 #include <QtQmlIntegration/qqmlintegration.h>
 #include <dlfcn.h>
 #include <sys/mman.h>
@@ -266,10 +267,19 @@ class SafeAnimatedImage : public QQuickPaintedItem {
       emit currentFrameChanged();
       if (generation != token)
         return;
-      update();
       setStatus(1);
       if (generation != token)
         return;
+      update();
+      // A hidden/cold window can discard an earlier painted-item invalidation.
+      // Wake the scene once more after bindings and visibility have settled.
+      QTimer::singleShot(16, this, [this, token] {
+        if (generation == token) {
+          update();
+          if (window())
+            window()->update();
+        }
+      });
       if (requested && isVisible() && count > 1)
         advance.start(delay);
     };
@@ -289,8 +299,11 @@ public:
     connect(this, &QQuickItem::visibleChanged, this, [this] {
       if (!isVisible())
         advance.stop();
-      else if (requested && count > 1 && !job)
-        advance.start(delay);
+      else {
+        update();
+        if (requested && count > 1 && !job)
+          advance.start(delay);
+      }
     });
   }
   ~SafeAnimatedImage() override {

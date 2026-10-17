@@ -2,6 +2,8 @@
 
 ## 0.18.2 — 2026-10-17
 
+- Redraw decoded frames after visibility changes and the initial scene update, so a cold photo preview appears without resizing the window.
+
 - Keep media imports deferred until native bootstrap completes, including the resident voice recorder. Add a cold-start regression with native import paths absent.
 
 - Fix the PNG compressed-metadata blocker reported by @HANCORE-linux. Strip PNG ancillary metadata before decoding, and move every image decode out of the shared shell into a resource-limited worker that returns only bounded raw pixels.

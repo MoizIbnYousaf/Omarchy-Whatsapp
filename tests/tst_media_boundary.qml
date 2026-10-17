@@ -12,6 +12,13 @@ TestCase {
   tryCompare(a,"status",Image.Ready,10000)
   compare(a.sourceSize.width,1);compare(a.sourceSize.height,1)
  }
+ function test_first_frame_survives_hidden_load(){
+  var a=createTemporaryObject(image,suite,{visible:false,source:Qt.resolvedUrl(".generated-media/metadata-bomb.png")})
+  tryCompare(a,"status",Image.Ready,10000)
+  a.visible=true;wait(100)
+  var pixels=grabImage(a)
+  compare(pixels.pixel(50,50),"#112233")
+ }
  function test_static_failure_and_recovery(){
   var a=createTemporaryObject(image,suite,{source:Qt.resolvedUrl(".generated-media/broken.gif")})
   tryCompare(a,"status",Image.Error)

@@ -206,3 +206,5 @@ media viewer opening/closing, and sticker playback in the installed shell.
 See [MEDIA-SECURITY.md](MEDIA-SECURITY.md) for the decoder inventory, limits and synthetic attack regressions. The release gate includes actual worker resource checks, broken-worker protocol tests and integrated raw-image/normalized-video playback.
 
 `test_cold_bootstrap.py` starts the resident service with native QML imports deliberately absent. Media components must remain lazy until bootstrap registers the module; preloading the module in ordinary tests must not hide a startup dependency.
+
+Media verification checks actual pixels after hidden loading and repeated first openings, not only `Image.Ready`. The installed Cua smoke check must show the photo before any window resize.
