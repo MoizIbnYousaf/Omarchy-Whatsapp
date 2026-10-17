@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.18.2 — 2026-10-17
+
+- Fix the PNG compressed-metadata blocker reported by @HANCORE-linux. Strip PNG ancillary metadata before decoding, and move every image decode out of the shared shell into a resource-limited worker that returns only bounded raw pixels.
+- Cover message/document images, albums, avatars, stickers, the media browser/viewer and outgoing attachment previews with the same boundary. Bound retained pixels and concurrent decoders; fail closed on malformed, unsupported, oversized or timed-out input.
+- Regenerate audio/video previews through limited FFmpeg workers, dropping original metadata, chapters, extra streams and artwork before Qt playback. Keep previews in anonymous memory files with a total size budget. Originals remain untouched for saving.
+- Add regressions for compressed metadata, real worker limits, cancellation, worker failures, raw-pixel rendering, animation, and normalized playback. FFmpeg is now an explicit preview dependency; no automatic package installation or unsafe decoder fallback.
+
+
 ## 0.18.1 — 2026-10-16
 
 - Keep outgoing message text, new-chat messages, edits, captions and all other mutation arguments out of process command lines. Send the complete command over a bounded private stdin protocol to the accompanying privacy-enabled wacli 0.19.0 build. Older binaries fail closed for these operations; local reads remain available.

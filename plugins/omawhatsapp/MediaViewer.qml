@@ -55,7 +55,7 @@ FocusScope {
 
   function localUrl(path) {
     var value = String(path || "")
-    if (value === "__demo__") return Qt.resolvedUrl("assets/demo-capture.svg")
+    if (value === "__demo__") return Qt.resolvedUrl("assets/demo-photo.png")
     if (value === "__demo_photo__") return Qt.resolvedUrl("assets/demo-photo.png")
     return MediaModel.encodedFileUrl(value)
   }
@@ -288,7 +288,8 @@ FocusScope {
         height: parent.height
         transformOrigin: Item.Center
         scale: root.zoom
-        Image {
+        SafeImage {
+          id: stillPreview
           anchors.fill: parent
           anchors.margins: Style.space(18)
           source: root.localUrl(root.localPath)
@@ -298,6 +299,15 @@ FocusScope {
           smooth: true
           mipmap: true
         }
+      }
+      Text {
+        textFormat: Text.PlainText
+        anchors.centerIn: parent
+        visible: stillPreview.status === Image.Error
+        text: "This image could not be previewed safely.\nYou can still save the original."
+        color: root.dim
+        horizontalAlignment: Text.AlignHCenter
+        font.family: root.fontFamily
       }
       Connections {
         target: root

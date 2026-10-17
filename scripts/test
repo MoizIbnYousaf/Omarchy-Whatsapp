@@ -7,7 +7,7 @@ set -euo pipefail
 repo_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
-for command_name in make qmllint jq omarchy rg g++ pkg-config; do
+for command_name in make qmllint jq omarchy rg g++ pkg-config ffmpeg; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "test: missing command: $command_name" >&2
     exit 1
@@ -50,7 +50,8 @@ for component in QtCore QtGui QtQml QtQmlModels QtQuick; do
   native_flags+=("-I$qt_include/$component/$qt_version" "-I$qt_include/$component/$qt_version/$component")
 done
 "$(pkg-config --variable=libexecdir Qt6Core)/moc" $(pkg-config --cflags Qt6Quick) "${native_flags[@]}" native/inputs.cpp -o "$plugin_home/inputs.moc"
-g++ -std=c++17 -fPIC $(pkg-config --cflags Qt6Quick) "${native_flags[@]}" -I"$plugin_home" tests/paste_reader.cpp -o "$plugin_home/paste-reader" $(pkg-config --libs Qt6Quick)
+"$(pkg-config --variable=libexecdir Qt6Core)/moc" $(pkg-config --cflags Qt6Quick) native/media_items.h -o "$plugin_home/media_items.moc"
+g++ -std=c++17 -fPIC $(pkg-config --cflags Qt6Quick) "${native_flags[@]}" -I"$plugin_home" -Inative tests/paste_reader.cpp -o "$plugin_home/paste-reader" $(pkg-config --libs Qt6Quick)
 QT_QPA_PLATFORM=offscreen "$plugin_home/paste-reader"
 ./scripts/check-wacli-parity
 

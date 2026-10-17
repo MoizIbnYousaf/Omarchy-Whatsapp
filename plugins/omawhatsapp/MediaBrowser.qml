@@ -174,7 +174,8 @@ Rectangle {
         radius: Style.cornerRadius
         clip: true
         color: Style.normalFillFor(root.foreground, root.accent)
-        Image {
+        SafeImage {
+          id: gridPreview
           anchors.fill: parent
           visible: parent.local && !parent.isVideo
           source: visible ? root.fileUrl(modelData.local_path) : ""
@@ -186,8 +187,8 @@ Rectangle {
         Text {
           textFormat: Text.PlainText
           anchors.centerIn: parent
-          visible: parent.isVideo || !parent.local
-          text: parent.local ? "󰐊" : "󰇚"
+          visible: parent.isVideo || !parent.local || gridPreview.status === Image.Error
+          text: !parent.local ? "󰇚" : parent.isVideo ? "󰐊" : "󰋩"
           color: root.muted
           font.family: root.fontFamily
           font.pixelSize: Style.font.iconLarge

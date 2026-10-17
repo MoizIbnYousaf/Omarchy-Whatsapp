@@ -76,12 +76,12 @@ conversation is included in this repository.
 ## Install
 
 ```bash
-omarchy pkg add gcc pkgconf
+omarchy pkg add gcc pkgconf ffmpeg
 omarchy pkg aur add wacli-bin
 omarchy plugin add https://github.com/MoizIbnYousaf/Omarchy-Whatsapp --enable
 ```
 
-The native clipboard-safe editors build locally against your installed Qt on first launch (and rebuild after a Qt update). No code is downloaded during that build. If the compiler or matching Qt headers are unavailable, the app keeps its editors unloaded and reports the problem.
+The native clipboard-safe editors and isolated media worker build locally against your installed Qt on first launch (and rebuild after a Qt update). No code is downloaded during that build. Media previews use bounded child processes; FFmpeg regenerates audio/video previews without original metadata. Oversized or unsupported previews show an error, and original attachments remain available to save. See [media limits](docs/MEDIA-SECURITY.md). If the compiler or matching Qt headers are unavailable, the app keeps its editors unloaded and reports the problem.
 
 For sending and other mutations, also install the verified privacy-enabled
 wacli asset described under [Private command transport](#private-command-transport).

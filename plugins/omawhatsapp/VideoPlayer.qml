@@ -116,8 +116,9 @@ Item {
     volume: root.compact ? 0.8 : 0.85
   }
 
-  MediaPlayer {
+  SafeMediaPlayer {
     id: player
+    kind: "video"
     objectName: "videoMediaPlayer"
     source: root.source
     videoOutput: videoOutput

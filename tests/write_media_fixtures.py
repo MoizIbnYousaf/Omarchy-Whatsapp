@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 import sys
+from test_media_worker import bomb
 
 
 FIXTURES = {
@@ -25,6 +26,7 @@ def main() -> int:
     destination.mkdir(parents=True, exist_ok=True)
     for name, encoded in FIXTURES.items():
         (destination / name).write_bytes(base64.b64decode(encoded, validate=True))
+    (destination / "metadata-bomb.png").write_bytes(bomb())
     return 0
 
 

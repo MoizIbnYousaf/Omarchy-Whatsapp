@@ -29,7 +29,7 @@ jobs:
       - name: Install pinned test prerequisites
         run: >-
           pacman -Syu --noconfirm
-          bash coreutils curl findutils gcc git inotify-tools jq make pkgconf python
+          bash coreutils curl ffmpeg findutils gcc git inotify-tools jq make pkgconf python
           qt6-declarative qt6-imageformats qt6-multimedia ripgrep systemd tar
           util-linux wl-clipboard xdg-utils zenity
 

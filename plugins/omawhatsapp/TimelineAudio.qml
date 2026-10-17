@@ -25,7 +25,7 @@ Item {
   signal advanceRequested(string messageId)
 
   AudioOutput { id: sink; volume: 0.8; muted: root.muted }
-  MediaPlayer {
+  SafeMediaPlayer {
     id: player
     objectName: "timelineAudioPlayer"
     audioOutput: sink

@@ -21,7 +21,7 @@ version = output("pkg-config", "--modversion", "Qt6Quick")
 include = Path(output("pkg-config", "--variable=includedir", "Qt6Core"))
 qtlib = Path(output("pkg-config", "--variable=libdir", "Qt6Core")) / "libQt6Quick.so"
 qt_stat = qtlib.stat()
-key = hashlib.sha256(source.read_bytes() + Path(__file__).read_bytes() +
+key = hashlib.sha256(source.read_bytes() + source.with_name("media_items.h").read_bytes() + source.with_name("media_worker.cpp").read_bytes() + Path(__file__).read_bytes() +
     f"{version}:{platform.machine()}:{qt_stat.st_size}:{qt_stat.st_mtime_ns}".encode()).hexdigest()
 cache_home = Path(os.environ.get("XDG_CACHE_HOME", ""))
 if not cache_home.is_absolute(): cache_home = Path.home() / ".cache"
@@ -37,25 +37,31 @@ with os.fdopen(lockfd, "w") as lock:
     fcntl.flock(lock, fcntl.LOCK_EX)
     target = cache / key
     module = target / "OmaWhatsApp" / "Inputs"
-    if not (module / "libomainputs.so").is_file():
+    if not (module / "libomainputs.so").is_file() or not (module / "omawa-media-worker").is_file():
         temp = Path(tempfile.mkdtemp(prefix="build-", dir=cache))
         try:
             out = temp / "OmaWhatsApp" / "Inputs"
             out.mkdir(parents=True)
             copied = temp / "inputs.cpp"
             shutil.copyfile(source, copied)
+            shutil.copyfile(source.with_name("media_items.h"), temp / "media_items.h")
             flags = shlex.split(output("pkg-config", "--cflags", "Qt6Quick"))
             for component in ("QtCore", "QtGui", "QtQml", "QtQmlModels", "QtQuick"):
                 flags += ["-I" + str(include / component / version),
                           "-I" + str(include / component / version / component)]
             moc = Path(output("pkg-config", "--variable=libexecdir", "Qt6Core")) / "moc"
             subprocess.run([str(moc), *flags, str(copied), "-o", str(temp / "inputs.moc")], check=True, timeout=30)
+            subprocess.run([str(moc), *flags, str(temp / "media_items.h"), "-o", str(temp / "media_items.moc")], check=True, timeout=30)
             libs = shlex.split(output("pkg-config", "--libs", "Qt6Quick"))
             subprocess.run(["g++", "-std=c++17", "-shared", "-fPIC", "-O2", "-Wl,-z,defs", *flags,
-                str(copied), "-o", str(out / "libomainputs.so"), *libs], check=True, timeout=90)
+                str(copied), "-o", str(out / "libomainputs.so"), *libs, "-ldl"], check=True, timeout=90)
+            worker_flags = shlex.split(output("pkg-config", "--cflags", "--libs", "Qt6Gui"))
+            subprocess.run(["g++", "-std=c++17", "-fPIC", "-O2", str(source.with_name("media_worker.cpp")), "-o", str(out / "omawa-media-worker"), *worker_flags], check=True, timeout=90)
+            (temp / "media_items.h").unlink()
             (out / "qmldir").write_text("module OmaWhatsApp.Inputs\nplugin omainputs\n")
             copied.unlink()
             (temp / "inputs.moc").unlink()
+            (temp / "media_items.moc").unlink()
             os.rename(temp, target)
         finally:
             if temp.exists(): shutil.rmtree(temp)

@@ -457,7 +457,7 @@ Item {
     if (demoMode && payload.attachments === true) {
       pendingStickerPath = ""
       pendingAttachments = [
-        String(Qt.resolvedUrl("assets/demo-capture.svg")),
+        String(Qt.resolvedUrl("assets/demo-photo.png")),
         "file:///tmp/omawhatsapp-release-notes.pdf"
       ]
     } else if (demoMode || previousDemo) {
@@ -1997,7 +1997,7 @@ Item {
 
   function localMediaUrl(path) {
     var value = String(path || "")
-    if (value === "__demo__") return Qt.resolvedUrl("assets/demo-capture.svg")
+    if (value === "__demo__") return Qt.resolvedUrl("assets/demo-photo.png")
     if (value === "__demo_photo__") return Qt.resolvedUrl("assets/demo-photo.png")
     return value === "" ? "" : encodeURI("file://" + value)
   }
@@ -4487,7 +4487,7 @@ Item {
                   radius: Style.cornerRadius
                   color: root.background
                   clip: true
-                  Image {
+                  SafeImage {
                     visible: root.attachmentIsImage(modelData)
                     anchors.fill: parent
                     anchors.margins: Style.space(2)

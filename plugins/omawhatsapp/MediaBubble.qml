@@ -129,7 +129,7 @@ Item {
 
   function localUrlFor(item) {
     var path = String(item && item.local_path || "")
-    if (path === "__demo__") return Qt.resolvedUrl("assets/demo-capture.svg")
+    if (path === "__demo__") return Qt.resolvedUrl("assets/demo-photo.png")
     if (path === "__demo_photo__") return Qt.resolvedUrl("assets/demo-photo.png")
     if (path === "__demo_video__") return ""
     if (path === "") return ""
@@ -296,7 +296,7 @@ Item {
     Item {
       implicitHeight: root.previewHeight
       clip: true
-      Image {
+      SafeImage {
         id: imagePreview
         objectName: "imageMediaSurface"
         anchors.fill: parent
@@ -462,7 +462,7 @@ Item {
       implicitHeight: audioRow.implicitHeight + Style.space(12)
       AudioOutput { id: audioSink; volume: 0.8 }
       // With a shared player this one only reads the length; it never plays.
-      MediaPlayer {
+      SafeMediaPlayer {
         id: audioPlayer
         objectName: "audioMediaPlayer"
         source: root.localUrl()

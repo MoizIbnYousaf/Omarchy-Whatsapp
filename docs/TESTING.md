@@ -200,3 +200,7 @@ and destroys stopped previews. `test_animation_inventory.py` prevents native
 AnimatedImage from reappearing in any app surface. All of these run without
 private media. Manual smoke testing should include repeated demo chat changes,
 media viewer opening/closing, and sticker playback in the installed shell.
+
+## Media resource boundary
+
+See [MEDIA-SECURITY.md](MEDIA-SECURITY.md) for the decoder inventory, limits and synthetic attack regressions. The release gate includes actual worker resource checks, broken-worker protocol tests and integrated raw-image/normalized-video playback.

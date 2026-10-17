@@ -274,7 +274,7 @@ Item {
   }
 
   AudioOutput { id: previewOutput }
-  MediaPlayer {
+  SafeMediaPlayer {
     id: player
     audioOutput: previewOutput
     onMediaStatusChanged: if (mediaStatus === MediaPlayer.EndOfMedia

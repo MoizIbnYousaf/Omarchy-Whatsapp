@@ -158,3 +158,7 @@ seconds, and a result is discarded if its editing target changed. Account IDs
 retain their stricter 256-byte/64-character validation. Failed attachment/text
 reads are reported rather than retried through Qt. Clipboard contents and built
 native modules are never stored in the source repository.
+
+## Media previews
+
+Original image decoders run only in bounded child processes. The shell receives raw pixels. Audio/video previews are regenerated without original metadata in a bounded worker and retained in anonymous memory, never a permanent decoded cache. Oversized or invalid previews fail closed. Originals remain unchanged. See [media security](MEDIA-SECURITY.md) for limits and scope.

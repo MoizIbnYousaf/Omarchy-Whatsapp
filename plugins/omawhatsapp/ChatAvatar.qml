@@ -77,7 +77,7 @@ Item {
       maskSpreadAtMin: 0.3
     }
 
-    Image {
+    SafeImage {
       id: avatarImage
       objectName: "chatAvatarImage"
       anchors.fill: parent

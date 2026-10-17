@@ -1,5 +1,5 @@
 import QtQuick
 import OmaWhatsApp.Inputs as Native
 
-// All animation decoding stays on the bounded, timer-driven native reader.
+// Decode only in the resource-limited worker, return one raw frame per request.
 Native.AnimatedImage {}
