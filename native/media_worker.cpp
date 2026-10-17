@@ -7,9 +7,13 @@
 #include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QThreadPool>
 #include <QtEndian>
 #include <cstdio>
+#include <cstdlib>
 #include <fcntl.h>
+#include <malloc.h>
+#include <new>
 #include <signal.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
@@ -49,6 +53,20 @@ static QByteArray pngPixelsOnly(const QByteArray &bytes) {
   }
   return {};
 }
+static QByteArray sniffFormat(const QByteArray &bytes) {
+  if (bytes.startsWith(QByteArray::fromHex("89504e470d0a1a0a")))
+    return "png";
+  if (bytes.startsWith(QByteArray::fromHex("ffd8ff")))
+    return "jpeg";
+  if (bytes.startsWith("GIF87a") || bytes.startsWith("GIF89a"))
+    return "gif";
+  if (bytes.size() >= 12 && bytes.startsWith("RIFF") &&
+      bytes.mid(8, 4) == "WEBP")
+    return "webp";
+  if (bytes.startsWith("BM"))
+    return "bmp";
+  return {};
+}
 static int image(const QJsonObject &request) {
   const QString path = request["path"].toString();
   if (!QFileInfo(path).isAbsolute())
@@ -74,14 +92,16 @@ static int image(const QJsonObject &request) {
   bytes = pngPixelsOnly(bytes);
   if (bytes.isEmpty())
     return 1;
+  const auto format = sniffFormat(bytes);
+  if (format.isEmpty())
+    return 1;
   QBuffer input(&bytes);
   input.open(QIODevice::ReadOnly);
-  QImageReader reader(&input);
-  reader.setDecideFormatFromContent(true);
-  const auto format = reader.format().toLower();
-  if (format != "png" && format != "jpeg" && format != "gif" &&
-      format != "webp" && format != "bmp")
-    return 1;
+  // Never probe unrelated installed plugins (HEIF, AVIF, JXL, etc.). Even a
+  // rejected probe may load their codec libraries into this limited process.
+  QImageReader reader(&input, format);
+  reader.setAutoDetectImageFormat(false);
+  reader.setDecideFormatFromContent(false);
   QImageReader::setAllocationLimit(96);
   reader.setAutoTransform(true);
   QSize original = reader.size();
@@ -194,30 +214,46 @@ static int media(const QJsonObject &request) {
   for (auto &arg : args)
     argv.append(arg.data());
   argv.append(nullptr);
+  // This applies to the new process image after exec; mallopt below applies
+  // to the current image decoder. Avoid per-thread 64-MiB arena reservations.
+  if (setenv("MALLOC_ARENA_MAX", "1", 1))
+    return 1;
   // The only media paths in ffmpeg argv are the fixed inherited descriptors.
   execv(argv[0], argv.data());
   return 1;
 }
 int main(int argc, char **argv) {
-  bool av = argc == 2 && QByteArray(argv[1]) == "--media";
-  const pid_t parent = getppid();
-  if (prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != parent ||
-      prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || !limit(RLIMIT_CORE, 0) ||
-      !limit(RLIMIT_AS, (av ? 512 : 384) * 1024 * 1024) ||
-      !limit(RLIMIT_CPU, av ? 30 : 5) ||
-      !limit(RLIMIT_FSIZE, 128 * 1024 * 1024) || !limit(RLIMIT_NOFILE, 64))
+  // Bound glibc arena reservations before Qt can start any decoding threads.
+  if (!mallopt(M_ARENA_MAX, 1))
     return 1;
-  alarm(av ? 60 : 6);
-  QCoreApplication app(argc, argv);
-  QFile input;
-  if (!input.open(stdin, QIODevice::ReadOnly))
+  try {
+    bool av = argc == 2 && QByteArray(argv[1]) == "--media";
+    const pid_t parent = getppid();
+    if (prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != parent ||
+        prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || !limit(RLIMIT_CORE, 0) ||
+        // FFmpeg maps its linked codec libraries before decoding. This is a
+        // total address-space bound; -max_alloc separately limits each
+        // allocation.
+        !limit(RLIMIT_AS, (av ? 1024 : 384) * 1024 * 1024) ||
+        !limit(RLIMIT_CPU, av ? 30 : 5) ||
+        !limit(RLIMIT_FSIZE, 128 * 1024 * 1024) || !limit(RLIMIT_NOFILE, 64))
+      return 1;
+    alarm(av ? 60 : 6);
+    QCoreApplication app(argc, argv);
+    QThreadPool::globalInstance()->setMaxThreadCount(2);
+    QFile input;
+    if (!input.open(stdin, QIODevice::ReadOnly))
+      return 1;
+    QByteArray data = input.read(16385);
+    if (data.size() > 16384)
+      return 1;
+    QJsonParseError error;
+    auto document = QJsonDocument::fromJson(data, &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject())
+      return 1;
+    return av ? media(document.object()) : image(document.object());
+  } catch (const std::bad_alloc &) {
+    // A rejected allocation is an unavailable preview, not a crash report.
     return 1;
-  QByteArray data = input.read(16385);
-  if (data.size() > 16384)
-    return 1;
-  QJsonParseError error;
-  auto document = QJsonDocument::fromJson(data, &error);
-  if (error.error != QJsonParseError::NoError || !document.isObject())
-    return 1;
-  return av ? media(document.object()) : image(document.object());
+  }
 }

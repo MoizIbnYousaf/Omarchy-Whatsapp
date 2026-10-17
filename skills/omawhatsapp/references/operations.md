@@ -1,11 +1,34 @@
 # Focused OmaWhatsApp operations
 
-All commands use the installed helper and emit one JSON object. Build requests
-with `jq` so user content is data, not shell syntax.
+All commands use the installed helper and emit one JSON object. Keep private
+values on stdin for the entire pipeline, including JSON construction. In Bash,
+define this function once; its arguments stay inside the shell, and the Bash
+`printf` builtin sends them to `jq` over a pipe:
 
 ```bash
+set +x
+set +a
+set -o pipefail
 oma="$HOME/.local/bin/omawhatsapp"
+oma_request() {
+  builtin printf '%s\0' "$@" | jq -Rsc '
+    split("\u0000")[:-1] |
+    if length % 2 != 0 then error("expected key/value pairs")
+    else . as $values |
+      reduce range(0; length; 2) as $i ({}; .[$values[$i]] = $values[$i + 1])
+    end'
+}
 ```
+
+Run these examples in that same Bash session. Keep private values in
+non-exported shell variables populated from stdin or helper results. Never
+interpolate them into `bash -c`/`python -c` source, `jq --arg`/`--argjson`,
+external `printf` arguments, environment variables, temporary files, shell
+history, or tracing output. `set +a` prevents new variables from being
+automatically exported; it does not unexport existing ones. If an existing
+variable was exported, use Bash's `export -n variable_name` before assigning
+private content. JSON arrays below travel as strings over stdin and are parsed
+by a fixed `jq` filter, never supplied as process arguments.
 
 ## Accounts
 
@@ -16,8 +39,8 @@ the `account` it came from. A chat target is resolved inside its own account's
 mirror, so pass back the exact `account` a row reported before mutating it:
 
 ```bash
-jq -nc --arg jid "$resolved_jid" --arg account "$row_account" --arg text "$message" \
-  '{account:$account,jid:$jid,text:$text}' | "$oma" send
+oma_request jid "$resolved_jid" account "$row_account" text "$message" \
+  | "$oma" send
 ```
 
 Never send to a JID resolved from a different account's rail.
@@ -46,21 +69,21 @@ Search the bounded chat rail, then require exactly one intended result before
 using its returned `jid`:
 
 ```bash
-jq -nc --arg query "$requested_name" '{query:$query}' \
+oma_request query "$requested_name" \
   | "$oma" chats --limit 500
 ```
 
 Read or search one exact conversation:
 
 ```bash
-jq -nc --arg jid "$resolved_jid" --arg query "$requested_query" \
-  '{jid:$jid,query:$query}' | "$oma" messages --limit 240
+oma_request jid "$resolved_jid" query "$requested_query" \
+  | "$oma" messages --limit 240
 ```
 
 Group members/mention candidates:
 
 ```bash
-jq -nc --arg jid "$resolved_jid" '{jid:$jid}' | "$oma" members
+oma_request jid "$resolved_jid" | "$oma" members
 ```
 
 ## External WhatsApp mutations
@@ -70,18 +93,17 @@ These require a clearly authorized current request and online mode.
 Send text (optional reply ID and verified mention JIDs):
 
 ```bash
-jq -nc --arg jid "$resolved_jid" --arg text "$message" \
-  --arg reply "$reply_id" --argjson mentions "$mention_jids_json" \
-  '{jid:$jid,text:$text,reply_id:$reply,mentions:$mentions}' \
+oma_request jid "$resolved_jid" text "$message" \
+  reply_id "$reply_id" mentions "$mention_jids_json" \
+  | jq '.mentions |= fromjson' \
   | "$oma" send
 ```
 
 Send local files; use absolute paths or `file://` URLs, at most 10:
 
 ```bash
-jq -nc --arg jid "$resolved_jid" --arg caption "$caption" \
-  --argjson paths "$local_paths_json" \
-  '{jid:$jid,caption:$caption,paths:$paths}' | "$oma" files
+oma_request jid "$resolved_jid" caption "$caption" paths "$local_paths_json" \
+  | jq '.paths |= fromjson' | "$oma" files
 ```
 
 The other bounded message commands accept these objects:
@@ -107,8 +129,7 @@ voice` operation with the exact `whatsapp-write` authorization described in
 Chat state uses one allowlisted action:
 
 ```bash
-jq -nc --arg jid "$resolved_jid" --arg action "$action" \
-  '{jid:$jid,action:$action}' | "$oma" chat-action
+oma_request jid "$resolved_jid" action "$action" | "$oma" chat-action
 ```
 
 Allowed actions are `read`, `unread`, `pin`, `unpin`, `archive`, `unarchive`,

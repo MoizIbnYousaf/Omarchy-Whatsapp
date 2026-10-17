@@ -194,6 +194,14 @@ patched dependency with read-only dispatch and no store or network access.
 The CI private-transport job builds the bundled patch against the exact audited
 upstream commit and runs plain/FTS dependency tests and vet.
 
+`test_agent_requests.py` executes the Bash examples extracted directly from the
+shipped agent skill. Synthetic Unicode, quotes, newlines, recipient IDs, paths,
+captions and JSON arrays must survive unchanged. The harness holds each actual
+`jq` process at stdin and inspects `/proc` arguments/environment before passing
+the payload; a fake helper verifies the consumer boundary without contacting
+WhatsApp. A control reproduces the old `jq --arg` exposure, and an inventory
+check rejects argument-based JSON construction in every skill code block.
+
 `tst_safe_animation.qml` plays synthetic multi-frame GIF/WebP files, pauses and
 resumes them, loads malformed files, replaces sources, and repeatedly creates
 and destroys stopped previews. `test_animation_inventory.py` prevents native
@@ -204,6 +212,14 @@ media viewer opening/closing, and sticker playback in the installed shell.
 ## Media resource boundary
 
 See [MEDIA-SECURITY.md](MEDIA-SECURITY.md) for the decoder inventory, limits and synthetic attack regressions. The release gate includes actual worker resource checks, broken-worker protocol tests and integrated raw-image/normalized-video playback.
+
+The worker suite generates baseline and progressive 900×1600 JPEGs, decodes
+each at two display sizes in 48 runs with two concurrent workers, and removes
+inherited allocator tuning so the worker must configure itself. It verifies
+that a live JPEG worker has no unrelated Qt image plugins mapped, checks every
+supported signature plus lying/unsupported headers, and reads the live image
+and audio/video process resource limits. CI installs KDE's `kimageformats` in
+addition to `qt6-imageformats` to cover richer desktop installations.
 
 `test_cold_bootstrap.py` starts the resident service with native QML imports deliberately absent. Media components must remain lazy until bootstrap registers the module; preloading the module in ordinary tests must not hide a startup dependency.
 

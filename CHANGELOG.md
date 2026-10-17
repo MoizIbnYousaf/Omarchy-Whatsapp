@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.18.3 — 2026-10-17
+
+- Keep private text, recipients, queries, account names, captions and file paths out of the optional agent skill's JSON-builder process arguments. Use a Bash-builtin/stdin request builder throughout the focused and advanced examples. Thanks to @HANCORE-linux for identifying the remaining `jq --arg` exposure.
+- Select the image decoder directly from allowlisted file signatures, without probing unrelated installed codecs. Bound glibc allocator arenas and Qt pool threads so normal JPEG/GIF previews do not exhaust the worker's address space. Thanks to @nerdislb for reporting and investigating #21.
+- Allow bounded FFmpeg previews room for their mapped codec libraries, with one allocator arena and a 1-GiB total address-space cap. Retain the input/output, per-allocation, CPU, wall-time, protocol and concurrency limits.
+- Test the actual shipped agent examples with synthetic values and procfs inspection; add repeated baseline/progressive phone-photo decodes, supported/lying format tests and a CI environment with kimageformats.
+
 ## 0.18.2 — 2026-10-17
 
 - Redraw decoded frames after visibility changes and the initial scene update, so a cold photo preview appears without resizing the window.

@@ -36,6 +36,12 @@ stdin. If the helper reports that the build is missing, stop and explain the
 upgrade requirement from the README; never bypass it by running private
 message text through ordinary wacli command-line arguments.
 
+This applies before the helper too: never put private values in JSON-builder
+arguments (`jq --arg`/`--argjson`), exported variables, or interpolated command
+source. Use the Bash-builtin/stdin request builder in
+[references/operations.md](references/operations.md). Keep tracing off. A safe
+final helper pipe does not protect private data exposed by an earlier process.
+
 ## Safety boundary
 
 - Local reads are read-only. Never inspect `session.db`, write `wacli.db`, or

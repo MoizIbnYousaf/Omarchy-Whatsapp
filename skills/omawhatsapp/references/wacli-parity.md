@@ -46,12 +46,15 @@ Send one JSON object to `omawhatsapp wacli`:
 }
 ```
 
-Build it with `jq`; user text, filenames, JIDs, phone numbers, invite codes,
-URLs, and secrets are data, never shell source:
+Build requests with `oma_request` from
+[operations.md](operations.md), including advanced argument arrays. User text,
+filenames, JIDs, phone numbers and invite codes stay on stdin, never in
+`jq --arg`/`--argjson`, the environment, or interpolated command source.
+For example, `args_json` must be a non-exported variable populated from stdin
+or a helper result:
 
 ```bash
-jq -nc --argjson args '["messages","starred","--limit","50"]' \
-  '{args:$args}' | "$oma" wacli
+oma_request args "$args_json" | jq '.args |= fromjson' | "$oma" wacli
 ```
 
 Pass `--account`, `--store`, `--timeout`, `--lock-wait`, `--events`, and
@@ -104,12 +107,14 @@ Examples:
 jq -nc '{args:["calls","list","--limit","20"]}' | "$oma" wacli
 
 # Live metadata refresh: only after the user requests the live lookup.
-jq -nc '{args:["groups","info","--jid","EXACT_GROUP_JID"],
-  authorization:"remote-read"}' | "$oma" wacli
+oma_request jid "$resolved_group_jid" | jq '
+  {args:["groups","info","--jid",.jid],authorization:"remote-read"}' \
+  | "$oma" wacli
 
 # WhatsApp mutation: only after the user requests this exact vote.
-jq -nc '{args:["poll","vote","--to","EXACT_CHAT_JID","--id","EXACT_ID",
-  "--option","Yes"],authorization:"whatsapp-write"}' | "$oma" wacli
+oma_request jid "$resolved_jid" id "$poll_id" option "$chosen_option" | jq '
+  {args:["poll","vote","--to",.jid,"--id",.id,"--option",.option],
+   authorization:"whatsapp-write"}' | "$oma" wacli
 ```
 
 Dry runs for `history fill`, `messages purge`, and `store cleanup` are
