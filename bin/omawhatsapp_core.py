@@ -19,6 +19,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any, Iterator, Sequence
 from urllib.parse import parse_qsl, quote, unquote, urlparse
@@ -756,7 +757,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 # Bumped with manifest.json (scripts/test checks it). The app compares it with
 # the plugin it loaded: an update that replaced only the plugin says so.
-HELPER_VERSION = "0.18.3"  # x-release-please-version
+HELPER_VERSION = "0.18.4"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
@@ -1258,7 +1259,8 @@ class Backend:
         try:
             # account=None: the account list itself must never be account scoped.
             result = self._run(
-                ["--read-only", "--json", "accounts", "list"], timeout=15, account=None
+                ["--read-only", "--json", "accounts", "list"], timeout=15, account=None,
+                private_args=False  # Static discovery has no private request arguments.
             )
             envelope = json.loads(result.stdout or "{}")
         except (OmaWhatsAppError, json.JSONDecodeError) as exc:
@@ -1332,6 +1334,33 @@ class Backend:
     def use_account(self, name: Any = "") -> Account:
         self._active = self.account(name)
         return self._active
+
+    def prepare_handoff(self, purpose: str, payload: dict[str, Any]) -> str:
+        if purpose not in {"notification", "link"}:
+            raise OmaWhatsAppError("Invalid handoff purpose.")
+        token = secrets.token_hex(24)
+        with self._state_lock("handoffs.lock"):
+            table = self._read_state_json("handoffs.json", 262144, {})
+            now = time.time()
+            table = {key: value for key, value in table.items()
+                     if isinstance(value, dict) and value.get("expires", 0) > now}
+            if len(table) >= 128:
+                raise OmaWhatsAppError("Too many pending app actions; try again later.")
+            table[token] = {"purpose": purpose, "expires": now + 120, "payload": payload}
+            self._write_state_json("handoffs.json", table, 262144)
+        return token
+
+    def consume_handoff(self, token: Any, purpose: str) -> dict[str, Any]:
+        if not isinstance(token, str) or not re.fullmatch(r"[0-9a-f]{48}", token):
+            raise OmaWhatsAppError("Invalid app action.")
+        with self._state_lock("handoffs.lock"):
+            table = self._read_state_json("handoffs.json", 262144, {})
+            value = table.pop(token, None)
+            self._write_state_json("handoffs.json", table, 262144)
+        if not isinstance(value, dict) or value.get("purpose") != purpose \
+                or value.get("expires", 0) <= time.time():
+            raise OmaWhatsAppError("This app action expired; please try again.")
+        return value["payload"]
 
     def _refresh_account_registry(self) -> None:
         self._accounts = None
@@ -2158,7 +2187,7 @@ class Backend:
         except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired, ProcessOutputLimitExceeded):
             supported = False
         if not supported:
-            raise OmaWhatsAppError("This action requires the privacy-enabled wacli build. See README → Private command transport; no message was sent.")
+            raise OmaWhatsAppError("This action requires the privacy-enabled wacli build. See README → Private command transport; no command was dispatched.")
         self._private_transport_identity = identity
 
     def _run(
@@ -2169,7 +2198,7 @@ class Backend:
         stdout_limit: int = MAX_WACLI_OUTPUT,
         stderr_limit: int = MAX_PROCESS_ERROR,
         account: Any = ACTIVE_ACCOUNT,
-        private_args: bool = False,
+        private_args: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         if not self.wacli.is_file() or not os.access(self.wacli, os.X_OK):
             raise OmaWhatsAppError("wacli is not installed.")
@@ -2959,7 +2988,7 @@ class Backend:
         stdout_limit: int = MAX_WACLI_OUTPUT,
         stderr_limit: int = MAX_PROCESS_ERROR,
         account: Any = ACTIVE_ACCOUNT,
-        private_args: bool = False,
+        private_args: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         """Run after stopping sync, tolerating its bounded lock-release delay."""
         result: subprocess.CompletedProcess[str] | None = None
@@ -3195,7 +3224,7 @@ class Backend:
         # as the phone does; wacli can overwrite chats.name with a push name.
         return """COALESCE(
           NULLIF(CASE WHEN chats.jid GLOB '*@s.whatsapp.net' THEN contacts.full_name END, ''),
-          NULLIF(chats.name, ''), NULLIF(groups.name, ''),
+          NULLIF(groups.name, ''), NULLIF(chats.name, ''),
           NULLIF(contacts.business_name, ''), NULLIF(contacts.full_name, ''),
           NULLIF(contacts.push_name, ''), NULLIF(contacts.system_name, ''),
           NULLIF(latest.chat_name, ''), 'WhatsApp chat')"""
@@ -4157,8 +4186,9 @@ class Backend:
         shell = OMARCHY_SHELL if OMARCHY_SHELL.exists() else Path(shutil.which("omarchy-shell") or "")
         if not str(shell) or not shell.exists():
             return {"ok": True, "kind": "notify-open", "opened": False}
-        payload = json.dumps({"account": str(target.get("account") or ""),
-                              "jid": str(target["jid"])})
+        token = self.prepare_handoff("notification", {
+            "account": str(target.get("account") or ""), "jid": str(target["jid"])})
+        payload = json.dumps({"handoff": token})
         surface = "openDropdown" if ui_preference(self._preferences(), "notify_reply") else "openApp"
         try:
             run_bounded([str(shell), PLUGIN_ID, surface, payload], timeout=10,
@@ -4954,7 +4984,7 @@ class Backend:
                     common = [{"jid": str(item["jid"]), "name": str(item["name"])[:128]}
                               for item in connection.execute(
                         """SELECT groups.jid,
-                             COALESCE(NULLIF(chats.name, ''), NULLIF(groups.name, ''), 'Group') AS name
+                             COALESCE(NULLIF(groups.name, ''), NULLIF(chats.name, ''), 'Group') AS name
                            FROM group_participants AS members
                            JOIN groups ON groups.jid = members.group_jid
                            LEFT JOIN chats ON chats.jid = groups.jid
@@ -5324,6 +5354,56 @@ class Backend:
             raise
         return {"ok": True, "kind": "media", "local_path": str(saved)}
 
+    @staticmethod
+    @contextmanager
+    def _private_output(target: Path, replace: bool) -> Iterator[Any]:
+        """Bind the parent once; private throughout, atomic no-replace by default."""
+        directory = descriptor = -1
+        temporary = ".omawhatsapp-" + secrets.token_hex(16) + ".part"
+        try:
+            directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            try:
+                existing = os.stat(target.name, dir_fd=directory, follow_symlinks=False)
+            except FileNotFoundError:
+                existing = None
+            if existing is not None:
+                if not stat.S_ISREG(existing.st_mode):
+                    raise OmaWhatsAppError("Choose a file name, not a folder or a link.")
+                if replace is not True:
+                    raise OmaWhatsAppError("A file with that name is already there; choose another name.")
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                                 | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=directory)
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb") as handle:
+                descriptor = -1
+                yield handle
+                handle.flush()
+                os.fsync(handle.fileno())
+            current_parent = os.stat(target.parent)
+            opened_parent = os.fstat(directory)
+            if (current_parent.st_dev, current_parent.st_ino) != (opened_parent.st_dev, opened_parent.st_ino):
+                raise OmaWhatsAppError("The destination folder changed; choose it again.")
+            if replace is True:
+                os.replace(temporary, target.name, src_dir_fd=directory, dst_dir_fd=directory)
+            else:
+                os.link(temporary, target.name, src_dir_fd=directory, dst_dir_fd=directory,
+                        follow_symlinks=False)
+                os.unlink(temporary, dir_fd=directory)
+            temporary = ""
+            os.fsync(directory)
+        except OSError as exc:
+            raise OmaWhatsAppError("The file could not be saved; it may already exist or the folder changed.") from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            if directory >= 0:
+                if temporary:
+                    try:
+                        os.unlink(temporary, dir_fd=directory)
+                    except FileNotFoundError:
+                        pass
+                os.close(directory)
+
     def save_media(self, jid: str, message_id: str, destination: Any,
                    replace: bool = False) -> dict[str, Any]:
         """Copy one attachment to a path the user chose in a save dialog.
@@ -5339,17 +5419,13 @@ class Backend:
             raise OmaWhatsAppError("Choose a file name, not a folder or a link.")
         if os.path.lexists(target_path) and replace is not True:
             raise OmaWhatsAppError("A file with that name is already there; choose another name.")
-        source = Path(self.download_media(jid, message_id)["local_path"])
-        temporary = target_path.with_name(f".{target_path.name}.{secrets.token_hex(6)}.part")
-        try:
-            shutil.copyfile(source, temporary, follow_symlinks=False)
-            os.replace(temporary, target_path)
-        except OSError as exc:
-            try:
-                temporary.unlink()
-            except OSError:
-                pass
-            raise OmaWhatsAppError("The attachment could not be saved there.") from exc
+        with self._private_output(target_path, replace) as output:
+            source = Path(self.download_media(jid, message_id)["local_path"])
+            descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            with os.fdopen(descriptor, "rb") as incoming:
+                if not stat.S_ISREG(os.fstat(incoming.fileno()).st_mode):
+                    raise OmaWhatsAppError("The attachment is not a regular file.")
+                shutil.copyfileobj(incoming, output)
         return {"ok": True, "kind": "save-media", "path": str(target_path)}
 
     @staticmethod
@@ -5999,43 +6075,36 @@ class Backend:
             raise OmaWhatsAppError("Choose a file name, not a folder or a link.")
         if os.path.lexists(destination_path) and replace is not True:
             raise OmaWhatsAppError("A file with that name is already there; choose another name.")
-        rows: list[dict[str, Any]] = []
-        cursor: Any = None
-        while True:
-            page = self.messages(chat["jid"], "", 500, cursor)
-            rows.extend(page["messages"])
-            if not page["has_more"] or not page["messages"] or len(rows) >= 200000:
-                break
-            last = page["messages"][-1]
-            cursor = {"ts": last["timestamp"], "id": last["id"]}
-        lines = [f"WhatsApp chat with {chat['name']}"]
-        for row in reversed(rows):
-            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(int(row["timestamp"])))
-            who = "You" if row.get("from_me") else (row.get("sender") or chat["name"])
-            if row.get("revoked"):
-                body = "This message was deleted"
-            elif row.get("poll"):
-                poll = row["poll"]
-                body = "POLL: " + str(poll.get("question") or "") + "".join(
-                    f"\nOPTION: {option['text']} ({option['votes']} votes)" for option in poll["options"])
-            elif row.get("media_type") == "location":
-                body = (f"location: https://www.openstreetmap.org/?mlat={row.get('latitude')}"
-                        f"&mlon={row.get('longitude')} {row.get('location_name') or ''}").strip()
-            elif row.get("media_type"):
-                label = row.get("filename") or row.get("media_type")
-                body = f"<attached: {label}>" + (f" {row['text']}" if row.get("text") else "")
-            else:
-                body = str(row.get("text") or "")
-            lines.append(f"{when} - {who}: {body}")
-        temporary = destination_path.with_name(f".{destination_path.name}.{secrets.token_hex(4)}.tmp")
-        try:
-            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write("\n".join(lines) + "\n")
-            os.replace(temporary, destination_path)
-        except OSError as exc:
-            temporary.unlink(missing_ok=True)
-            raise OmaWhatsAppError("The export could not be written there.") from exc
+        with self._private_output(destination_path, replace) as output:
+            rows: list[dict[str, Any]] = []
+            cursor: Any = None
+            while True:
+                page = self.messages(chat["jid"], "", 500, cursor)
+                rows.extend(page["messages"])
+                if not page["has_more"] or not page["messages"] or len(rows) >= 200000:
+                    break
+                last = page["messages"][-1]
+                cursor = {"ts": last["timestamp"], "id": last["id"]}
+            lines = [f"WhatsApp chat with {chat['name']}"]
+            for row in reversed(rows):
+                when = time.strftime("%Y-%m-%d %H:%M", time.localtime(int(row["timestamp"])))
+                who = "You" if row.get("from_me") else (row.get("sender") or chat["name"])
+                if row.get("revoked"):
+                    body = "This message was deleted"
+                elif row.get("poll"):
+                    poll = row["poll"]
+                    body = "POLL: " + str(poll.get("question") or "") + "".join(
+                        f"\nOPTION: {option['text']} ({option['votes']} votes)" for option in poll["options"])
+                elif row.get("media_type") == "location":
+                    body = (f"location: https://www.openstreetmap.org/?mlat={row.get('latitude')}"
+                            f"&mlon={row.get('longitude')} {row.get('location_name') or ''}").strip()
+                elif row.get("media_type"):
+                    label = row.get("filename") or row.get("media_type")
+                    body = f"<attached: {label}>" + (f" {row['text']}" if row.get("text") else "")
+                else:
+                    body = str(row.get("text") or "")
+                lines.append(f"{when} - {who}: {body}")
+            output.write(("\n".join(lines) + "\n").encode("utf-8"))
         return {"ok": True, "kind": "export-chat", "path": str(destination_path),
                 "messages": len(rows)}
 
@@ -7380,13 +7449,14 @@ class Backend:
             global_args, timeout, output_limit, include_events = self._transport_globals(
                 unscoped_payload, read_only=policy == "local-read", json_output=True
             )
-            command = [*scoped.cli_args, *global_args, *args]
+            public_version = path == ("version",)
+            command = [*([] if public_version else scoped.cli_args), *global_args, *args]
             if policy == "local-read":
                 result = self._run(
                     command, timeout=timeout + 5, stdout_limit=output_limit,
                     stderr_limit=output_limit if include_events else MAX_PROCESS_ERROR,
-                    # The scope is already spelled out in global_args.
-                    account=None,
+                    # The scope is already in command. Version contains no private values.
+                    account=None, private_args=not public_version,
                 )
             else:
                 local_destructive = path in {
@@ -7409,14 +7479,14 @@ class Backend:
         )
 
     @staticmethod
-    def _run_auth_terminal(command: list[str]) -> subprocess.CompletedProcess[str]:
+    def _run_auth_terminal(command: list[str], *, input_file: Any = None) -> subprocess.CompletedProcess[str]:
         """Forward QR/output to the user's terminal without storing it.
 
         Only a bounded suffix in memory is inspected for fixed failure phrases.
         QR codes and private diagnostics never enter JSON or persistent logs.
         """
         rejected = False
-        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+        with subprocess.Popen(command, stdin=input_file, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
             with selectors.DefaultSelector() as selector:
                 assert process.stdout is not None and process.stderr is not None
                 selector.register(process.stdout, selectors.EVENT_READ, sys.stdout)
@@ -7504,11 +7574,18 @@ class Backend:
             operation_error: BaseException | None = None
             returncode: int | None = None
             try:
-                command = [str(self.wacli), *global_args, *args]
-                result = self._run_auth_terminal(command) if path in {
-                    ("auth",), ("accounts", "add")
-                } else subprocess.run(command, check=False)
-                returncode = result.returncode
+                self._require_private_transport()
+                encoded = json.dumps([*global_args, *args], ensure_ascii=False).encode("utf-8")
+                if len(encoded) > 65536:
+                    raise OmaWhatsAppError("The private command is too large.")
+                with tempfile.TemporaryFile() as private_input:
+                    private_input.write(encoded)
+                    private_input.seek(0)
+                    command = [str(self.wacli), "--private-args-stdin"]
+                    result = self._run_auth_terminal(command, input_file=private_input) if path in {
+                        ("auth",), ("accounts", "add")
+                    } else subprocess.run(command, stdin=private_input, check=False)
+                    returncode = result.returncode
             except BaseException as exc:
                 operation_error = exc
             if path == ("auth",):
@@ -7563,6 +7640,7 @@ def parser() -> argparse.ArgumentParser:
     commands = value.add_subparsers(dest="command", required=True)
     status = commands.add_parser("status")
     status.add_argument("--account", default="")
+    status.add_argument("--request-stdin", action="store_true")
     link_account = commands.add_parser("link-account")
     link_account.add_argument("name")
     link_account.add_argument("--authorize", default="")
@@ -7621,6 +7699,10 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("about")
     commands.add_parser("save-media")
     commands.add_parser("notify-open")
+    commands.add_parser("prepare-link")
+    commands.add_parser("consume-handoff")
+    link_token = commands.add_parser("link-token")
+    link_token.add_argument("token")
     commands.add_parser("sync-mode")
     commands.add_parser("quit")
     commands.add_parser("unlink-account")
@@ -7671,6 +7753,13 @@ def main() -> int:
                     exc, "OmaWhatsApp could not recover background sync."
                 ),
             }, 1)
+    if args.command == "link-token":
+        try:
+            data = backend.consume_handoff(args.token, "link")
+            return backend.link_account(data["name"], "interactive")
+        except OmaWhatsAppError as exc:
+            print(clean_error(exc, "Linking could not be started."), file=sys.stderr)
+            return 1
     if args.command == "link-account":
         try:
             return backend.link_account(args.name, args.authorize)
@@ -7707,7 +7796,8 @@ def main() -> int:
             return emit({"ok": True, "kind": "session-ready", "ready": ready},
                         0 if ready else 1)
         if args.command == "status":
-            backend.use_account(str(getattr(args, "account", "") or ""))
+            scope = request().get("account", "") if args.request_stdin else args.account
+            backend.use_account(str(scope or ""))
             return emit(backend.status())
         if args.command == "capabilities":
             return emit(backend.capabilities())
@@ -7717,6 +7807,14 @@ def main() -> int:
         # Every request may name the account it belongs to. Empty keeps a
         # preserved root session stable, then falls back to wacli's default.
         backend.use_account(payload.get("account"))
+        if args.command == "prepare-link":
+            name = str(payload.get("name") or "").strip()
+            if payload.get("authorization") != "interactive" or not ACCOUNT_NAME.fullmatch(name):
+                raise OmaWhatsAppError("Choose an account name and authorize interactive linking.")
+            return emit({"ok": True, "token": backend.prepare_handoff("link", {"name": name})})
+        if args.command == "consume-handoff":
+            data = backend.consume_handoff(payload.get("token"), "notification")
+            return emit({"ok": True, "target": data})
         if args.command == "wacli":
             if args.transport_args:
                 raise OmaWhatsAppError(

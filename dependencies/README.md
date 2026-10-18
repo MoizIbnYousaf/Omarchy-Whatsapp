@@ -20,6 +20,12 @@ The builder exports only committed upstream source and applies only the bundled
 patch. It neither downloads source nor installs a binary or starts WhatsApp.
 Use Go 1.27.1 or newer, a C compiler and the upstream build prerequisites.
 
-The app refuses mutation commands when this protocol is unavailable, before
-passing any private content to a child. Existing local reads still work with
-older supported wacli versions. Never substitute an unsafe argv fallback.
+The app refuses sensitive commands when this protocol is unavailable, before
+passing any private content to a child. Direct local SQLite reads still work with older versions; sensitive external
+reads and terminal authentication require private input too. Never substitute an unsafe argv fallback.
+
+The 0.18.4 asset is extension `omawhatsapp.2`. Its group-name fallback preserves
+an existing cached subject when metadata is temporarily unavailable, rather than
+substituting the current participant's push name. The app independently prefers
+the groups table's subject. Protocol version remains 1; existing private-input
+binaries protect reads, but install the .2 asset for the sync-name correction.

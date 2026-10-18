@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.18.4 — Private reads, safe saves, and stable group titles
+
+- Keep group subjects ahead of cached sender names throughout the chat rail,
+  search, details and notifications. The maintained sync build no longer falls
+  back to a participant's push name when group metadata is unavailable.
+- Protect sensitive read commands, presence, profile/media lookups and terminal
+  auth with private input. Notification clicks and account linking use bounded,
+  expiring, one-use local handoffs; account status probes use stdin. Save dialogs
+  suggest generic names instead of putting chat/file names in process arguments.
+- Save attachments privately at 0600 and bind output to the chosen directory.
+  Save/export without overwrite permission atomically refuse a destination
+  created during download or pagination; failed copies clean up temporary files.
+- Reject malformed Unicode, invalid IDs and oversized/deep agent requests before
+  dispatch. The MCP server continues serving healthy requests after rejection.
+- Add synthetic regressions for process privacy, file races/permissions, handoff
+  replay/expiry, group renames and protocol recovery. Retain clipboard and media
+  isolation protections from previous releases.
+
+
 ## 0.18.3 — 2026-10-17
 
 - Keep private text, recipients, queries, account names, captions and file paths out of the optional agent skill's JSON-builder process arguments. Use a Bash-builtin/stdin request builder throughout the focused and advanced examples. Thanks to @HANCORE-linux for identifying the remaining `jq --arg` exposure.

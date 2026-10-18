@@ -105,7 +105,7 @@ class BackendTests(unittest.TestCase):
         self.store = self.root / "wacli"
         self.store.mkdir()
         self.wacli = self.root / "wacli-bin"
-        self.wacli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        self.wacli.write_text("#!/bin/sh\nif [ \"$1\" = \"--private-args-version\" ]; then echo '{\"protocol\":1,\"max_bytes\":65536}'; fi\nexit 0\n", encoding="utf-8")
         self.wacli.chmod(0o700)
         self.preview = self.root / "mock.png"
         self.preview.write_bytes(b"png")
@@ -964,7 +964,10 @@ class BackendTests(unittest.TestCase):
         # The owner's report: a click opened the full app with no quick reply.
         self.assertEqual(calls[0][:3], [str(shell), backend_module.PLUGIN_ID, "openDropdown"],
                          "a click opens the reply view by the bar")
-        self.assertEqual(json.loads(calls[0][3]), {"account": "work", "jid": "team@g.us"})
+        token = json.loads(calls[0][3])["handoff"]
+        self.assertEqual(self.backend.consume_handoff(token, "notification"),
+                         {"account": "work", "jid": "team@g.us"})
+        self.assertNotIn("team@g.us", " ".join(calls[0]))
         self.assertEqual(self.backend._notify_ids(), {"work\nteam@g.us": 42},
                          "the popup id is kept for the next message in that chat")
         self.backend.settings({"notify_reply": False})
@@ -2852,10 +2855,7 @@ class BackendTests(unittest.TestCase):
                 ["auth", "--qr-format", "terminal"], authorization="interactive"
             )
         self.assertEqual(code, 0)
-        self.assertEqual(run.call_args.args[0], [
-            str(self.wacli), "--store", str(self.store.resolve()),
-            "auth", "--qr-format", "terminal"
-        ])
+        self.assertEqual(run.call_args.args[0], [str(self.wacli), "--private-args-stdin"])
         systemctl.assert_called_once_with([
             "enable", "--now", "wacli-sync.service"
         ])
@@ -2885,9 +2885,7 @@ class BackendTests(unittest.TestCase):
                 ["auth"], authorization="interactive", store=str(one_off)
             )
         self.assertEqual(result, 0)
-        self.assertEqual(run.call_args.args[0][:3], [
-            str(self.wacli), "--store", str(one_off.resolve()),
-        ])
+        self.assertEqual(run.call_args.args[0], [str(self.wacli), "--private-args-stdin"])
         systemctl.assert_not_called()
 
     def test_wacli_interactive_cli_parser_preserves_command(self) -> None:
@@ -3380,6 +3378,12 @@ import pathlib
 import sys
 
 args = sys.argv[1:]
+if args == ["--private-args-version"]:
+    print('{"protocol":1,"max_bytes":65536}')
+    sys.exit(0)
+if args == ["--private-args-stdin"]:
+    import json
+    args = json.load(sys.stdin)
 if "accounts" in args and "list" in args:
     sys.stdout.write(pathlib.Path(PAYLOAD).read_text(encoding="utf-8"))
 sys.exit(0)
@@ -3489,10 +3493,12 @@ sys.exit(0)
 
         completed = subprocess.CompletedProcess([], 0, "{}", "")
         with mock.patch.object(
-                backend_module, "run_bounded", return_value=completed) as run:
+                backend_module, "run_bounded", return_value=completed) as run, \
+                mock.patch.object(backend, "_require_private_transport"):
             backend._run(["--json", "doctor"], account=primary)
-        self.assertEqual(run.call_args.args[0][:3],
-                         [str(self.wacli), "--store", str(legacy.resolve())])
+        self.assertEqual(run.call_args.args[0], [str(self.wacli), "--private-args-stdin"])
+        self.assertEqual(json.loads(run.call_args.kwargs["input_bytes"])[:2],
+                         ["--store", str(legacy.resolve())])
 
         completed = subprocess.CompletedProcess(
             [], 0, '{"success":true,"data":{"version":"synthetic"}}', ""
@@ -3501,7 +3507,7 @@ sys.exit(0)
             result = backend.transport({"account": "primary", "args": ["version"]})
         self.assertTrue(result["ok"])
         command = run.call_args.args[0]
-        self.assertEqual(command[:2], ["--store", str(legacy.resolve())])
+        self.assertNotIn("--store", command)
         self.assertNotIn("--account", command)
 
     def test_root_account_reference_stays_stable_across_the_first_link(self) -> None:

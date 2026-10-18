@@ -31,7 +31,7 @@ class BackendHardeningTests(unittest.TestCase):
         self.store = self.root / "store"
         self.store.mkdir()
         self.wacli = self.root / "wacli"
-        self.wacli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        self.wacli.write_text("#!/bin/sh\nif [ \"$1\" = \"--private-args-version\" ]; then echo '{\"protocol\":1,\"max_bytes\":65536}'; fi\nexit 0\n", encoding="utf-8")
         self.wacli.chmod(0o700)
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.executescript(SCHEMA)
@@ -839,7 +839,7 @@ class AccountLifecycleTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
         self.wacli = self.root / "wacli"
-        self.wacli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        self.wacli.write_text("#!/bin/sh\nif [ \"$1\" = \"--private-args-version\" ]; then echo '{\"protocol\":1,\"max_bytes\":65536}'; fi\nexit 0\n", encoding="utf-8")
         self.wacli.chmod(0o700)
         self.work_store = self.root / "work"
         self.home_store = self.root / "home"
@@ -891,9 +891,7 @@ class AccountLifecycleTests(unittest.TestCase):
                 ["sync", "--once"], authorization="sync", account="home"
             )
         self.assertEqual(code, 0)
-        self.assertEqual(run.call_args.args[0], [
-            str(self.wacli), "--account", "home", "sync", "--once"
-        ])
+        self.assertEqual(run.call_args.args[0], [str(self.wacli), "--private-args-stdin"])
         commands = [call.args[0] for call in systemctl.call_args_list]
         self.assertEqual(commands, [
             ["stop", "wacli-sync@home.service"],
@@ -915,9 +913,7 @@ class AccountLifecycleTests(unittest.TestCase):
                 ["auth"], authorization="interactive", account="home"
             )
         self.assertEqual(code, 0)
-        self.assertEqual(run.call_args.args[0], [
-            str(self.wacli), "--account", "home", "auth"
-        ])
+        self.assertEqual(run.call_args.args[0], [str(self.wacli), "--private-args-stdin"])
         systemctl.assert_called_once_with([
             "enable", "--now", "wacli-sync@home.service"
         ])

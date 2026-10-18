@@ -1,6 +1,6 @@
-diff --git i/cmd/wacli/main.go w/cmd/wacli/main.go
+diff --git c/cmd/wacli/main.go w/cmd/wacli/main.go
 index f83b8e8..257676f 100644
---- i/cmd/wacli/main.go
+--- c/cmd/wacli/main.go
 +++ w/cmd/wacli/main.go
 @@ -3,0 +4 @@ import (
 +	"fmt"
@@ -20,7 +20,7 @@ index f83b8e8..257676f 100644
 +		privateInputMode = true
 +	}
 +	if err := execute(args); err != nil {
-diff --git i/cmd/wacli/private_args.go w/cmd/wacli/private_args.go
+diff --git c/cmd/wacli/private_args.go w/cmd/wacli/private_args.go
 new file mode 100644
 index 0000000..9d4f815
 --- /dev/null
@@ -78,7 +78,7 @@ index 0000000..9d4f815
 +	}
 +	return decoded, true, nil
 +}
-diff --git i/cmd/wacli/private_args_test.go w/cmd/wacli/private_args_test.go
+diff --git c/cmd/wacli/private_args_test.go w/cmd/wacli/private_args_test.go
 new file mode 100644
 index 0000000..cb04c04
 --- /dev/null
@@ -116,9 +116,9 @@ index 0000000..cb04c04
 +		t.Fatal("ordinary CLI changed")
 +	}
 +}
-diff --git i/cmd/wacli/root.go w/cmd/wacli/root.go
+diff --git c/cmd/wacli/root.go w/cmd/wacli/root.go
 index bfe8f33..018e169 100644
---- i/cmd/wacli/root.go
+--- c/cmd/wacli/root.go
 +++ w/cmd/wacli/root.go
 @@ -4,0 +5 @@ import (
 +	"errors"
@@ -133,4 +133,41 @@ index bfe8f33..018e169 100644
 +		}
 +		_ = out.WriteError(os.Stderr, flags.asJSON, fmt.Errorf("%s", message))
 +		return
++	}
+diff --git c/internal/wa/chat_name_fallback_test.go w/internal/wa/chat_name_fallback_test.go
+new file mode 100644
+index 0000000..9c7cba8
+--- /dev/null
++++ w/internal/wa/chat_name_fallback_test.go
+@@ -0,0 +1,17 @@
++package wa
++
++import (
++	"go.mau.fi/whatsmeow/types"
++	"testing"
++)
++
++func TestGroupFallbackDoesNotUseSender(t *testing.T) {
++	for _, server := range []string{types.GroupServer, types.BroadcastServer} {
++		if got := chatNameFallback(types.NewJID("synthetic", server), "Synthetic sender", "fallback"); got != "" {
++			t.Fatalf("group fallback used a sender: %q", got)
++		}
++	}
++	if got := chatNameFallback(types.NewJID("synthetic", types.DefaultUserServer), "Synthetic contact", "fallback"); got != "Synthetic contact" {
++		t.Fatalf("direct message lost its contact name: %q", got)
++	}
++}
+diff --git c/internal/wa/contacts.go w/internal/wa/contacts.go
+index f80deb1..b3688ab 100644
+--- c/internal/wa/contacts.go
++++ w/internal/wa/contacts.go
+@@ -154,0 +155,9 @@ func (c *Client) ResolveChatName(ctx context.Context, chat types.JID, pushName s
++	return chatNameFallback(chat, pushName, fallback)
++}
++
++// A group's sender push name is never its subject. An empty result preserves
++// the existing stored title when a metadata lookup is temporarily unavailable.
++func chatNameFallback(chat types.JID, pushName, fallback string) string {
++	if chat.Server == types.GroupServer || chat.IsBroadcastList() {
++		return ""
 +	}

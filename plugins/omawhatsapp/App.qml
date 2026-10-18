@@ -1403,14 +1403,11 @@ Item {
     var origin = currentChatRef()
     if (origin.jid === "" || root.demoMode || !root.service) return false
     if (!zenityReady()) return false
-    var name = String(item.filename || "").split("/").pop()
-    if (name === "") name = String(item.local_path || "").split("/").pop()
-    if (name === "") name = "attachment"
     savePickerProcess.item = item
     savePickerProcess.originRef = AccountModel.chatRef(origin.account, origin.jid)
     savePickerProcess.command = ["/usr/bin/zenity", "--file-selection", "--save",
-      "--confirm-overwrite", "--title=Save attachment",
-      "--filename=" + String(Quickshell.env("HOME") || "") + "/Downloads/" + name]
+      "--title=Save attachment",
+      "--filename=" + String(Quickshell.env("HOME") || "") + "/Downloads/attachment"]
     savePickerProcess.running = true
     return true
   }
@@ -1420,11 +1417,10 @@ Item {
     var origin = currentChatRef()
     if (origin.jid === "" || root.demoMode || !root.service || exportPickerProcess.running) return false
     if (!zenityReady()) return false
-    var name = String(root.displayGroupName || "chat").replace(/[\/\\:*?"<>|]+/g, " ").trim() || "chat"
     exportPickerProcess.originRef = AccountModel.chatRef(origin.account, origin.jid)
     exportPickerProcess.command = ["/usr/bin/zenity", "--file-selection", "--save",
-      "--confirm-overwrite", "--title=Export chat",
-      "--filename=" + String(Quickshell.env("HOME") || "") + "/Documents/WhatsApp - " + name + ".txt"]
+      "--title=Export chat",
+      "--filename=" + String(Quickshell.env("HOME") || "") + "/Documents/WhatsApp export.txt"]
     exportPickerProcess.running = true
     return true
   }
@@ -2410,6 +2406,44 @@ Item {
         }
       }
 
+      Dialog {
+        id: outputConfirm
+        objectName: "outputConfirm"
+        property var pending: null
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(Style.space(460), window.width - Style.space(28))
+        modal: true
+        focus: true
+        title: "Save to this file?"
+        palette.window: root.background
+        palette.windowText: root.foreground
+        palette.button: root.background
+        palette.buttonText: root.foreground
+        palette.highlight: root.accent
+        palette.highlightedText: root.background
+        font.family: root.fontFamily
+        standardButtons: Dialog.Save | Dialog.Cancel
+        closePolicy: Popup.CloseOnEscape
+        contentItem: Text {
+          textFormat: Text.PlainText
+          text: "Any existing file at this location will be replaced.\n\n"
+            + String(outputConfirm.pending ? outputConfirm.pending.path : "")
+          color: root.foreground
+          font.family: root.fontFamily
+          wrapMode: Text.WrapAnywhere
+        }
+        onAccepted: {
+          var action = pending
+          pending = null
+          if (!action || !root.service) return
+          if (action.kind === "media")
+            root.service.saveMedia(action.target, action.item, action.path, "app")
+          else root.service.exportChat(action.target, action.path, "app")
+        }
+        onRejected: pending = null
+      }
+
       Process {
         id: savePickerProcess
         objectName: "savePickerProcess"
@@ -2422,7 +2456,8 @@ Item {
           var chosen = String(savePickerOutput.text || "").trim()
           originRef = AccountModel.chatRef("", "")
           if (exitCode !== 0 || chosen.charAt(0) !== "/" || !root.service) return
-          root.service.saveMedia(target, item, chosen, "app")
+          outputConfirm.pending = {kind: "media", target: target, item: item, path: chosen}
+          outputConfirm.open()
         }
       }
 
@@ -2437,7 +2472,8 @@ Item {
           var chosen = String(exportPickerOutput.text || "").trim()
           originRef = AccountModel.chatRef("", "")
           if (exitCode !== 0 || chosen.charAt(0) !== "/" || !root.service) return
-          root.service.exportChat(target, chosen, "app")
+          outputConfirm.pending = {kind: "export", target: target, path: chosen}
+          outputConfirm.open()
         }
       }
 

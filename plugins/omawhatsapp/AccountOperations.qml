@@ -26,10 +26,10 @@ Item {
     try { return JSON.parse(String(raw || "{}")) } catch (error) { return null }
   }
 
-  function linkCommand(name) {
+  function linkCommand(token) {
     return ["/usr/bin/xdg-terminal-exec",
-      "--title=OmaWhatsApp · Link " + String(name || ""), "--hold", "--",
-      helper, "link-account", String(name || ""), "--authorize", "interactive"]
+      "--title=OmaWhatsApp · Link account", "--hold", "--",
+      helper, "link-token", String(token)]
   }
 
   // The main account links with wacli's own auth: a terminal shows the QR
@@ -58,9 +58,9 @@ Item {
     linkTarget = value
     linkPolls = 0
     statusMessage = "Finish linking " + value + " in the terminal"
-    linkProcess.command = linkCommand(value)
-    linkProcess.running = true
-    linkPoll.restart()
+    prepareLinkProcess.payload = JSON.stringify({name: value, authorization: "interactive"})
+    prepareLinkProcess.stdinEnabled = true
+    prepareLinkProcess.running = true
     return true
   }
 
@@ -105,7 +105,8 @@ Item {
 
   function handleLinkExit(exitCode) {
     if (!recordLinkExit(exitCode)) return
-    linkProbe.command = [helper, "status", "--account", linkTarget]
+    linkProbe.payload = JSON.stringify({account: linkTarget})
+    linkProbe.stdinEnabled = true
     linkProbe.running = true
     refreshRequested()
   }
@@ -166,6 +167,27 @@ Item {
   }
 
   Process {
+    id: prepareLinkProcess
+    property string payload: ""
+    command: [root.helper, "prepare-link"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: prepareLinkOutput }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      var response = root.parseJson(prepareLinkOutput.text)
+      if (exitCode !== 0 || !response || response.ok !== true) {
+        root.linkPhase = "idle"
+        root.linkTarget = ""
+        root.statusMessage = "Linking could not be started"
+        return
+      }
+      linkProcess.command = root.linkCommand(response.token)
+      linkProcess.running = true
+      linkPoll.restart()
+    }
+  }
+
+  Process {
     id: linkProcess
     command: []
     onExited: function(exitCode) { root.handleLinkExit(exitCode) }
@@ -173,7 +195,10 @@ Item {
 
   Process {
     id: linkProbe
-    command: []
+    property string payload: ""
+    command: [root.helper, "status", "--request-stdin"]
+    stdinEnabled: true
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
     stdout: StdioCollector { id: linkProbeOutput }
     onExited: function(exitCode) {
       var payload = root.parseJson(linkProbeOutput.text)

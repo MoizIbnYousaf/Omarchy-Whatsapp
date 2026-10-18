@@ -224,3 +224,13 @@ addition to `qt6-imageformats` to cover richer desktop installations.
 `test_cold_bootstrap.py` starts the resident service with native QML imports deliberately absent. Media components must remain lazy until bootstrap registers the module; preloading the module in ordinary tests must not hide a startup dependency.
 
 Media verification checks actual pixels after hidden loading and repeated first openings, not only `Image.Ready`. The installed Cua smoke check must show the photo before any window resize.
+
+## Follow-on privacy and integrity regressions
+
+`test_followup_regressions.py` exercises real fake-child process boundaries for
+sensitive reads and authentication, one-use handoff expiry/purpose, private save
+permissions during copy, deterministic save/export destination races and parent
+replacement, group subject preference/rename/search, and malformed/oversized MCP
+frames followed by valid pings. All data is synthetic. The dependency patch also
+contains a group-name fallback test. No private store or network mutation is
+needed to establish these guarantees.

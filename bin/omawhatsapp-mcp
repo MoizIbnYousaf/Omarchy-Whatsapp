@@ -1572,7 +1572,35 @@ def listed_tools() -> list[dict[str, Any]]:
             for entry in TOOLS.values()]
 
 
+MAX_RPC_LINE = 1024 * 1024
+MAX_RPC_BATCH = 64
+
+
+def valid_scalars(value: Any, depth: int = 0) -> bool:
+    if depth > 64:
+        return False
+    if isinstance(value, str):
+        return not any(0xD800 <= ord(char) <= 0xDFFF for char in value)
+    if isinstance(value, dict):
+        return all(valid_scalars(k, depth + 1) and valid_scalars(v, depth + 1)
+                   for k, v in value.items())
+    if isinstance(value, list):
+        return all(valid_scalars(v, depth + 1) for v in value)
+    if isinstance(value, float):
+        return value == value and value not in (float("inf"), float("-inf"))
+    return True
+
+
+def invalid_request() -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": None,
+            "error": {"code": -32600, "message": "Invalid request"}}
+
+
 def respond(message: dict[str, Any]) -> dict[str, Any] | None:
+    identifier = message.get("id")
+    if (message.get("jsonrpc") != "2.0" or not isinstance(message.get("method"), str)
+            or isinstance(identifier, (bool, list, dict, float)) or not valid_scalars(message)):
+        return invalid_request()
     method = message.get("method")
     identifier = message.get("id")
     params = message.get("params") if isinstance(message.get("params"), dict) else {}
@@ -1599,16 +1627,27 @@ def respond(message: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def serve(stdin: Any = sys.stdin, stdout: Any = sys.stdout) -> int:
-    for line in stdin:
+    while True:
+        line = stdin.readline(MAX_RPC_LINE + 1)
+        if not line:
+            break
+        oversized = len(line) > MAX_RPC_LINE
+        if oversized:
+            while line and not line.endswith("\n"):
+                line = stdin.readline(MAX_RPC_LINE + 1)
+            line = "null"  # Reject the entire oversized frame before dispatch.
         if not line.strip():
             continue
         try:
             message = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
             reply: Any = {"jsonrpc": "2.0", "id": None,
                           "error": {"code": -32700, "message": "Parse error"}}
         else:
             batch = message if isinstance(message, list) else [message]
+            rejected_batch = oversized or not batch or len(batch) > MAX_RPC_BATCH
+            if rejected_batch:
+                batch = [None]
             replies = [respond(item) if isinstance(item, dict) else
                        {"jsonrpc": "2.0", "id": None,
                         "error": {"code": -32600, "message": "Invalid request"}}
@@ -1616,8 +1655,8 @@ def serve(stdin: Any = sys.stdin, stdout: Any = sys.stdout) -> int:
             replies = [item for item in replies if item is not None]
             if not replies:
                 continue
-            reply = replies if isinstance(message, list) else replies[0]
-        stdout.write(json.dumps(reply, ensure_ascii=False) + "\n")
+            reply = invalid_request() if rejected_batch else (replies if isinstance(message, list) else replies[0])
+        stdout.write(json.dumps(reply, ensure_ascii=True) + "\n")
         stdout.flush()
     return 0
 

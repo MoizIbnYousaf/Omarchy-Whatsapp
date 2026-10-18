@@ -630,6 +630,8 @@ Item {
   }
 
   function openApp(payloadJson) {
+    var data = root.parseJson(payloadJson)
+    if (data && data.handoff) return root.openHandoff(data.handoff, false)
     pendingAppPayload = String(payloadJson || "{}")
     injectApp()
     if (!appLoader.item) return false
@@ -637,6 +639,31 @@ Item {
     pendingAppPayload = ""
     appLoader.item.open(payload)
     return true
+  }
+
+  function openHandoff(token, dropdown) {
+    if (handoffProcess.running || !/^[0-9a-f]{48}$/.test(String(token))) return false
+    handoffProcess.dropdown = dropdown
+    handoffProcess.payload = JSON.stringify({token: String(token)})
+    handoffProcess.stdinEnabled = true
+    handoffProcess.running = true
+    return true
+  }
+
+  Process {
+    id: handoffProcess
+    property string payload: ""
+    property bool dropdown: false
+    command: [root.helper, "consume-handoff"]
+    stdinEnabled: true
+    stdout: StdioCollector { id: handoffOutput }
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
+    onExited: function(exitCode) {
+      var response = root.parseJson(handoffOutput.text)
+      if (exitCode !== 0 || !response || response.ok !== true) return
+      if (dropdown) root.openDropdownRequested(response.target)
+      else root.openApp(JSON.stringify(response.target))
+    }
   }
 
   function closeApp() {
@@ -687,7 +714,8 @@ Item {
     }
     statusProcess.requestedShortcutsGeneration = root.shortcutsGeneration
     statusProcess.requestedAccount = account
-    statusProcess.command = [helper, "status", "--account", account]
+    statusProcess.payload = JSON.stringify({account: account})
+    statusProcess.stdinEnabled = true
     statusProcess.running = true
   }
   function refreshFromStore() {
@@ -1916,6 +1944,7 @@ Item {
     function openDropdown(payload: string): string {
       var data = {}
       try { data = JSON.parse(payload || "{}") } catch (e) {}
+      if (data.handoff) return root.openHandoff(data.handoff, true) ? "loading" : "busy"
       root.openDropdownRequested(data)
       return "ok"
     }
@@ -2029,7 +2058,10 @@ Item {
     objectName: "statusProcess"
     property string requestedAccount: ""
     property int requestedShortcutsGeneration: 0
-    command: [root.helper, "status", "--account", ""]
+    property string payload: "{}"
+    command: [root.helper, "status", "--request-stdin"]
+    stdinEnabled: true
+    onStarted: { write(payload + "\n"); payload = ""; stdinEnabled = false }
     stdout: StdioCollector { id: statusOutput }
     stderr: StdioCollector { id: statusError }
     onExited: function(exitCode) {

@@ -203,12 +203,14 @@ OmaWhatsApp is independent and not affiliated with WhatsApp or Meta.
 From 0.18.1, sending, editing, captions and other mutation commands require the
 OmaWhatsApp privacy-enabled **wacli 0.19.0** build. It keeps private command
 arguments in a bounded stdin pipe instead of the Unix process command line.
+This includes sensitive read-only searches, profile/media lookups,
+presence and terminal authentication, not only writes.
 This is a small maintained extension of upstream wacli, not an upstream release.
-An ordinary older binary still supports local reads; the app refuses affected
+An ordinary older binary still supports direct local SQLite reads; the app refuses affected
 operations with an upgrade message and never falls back to exposed arguments.
 
-Download the `wacli_0.19.0_omawhatsapp.1_linux_amd64.tar.gz` asset and
-`checksums.txt` from the same 0.18.1 GitHub release, verify the archive against
+Download the `wacli_0.19.0_omawhatsapp.2_linux_amd64.tar.gz` asset and
+`checksums.txt` from the same 0.18.4 GitHub release, verify the archive against
 the checksum file, extract it to a temporary directory, then install its `wacli`
 executable to `~/.local/bin/wacli`. Check `wacli --private-args-version` reports
 `protocol: 1` and `max_bytes: 65536`. This asset is for Linux x86-64; other
@@ -224,3 +226,17 @@ Animated GIF/WebP surfaces now use a frame reader instead of Qt's recursive
 movie restart path. Frames are limited to 2048 pixels on their longest edge;
 source files over 64 MiB or images over 64 megapixels fail safely. The original
 file is not modified. Malformed images display the existing unavailable state.
+
+### Local output and process boundaries
+
+Attachment saves and chat exports create private (0600) files. Without explicit
+replacement permission, a concurrently created destination is preserved. Save
+pickers use generic suggestions; choose the filename you want in the dialog.
+Notification-click and GUI account-link targets cross process boundaries as
+short-lived one-use random handles, not chat IDs or account labels.
+
+This protects the app's automatic child-command payloads; it does not hide
+existing filesystem paths, systemd unit identities, or commands explicitly
+entered into a user's shell. The selected external file viewer necessarily
+receives the path of the file the user asked it to open. Avoid placing private
+values in manually entered process arguments or exported environment variables.

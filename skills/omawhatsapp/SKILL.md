@@ -30,9 +30,10 @@ invoking `wacli` directly.
 
 ## Private command transport
 
-Mutation commands require the accompanying privacy-enabled wacli build. The
+Sensitive commands, including external read-only searches and account-scoped
+probes, require the accompanying privacy-enabled wacli build. The
 helper capability-checks it and passes complete arguments through bounded
-stdin. If the helper reports that the build is missing, stop and explain the
+stdin. Direct SQLite reads do not require this transport. If the helper reports that the build is missing, stop and explain the
 upgrade requirement from the README; never bypass it by running private
 message text through ordinary wacli command-line arguments.
 

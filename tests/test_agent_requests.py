@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +23,13 @@ class AgentRequests(unittest.TestCase):
         with subprocess.Popen(["jq", "-c", "--arg", "text", text, "{text:$text}"],
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE) as process:
             try:
-                self.assertIn(text.encode(), Path(f"/proc/{process.pid}/cmdline").read_bytes())
+                deadline = time.monotonic() + 2
+                argv = b""
+                while time.monotonic() < deadline and text.encode() not in argv:
+                    argv = Path(f"/proc/{process.pid}/cmdline").read_bytes()
+                    if text.encode() not in argv:
+                        time.sleep(0.005)  # exec may briefly publish an empty cmdline
+                self.assertIn(text.encode(), argv)
             finally:
                 process.kill(); process.communicate()
 

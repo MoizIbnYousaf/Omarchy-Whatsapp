@@ -76,6 +76,9 @@ TestCase {
         linkMainAccount: function(name) { this.linkedName = name; this.mainLinked = true },
         linkAccount: function(name) { this.linkedName = name; this.mainLinked = false }
       })
+      property var savedOutput: null
+      function saveMedia(target, item, path, owner) { savedOutput = {kind: "media", target: target, path: path} }
+      function exportChat(target, path, owner) { savedOutput = {kind: "export", target: target, path: path} }
       property var lastPreference: null
       property var lastDelete: null
       property var lastForward: null
@@ -270,6 +273,24 @@ TestCase {
     verify(app !== null)
     app.opened = true
     return { app: app, service: service }
+  }
+
+  function test_save_confirmation_keeps_original_target_and_cancel_writes_nothing() {
+    var h = createHarness()
+    var dialog = findChild(h.app, "outputConfirm")
+    verify(dialog !== null)
+    dialog.pending = {kind: "export", target: workChat, path: "/synthetic/export.txt"}
+    dialog.open()
+    dialog.reject()
+    compare(h.service.savedOutput, null)
+    compare(dialog.pending, null)
+    dialog.pending = {kind: "media", target: workChat, item: {id: "synthetic"}, path: "/synthetic/file"}
+    dialog.open()
+    h.service.selectChat(otherChat)
+    dialog.accept()
+    compare(h.service.savedOutput.target.jid, workChat.jid)
+    compare(h.service.savedOutput.path, "/synthetic/file")
+    compare(dialog.pending, null)
   }
 
   function chatPreviewRow(app, index) {
@@ -745,7 +766,7 @@ TestCase {
     verify(h.app.runChatDetailsAction("export"))
     var picker = findChild(h.app, "exportPickerProcess")
     verify(picker.command.indexOf("--save") >= 0)
-    verify(String(picker.command[picker.command.length - 1]).indexOf("/Documents/WhatsApp - ") > 0)
+    verify(String(picker.command[picker.command.length - 1]).indexOf("/Documents/WhatsApp export.txt") > 0)
     verify(String(picker.command[picker.command.length - 1]).slice(-4) === ".txt")
     verify(h.app.runChatDetailsAction("download-missing"))
     compare(h.service.downloads, ["shared@example"])
@@ -1070,9 +1091,9 @@ TestCase {
     var process = findChild(app, "savePickerProcess")
     verify(process.running)
     verify(process.command.indexOf("--save") >= 0)
-    verify(process.command.indexOf("--confirm-overwrite") >= 0)
+    verify(process.command.indexOf("--confirm-overwrite") < 0, "the app confirms the exact destination separately")
     verify(process.command.filter(function(arg) {
-      return arg.indexOf("--filename=") === 0 && arg.endsWith("/Downloads/trip.jpg") }).length === 1)
+      return arg.indexOf("--filename=") === 0 && arg.endsWith("/Downloads/attachment") }).length === 1)
   }
 
   function test_app_reports_when_the_conversation_is_on_screen() {
