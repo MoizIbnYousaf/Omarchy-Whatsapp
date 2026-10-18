@@ -83,8 +83,8 @@ omarchy plugin add https://github.com/MoizIbnYousaf/Omarchy-Whatsapp --enable
 
 The native clipboard-safe editors and isolated media worker build locally against your installed Qt on first launch (and rebuild after a Qt update). No code is downloaded during that build. Media previews use bounded child processes; FFmpeg regenerates audio/video previews without original metadata. Oversized or unsupported previews show an error, and original attachments remain available to save. See [media limits](docs/MEDIA-SECURITY.md). If the compiler or matching Qt headers are unavailable, the app keeps its editors unloaded and reports the problem.
 
-For sending and other mutations, also install the verified privacy-enabled
-wacli asset described under [Private command transport](#private-command-transport).
+For sending and other mutations, also build and install the privacy-enabled
+wacli from pinned source as described under [Private command transport](#private-command-transport).
 The first time the app opens it walks you through the rest:
 
 1. **Set it up on this computer.** One click adds, in your home folder only,
@@ -209,13 +209,12 @@ This is a small maintained extension of upstream wacli, not an upstream release.
 An ordinary older binary still supports direct local SQLite reads; the app refuses affected
 operations with an upgrade message and never falls back to exposed arguments.
 
-Download the `wacli_0.19.0_omawhatsapp.2_linux_amd64.tar.gz` asset and
-`checksums.txt` from the same 0.18.4 GitHub release, verify the archive against
-the checksum file, extract it to a temporary directory, then install its `wacli`
-executable to `~/.local/bin/wacli`. Check `wacli --private-args-version` reports
-`protocol: 1` and `max_bytes: 65536`. This asset is for Linux x86-64; other
-architectures can build from the pinned source using the instructions in
-[dependencies/README.md](dependencies/README.md).
+Build from the exact reviewed upstream commit and the patch bundled in this
+checkout using [the source-build instructions](dependencies/README.md#build-and-install).
+That is the supported installation path for the privacy extension. Do not use
+release binaries or a checksum downloaded alongside them as an integrity
+reference: a mutable release can replace both. The protocol check confirms
+compatibility, not source provenance.
 
 Restart the app after upgrading. No relinking, account migration or chat-store
 change is required. Package-manager upgrades replacing wacli with an ordinary
