@@ -2172,12 +2172,16 @@ class Backend:
             return False
         return True
 
-    def _require_private_transport(self) -> None:
+    def _private_transport_supported(self) -> bool:
         """Read-only capability probe; old binaries never receive private argv."""
-        info = self.wacli.stat()
+        try:
+            info = self.wacli.stat()
+        except OSError:
+            return False
         identity = (str(self.wacli), info.st_ino, info.st_size, info.st_mtime_ns)
-        if getattr(self, "_private_transport_identity", None) == identity:
-            return
+        cached = getattr(self, "_private_transport_probe", None)
+        if cached is not None and cached[0] == identity:
+            return cached[1]
         try:
             result = run_bounded([str(self.wacli), "--private-args-version"],
                                  timeout=5, stdout_limit=1024, stderr_limit=1024)
@@ -2186,9 +2190,13 @@ class Backend:
                 and capability.get("max_bytes") == 65536
         except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired, ProcessOutputLimitExceeded):
             supported = False
-        if not supported:
+        # Keyed by the binary's identity: installing another wacli re-probes.
+        self._private_transport_probe = (identity, supported)
+        return supported
+
+    def _require_private_transport(self) -> None:
+        if not self._private_transport_supported():
             raise OmaWhatsAppError("This action requires the privacy-enabled wacli build. See README → Private command transport; no command was dispatched.")
-        self._private_transport_identity = identity
 
     def _run(
         self,
@@ -3459,6 +3467,8 @@ class Backend:
             "installed": True,
             "helper_version": HELPER_VERSION,
             "wacli_version": wacli_version,
+            # Linking (terminal auth) needs it too, so onboarding checks first.
+            "wacli_private_transport": self._private_transport_supported(),
             "setup": self._setup_state(preferences),
             # The rail is unified, but writes and receipts belong to the
             # selected account. Expose both invariants explicitly instead of

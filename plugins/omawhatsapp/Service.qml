@@ -1701,6 +1701,9 @@ Item {
   // wacli is installed but older than the helper's minimum.
   property bool wacliTooOld: false
   property string wacliVersion: ""
+  // An ordinary wacli build (e.g. wacli-bin) can read but cannot link: terminal
+  // auth needs the privacy-enabled build. Older helpers don't report it.
+  property bool wacliPrivateTransport: true
   readonly property bool needsOnboarding: !wacliInstalled || wacliTooOld || needsSetup
     || (statusReady && !anyAuthenticated && !anyDatabaseReady)
   property bool setupWriting: false
@@ -2099,6 +2102,7 @@ Item {
         root.wacliInstalled = true
         root.wacliTooOld = false
         root.wacliVersion = String(payload.wacli_version || "")
+        root.wacliPrivateTransport = payload.wacli_private_transport !== false
         root.anyAuthenticated = payload.any_authenticated === true
         root.anyDatabaseReady = payload.any_database_ready === true
         root.defaultAccountName = String((Array.isArray(payload.accounts)

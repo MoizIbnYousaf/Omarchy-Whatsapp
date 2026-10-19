@@ -58,4 +58,11 @@ class PrivateTransportTests(unittest.TestCase):
     backend._mutate(['send','text','--message','synthetic'],timeout=3,require_online=True,account=account)
    self.assertEqual(run.call_count,3)
    self.assertTrue(all(call.kwargs.get('private_args') for call in run.call_args_list))
+ def test_capability_probe_reports_without_raising(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp);binary=root/'wacli';binary.write_text('#!/bin/sh\nexit 1\n');binary.chmod(0o700)
+   backend=core.Backend(store_dir=root/'store',state_dir=root/'state',wacli=binary)
+   self.assertFalse(backend._private_transport_supported())
+   binary.write_text('#!/bin/sh\necho \'{"protocol":1,"max_bytes":65536}\'\n');os.utime(binary,ns=(1,10**18))
+   self.assertTrue(backend._private_transport_supported(),'a replaced binary is probed again')
 if __name__=='__main__':unittest.main()
