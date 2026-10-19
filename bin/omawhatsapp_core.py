@@ -3400,6 +3400,8 @@ class Backend:
         preferences = self._preferences()
         active = self.active
         accounts = self.accounts()
+        # The sync unit's session-ready check and terminal auth both need it.
+        private_transport = self._private_transport_supported()
 
         def report(account: Account) -> dict[str, Any]:
             # Account is explicit all the way down: parallel probes must never
@@ -3424,6 +3426,8 @@ class Backend:
                 "relink-required" if needs_relink else
                 "unlinked" if not authenticated else
                 "offline" if not online else
+                # Without it, the sync unit skips itself at every start.
+                "private-wacli-required" if not private_transport and not sync_active else
                 "connected" if sync_active and health == "connected" else
                 "connecting" if sync_active else "stopped"
             )
@@ -3468,7 +3472,7 @@ class Backend:
             "helper_version": HELPER_VERSION,
             "wacli_version": wacli_version,
             # Linking (terminal auth) needs it too, so onboarding checks first.
-            "wacli_private_transport": self._private_transport_supported(),
+            "wacli_private_transport": private_transport,
             "setup": self._setup_state(preferences),
             # The rail is unified, but writes and receipts belong to the
             # selected account. Expose both invariants explicitly instead of

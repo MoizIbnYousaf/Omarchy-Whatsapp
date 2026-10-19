@@ -2276,7 +2276,8 @@ Item {
         root.accounts = root.accounts.map(function(item) {
           return item && String(item.account || "") === syncedAccount
             ? Object.assign({}, item, { online: payload.online === true,
-                offline_mode: payload.online !== true, sync_active: false, connection_state: payload.online === true ? "connecting" : "offline" })
+                offline_mode: payload.online !== true, sync_active: false, connection_state: payload.online !== true ? "offline"
+                  : root.wacliPrivateTransport ? "connecting" : "private-wacli-required" })
             : item
         })
       }

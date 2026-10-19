@@ -273,6 +273,21 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(status["connection_state"], "relink-required")
         self.assertNotIn("401", json.dumps(status))
 
+    def test_ordinary_wacli_reports_why_the_sync_does_not_start(self) -> None:
+        with mock.patch.object(self.backend, "_doctor_cached", return_value={"authenticated": True}), \
+                mock.patch.object(self.backend, "_sync_active", return_value=False), \
+                mock.patch.object(self.backend, "_sync_health", return_value="unknown"), \
+                mock.patch.object(self.backend, "_private_transport_supported", return_value=False):
+            status = self.backend.status()
+        self.assertTrue(status["authenticated"])
+        self.assertFalse(status["wacli_private_transport"])
+        self.assertEqual(status["connection_state"], "private-wacli-required")
+        with mock.patch.object(self.backend, "_doctor_cached", return_value={"authenticated": True}), \
+                mock.patch.object(self.backend, "_sync_active", return_value=False), \
+                mock.patch.object(self.backend, "_sync_health", return_value="unknown"), \
+                mock.patch.object(self.backend, "_private_transport_supported", return_value=True):
+            self.assertEqual(self.backend.status()["connection_state"], "stopped")
+
     def test_chat_rail_contains_every_local_chat(self) -> None:
         result = self.backend.chats()
         self.assertEqual({chat["name"] for chat in result["chats"]},
