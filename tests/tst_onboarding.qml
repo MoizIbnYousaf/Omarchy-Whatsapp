@@ -34,6 +34,8 @@ TestCase {
       property var setupConflicts: []
       property bool wacliTooOld: false
       property string wacliVersion: ""
+      property bool wacliPrivateTransport: true
+      property var setupState: ({ plugin_root: "/plugins/omawhatsapp" })
       property bool setupAgents: false
       property bool originalPluginEnabled: false
       property bool setupWriting: false
@@ -58,6 +60,24 @@ TestCase {
     compare(service.accountOperations.linked, "primary", "the main account, by its own name")
     verify(view.linking)
     verify(findChild(view, "onboardingStatus").text.indexOf("QR code") > 0)
+  }
+
+  function test_an_ordinary_wacli_points_to_the_private_build_before_linking() {
+    var service = createTemporaryObject(serviceStub, testCase)
+    service.accountOperations = createTemporaryObject(operationsStub, testCase)
+    service.wacliPrivateTransport = false
+    service.wacliVersion = "0.22.0"
+    var view = createTemporaryObject(viewComponent, testCase, { service: service })
+    compare(findChild(view, "onboardingTitle").text, "One more piece first")
+    verify(findChild(view, "onboardingPrivateBuild").visible)
+    verify(!findChild(view, "onboardingSteps").visible, "no Show QR code button")
+    compare(findChild(view, "onboardingPrivateBuildPath").text,
+      "/plugins/omawhatsapp/dependencies/README.md → Build and install")
+    verify(!view.startLink(), "no terminal opens just to print a refusal")
+    compare(service.accountOperations.linked, "")
+    service.wacliPrivateTransport = true
+    verify(!findChild(view, "onboardingPrivateBuild").visible)
+    verify(findChild(view, "onboardingSteps").visible, "goes on once the build is installed")
   }
 
   function test_without_wacli_it_says_what_to_install() {

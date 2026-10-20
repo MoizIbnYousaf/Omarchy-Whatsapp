@@ -83,8 +83,10 @@ omarchy plugin add https://github.com/MoizIbnYousaf/Omarchy-Whatsapp --enable
 
 The native clipboard-safe editors and isolated media worker build locally against your installed Qt on first launch (and rebuild after a Qt update). No code is downloaded during that build. Media previews use bounded child processes; FFmpeg regenerates audio/video previews without original metadata. Oversized or unsupported previews show an error, and original attachments remain available to save. See [media limits](docs/MEDIA-SECURITY.md). If the compiler or matching Qt headers are unavailable, the app keeps its editors unloaded and reports the problem.
 
-For sending and other mutations, also build and install the privacy-enabled
-wacli from pinned source as described under [Private command transport](#private-command-transport).
+To link your phone, and for sending and other mutations, also build and install
+the privacy-enabled wacli from pinned source as described under
+[Private command transport](#private-command-transport). `wacli-bin` alone can
+read an existing store but cannot show the QR code.
 The first time the app opens it walks you through the rest:
 
 1. **Set it up on this computer.** One click adds, in your home folder only,
@@ -96,8 +98,9 @@ The first time the app opens it walks you through the rest:
 **Requirements.** Omarchy 4 (Quattro) and
 [wacli](https://github.com/openclaw/wacli) 0.17.1 or newer (tested with
 0.17.1, 0.18.3 and 0.19.0). The AUR `wacli-bin` package installs the official
-release used by the read-compatibility tests. Sending and other mutations now
-require the accompanying privacy-enabled 0.19.0 build; a wacli of your own at
+release used by the read-compatibility tests. Linking your phone, sending and
+other mutations require the accompanying privacy-enabled 0.19.0 build; onboarding
+says so before opening the QR code terminal. A wacli of your own at
 `~/.local/bin/wacli` is used first. Choosing files to attach needs `zenity`,
 which the app offers to install the first time it is missing. Everything else
 comes with Omarchy.

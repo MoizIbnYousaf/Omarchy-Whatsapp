@@ -22,11 +22,19 @@ Rectangle {
     && (service.wacliInstalled === false || wacliTooOld)
   readonly property bool setupNeeded: !demoMode && !!service && !wacliMissing
     && service.needsSetup === true
+  // wacli-bin reads fine but can't link: terminal auth needs the private build.
+  readonly property bool privateBuildNeeded: !demoMode && !!service && !wacliMissing
+    && !setupNeeded && service.wacliPrivateTransport === false
+  readonly property string buildInstructions: {
+    var state = service && service.setupState ? service.setupState : ({})
+    var base = String(state.plugin_root || "")
+    return (base !== "" ? base + "/" : "") + "dependencies/README.md → Build and install"
+  }
   readonly property bool linking: !!operations && operations.linkBusy === true
   property bool allowAgents: !!service && service.setupAgents === true
 
   function startLink() {
-    if (demoMode || !service || !operations) return false
+    if (demoMode || !service || !operations || privateBuildNeeded) return false
     return operations.linkMainAccount(service.defaultAccountName)
   }
 
@@ -68,7 +76,7 @@ Rectangle {
           Text {
             textFormat: Text.PlainText
             objectName: "onboardingTitle"
-            text: root.wacliMissing ? "One more piece first"
+            text: root.wacliMissing || root.privateBuildNeeded ? "One more piece first"
               : root.setupNeeded ? "Set it up on this computer" : "Link your WhatsApp"
             color: root.foreground
             font.family: root.fontFamily
@@ -153,6 +161,65 @@ Rectangle {
             width: parent.width
             wrapMode: Text.Wrap
             text: "This screen goes on by itself once wacli is installed. A wacli of your own at ~/.local/bin/wacli is used first."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+        }
+      }
+
+      // An ordinary wacli: linking would only print a refusal in the terminal.
+      Rectangle {
+        objectName: "onboardingPrivateBuild"
+        visible: root.privateBuildNeeded
+        width: parent.width
+        height: privateBuildColumn.implicitHeight + Style.space(28)
+        radius: Style.cornerRadius + 4
+        color: Style.normalFillFor(root.foreground, root.accent)
+        Column {
+          id: privateBuildColumn
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.margins: Style.space(16)
+          spacing: Style.space(8)
+          Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: "Linking your phone needs the privacy-enabled wacli build. Your wacli "
+              + String(root.service ? root.service.wacliVersion || "" : "")
+              + " can read chats but not show the QR code. Build it from this plugin's pinned source, as described in:"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+          }
+          Rectangle {
+            width: parent.width
+            height: privateBuildPath.implicitHeight + Style.space(16)
+            radius: Style.cornerRadius
+            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.06)
+            Text {
+              textFormat: Text.PlainText
+              id: privateBuildPath
+              objectName: "onboardingPrivateBuildPath"
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.leftMargin: Style.space(10)
+              anchors.rightMargin: Style.space(10)
+              anchors.verticalCenter: parent.verticalCenter
+              wrapMode: Text.WrapAnywhere
+              text: root.buildInstructions
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
+          Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: "This screen goes on by itself once the private build is installed at ~/.local/bin/wacli. Nothing is downloaded or installed for you."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -308,7 +375,7 @@ Rectangle {
       // The three steps, and the button that shows the QR code.
       Rectangle {
         objectName: "onboardingSteps"
-        visible: !root.wacliMissing && !root.setupNeeded
+        visible: !root.wacliMissing && !root.setupNeeded && !root.privateBuildNeeded
         width: parent.width
         height: stepsColumn.implicitHeight + Style.space(32)
         radius: Style.cornerRadius + 4

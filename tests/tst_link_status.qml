@@ -48,6 +48,11 @@ TestCase {
     compare(card.action, "Go online")
     card.state = "stopped"
     compare(card.action, "Resume")
+    card.state = "private-wacli-required"
+    compare(card.label, "Sync blocked · wacli build")
+    compare(card.detail, "New messages need the privacy-enabled wacli build.")
+    compare(card.action, "", "Resume would be skipped by the sync unit again")
+    card.state = "stopped"
     card.pauseReason = "loading media"
     compare(card.action, "")
     compare(card.label, "Sync paused · loading media")

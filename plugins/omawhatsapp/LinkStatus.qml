@@ -17,8 +17,10 @@ Rectangle {
     property bool demo: false
     signal actionRequested
     readonly property bool expired: state === "relink-required" || state === "unlinked"
-    readonly property string label: expired ? (state === "unlinked" ? "Not linked" : "Link expired") : state === "closed" ? "Closed · sync paused" : state === "offline" ? "Offline · local archive" : root.pauseReason !== "" ? "Sync paused · " + root.pauseReason : state === "connected" ? "Linked · connected" : state === "connecting" ? "Connecting…" : state === "stopped" ? "Sync stopped" : "Checking link…"
-    readonly property string detail: expired ? "Link again to receive new messages." : state === "closed" ? "Open to receive new messages." : root.pauseReason !== "" ? "Sync resumes when this finishes." : state === "connected" ? "Your messages are syncing." : state === "connecting" ? "Waiting for WhatsApp to connect." : state === "offline" ? "Your saved chats are available." : state === "stopped" ? "New messages are not arriving." : "Reading this account’s status."
+    // The account is linked, but the ordinary wacli can't run the sync.
+    readonly property bool privateBuild: state === "private-wacli-required"
+    readonly property string label: expired ? (state === "unlinked" ? "Not linked" : "Link expired") : state === "closed" ? "Closed · sync paused" : state === "offline" ? "Offline · local archive" : privateBuild ? "Sync blocked · wacli build" : root.pauseReason !== "" ? "Sync paused · " + root.pauseReason : state === "connected" ? "Linked · connected" : state === "connecting" ? "Connecting…" : state === "stopped" ? "Sync stopped" : "Checking link…"
+    readonly property string detail: expired ? "Link again to receive new messages." : state === "closed" ? "Open to receive new messages." : privateBuild ? "New messages need the privacy-enabled wacli build." : root.pauseReason !== "" ? "Sync resumes when this finishes." : state === "connected" ? "Your messages are syncing." : state === "connecting" ? "Waiting for WhatsApp to connect." : state === "offline" ? "Your saved chats are available." : state === "stopped" ? "New messages are not arriving." : "Reading this account’s status."
     readonly property string action: expired ? "Link again" : state === "closed" ? "Open" : state === "offline" ? "Go online" : state === "stopped" && root.pauseReason === "" ? "Resume" : ""
     width: parent.width
     height: Style.space(root.compact ? 28 : 66)
@@ -32,7 +34,7 @@ Rectangle {
         width: Style.space(6)
         height: width
         radius: width / 2
-        color: root.expired ? root.urgent : root.state === "connected" ? root.accent : root.dim
+        color: root.expired || root.privateBuild ? root.urgent : root.state === "connected" ? root.accent : root.dim
     }
     Column {
         anchors.left: parent.left
