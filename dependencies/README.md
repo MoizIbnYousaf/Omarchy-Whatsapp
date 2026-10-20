@@ -44,9 +44,34 @@ output. It does not install anything or start WhatsApp. Installation happens
 only in the final explicit commands after a successful build. No account
 relinking or store migration is needed.
 
-Prebuilt release assets are not a supported installation path. A checksum from
-the same mutable release does not bind a binary to reviewed source; protocol
-compatibility alone does not establish provenance.
+## Verified prebuilt (Linux x86-64)
+
+The trust anchor is `wacli-prebuilt.json` in the exact reviewed app commit,
+not the release's mutable checksum file. Its pinned archive digest is
+`b1d15d9079a9c73c7fe587e8b9b8481298c31aecb41d84d97e88ecae0c8103bf`;
+the executable digest is
+`24abe6cc36425af4e25816b791a18d234f666ee863525d682c725745729304d0`.
+The URL may be mutable; different bytes are rejected even if the release's
+checksum/provenance files are replaced too. Review pin changes as code.
+
+From this checkout, explicitly download and install:
+
+```bash
+set -euo pipefail
+archive=$(mktemp)
+trap 'rm -f -- "$archive"' EXIT
+url=$(python3 -c 'import json; print(json.load(open("dependencies/wacli-prebuilt.json"))["url"])')
+curl --fail --location --proto '=https' --tlsv1.2 --output "$archive" "$url"
+python3 scripts/install-private-wacli "$archive" --verify-only
+python3 scripts/install-private-wacli "$archive"
+```
+
+Both invocations independently verify the bounded archive bytes and the contained
+binary; files are read from the verified in-memory archive rather than extracted
+by a second command. Verification failure leaves the old binary untouched.
+The install is explicit, affects only `~/.local/bin/wacli`, and never starts sync
+or links an account. Restart the app after installation. Other architectures
+use the pinned-source build above.
 
 The app refuses sensitive commands when this protocol is unavailable, before
 passing any private content to a child. Direct local SQLite reads still work with older versions; sensitive external

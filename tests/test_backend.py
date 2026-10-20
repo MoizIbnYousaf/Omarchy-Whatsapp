@@ -288,6 +288,15 @@ class BackendTests(unittest.TestCase):
                 mock.patch.object(self.backend, "_private_transport_supported", return_value=True):
             self.assertEqual(self.backend.status()["connection_state"], "stopped")
 
+    def test_missing_private_build_is_not_misreported_as_unlinked(self):
+        with mock.patch.object(self.backend, "_doctor_cached", side_effect=backend_module.OmaWhatsAppError("private build required")), \
+                mock.patch.object(self.backend, "_sync_active", return_value=False), \
+                mock.patch.object(self.backend, "_sync_health", return_value="unknown"), \
+                mock.patch.object(self.backend, "_private_transport_supported", return_value=False):
+            status = self.backend.status()
+        self.assertEqual(status["connection_state"], "private-wacli-required")
+        self.assertFalse(status["authenticated"], "capability failure cannot assert authentication")
+
     def test_chat_rail_contains_every_local_chat(self) -> None:
         result = self.backend.chats()
         self.assertEqual({chat["name"] for chat in result["chats"]},

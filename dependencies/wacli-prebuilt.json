@@ -1,0 +1,9 @@
+{
+  "version": "0.19.0",
+  "extension": "omawhatsapp.2",
+  "platform": "linux-x86_64",
+  "url": "https://github.com/MoizIbnYousaf/Omarchy-Whatsapp/releases/download/v0.18.4/wacli_0.19.0_omawhatsapp.2_linux_amd64.tar.gz",
+  "archive_sha256": "b1d15d9079a9c73c7fe587e8b9b8481298c31aecb41d84d97e88ecae0c8103bf",
+  "binary_sha256": "24abe6cc36425af4e25816b791a18d234f666ee863525d682c725745729304d0",
+  "source_commit": "b87e6178b7b1e571ce2821ab516039cfa0c6ecf6"
+}

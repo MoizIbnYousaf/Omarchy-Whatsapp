@@ -757,7 +757,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 # Bumped with manifest.json (scripts/test checks it). The app compares it with
 # the plugin it loaded: an update that replaced only the plugin says so.
-HELPER_VERSION = "0.18.4"  # x-release-please-version
+HELPER_VERSION = "0.18.5"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
@@ -3424,10 +3424,9 @@ class Backend:
                 authenticated = False
             connection_state = (
                 "relink-required" if needs_relink else
+                "private-wacli-required" if not private_transport and online else
                 "unlinked" if not authenticated else
                 "offline" if not online else
-                # Without it, the sync unit skips itself at every start.
-                "private-wacli-required" if not private_transport and not sync_active else
                 "connected" if sync_active and health == "connected" else
                 "connecting" if sync_active else "stopped"
             )

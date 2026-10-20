@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.18.5 — Verified dependency install and clear onboarding
+
+- Bind the supported prebuilt wacli archive and binary SHA256 values to this
+  reviewed source tree. The explicit installer verifies both before publishing
+  an executable, rejects unsafe archives and leaves an existing install intact
+  on failure. Keep the pinned-source build alternative.
+- Show the missing private-wacli requirement before opening a QR terminal and
+  explain blocked sync for existing accounts. Thanks to @Crucialjun for #22 and
+  @XNinety9 for the onboarding/status fixes in #23.
+- Preserve the distinction between a missing dependency capability and an
+  unlinked account when the private doctor probe cannot run.
+
+
 ## 0.18.4 — Private reads, safe saves, and stable group titles
 
 - Keep group subjects ahead of cached sender names throughout the chat rail,
