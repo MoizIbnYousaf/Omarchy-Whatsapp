@@ -11,6 +11,10 @@
   @XNinety9 for the onboarding/status fixes in #23.
 - Preserve the distinction between a missing dependency capability and an
   unlinked account when the private doctor probe cannot run.
+- Keep a message's action menu inside the window. Reached from the ellipsis on
+  a message at the bottom of a full-height conversation, the menu opened below
+  it, ran past the window edge and lost its lower entries; it now flips above
+  the message when it does not fit below.
 
 
 ## 0.18.4 — Private reads, safe saves, and stable group titles

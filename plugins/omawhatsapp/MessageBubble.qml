@@ -256,6 +256,45 @@ Item {
     root.selectedRequested()
     actionMenu.open()
   }
+  // The menu draws in the window overlay, so the window clips it, not the row.
+  // Anchored only to the bubble, a menu on a message at the bottom of a
+  // full-height conversation opened past the window and lost its lower
+  // entries: clamp it against the window and flip it above when it will not
+  // fit below. Reading actionMenu.height here re-runs the bindings once the
+  // open popup has measured its entries, so the flip uses the real height.
+  function menuSceneWidth() {
+    return root.Window.window ? root.Window.window.width : root.width
+  }
+  function menuSceneHeight() {
+    return root.Window.window ? root.Window.window.height : root.height
+  }
+  function actionMenuX() {
+    var origin = bubble.mapToItem(null, 0, 0)
+    var margin = Style.space(8)
+    var left = root.menuAtPointer
+      ? origin.x + root.menuPoint.x
+      : origin.x + bubble.width - actionMenu.width
+    return Math.max(margin,
+      Math.min(menuSceneWidth() - actionMenu.width - margin, left)) - origin.x
+  }
+  function actionMenuY() {
+    var origin = bubble.mapToItem(null, 0, 0)
+    var margin = Style.space(8)
+    var gap = Style.space(3)
+    var height = actionMenu.height
+    var sceneHeight = menuSceneHeight()
+    var top
+    if (root.menuAtPointer) {
+      top = origin.y + root.menuPoint.y
+      if (top + height > sceneHeight - margin)
+        top = origin.y + root.menuPoint.y - height - gap
+    } else {
+      top = origin.y + actionSurface.y + actionSurface.height + gap
+      if (top + height > sceneHeight - margin)
+        top = origin.y + actionSurface.y - height - gap
+    }
+    return Math.max(margin, Math.min(sceneHeight - height - margin, top)) - origin.y
+  }
 
   TextMetrics {
     id: messageMetrics
@@ -995,12 +1034,9 @@ Item {
     Popup {
       id: actionMenu
       objectName: "messageActionMenu"
-      x: root.menuAtPointer
-        ? Math.max(-bubble.x, Math.min(root.width - bubble.x - width, root.menuPoint.x))
-        : Math.max(0, bubble.width - width)
-      y: root.menuAtPointer
-        ? root.menuPoint.y
-        : actionSurface.y + actionSurface.height + Style.space(3)
+      // Placed against the window bounds by actionMenuX()/actionMenuY().
+      x: root.actionMenuX()
+      y: root.actionMenuY()
       width: Style.space(178)
       height: menuColumn.implicitHeight + Style.space(10)
       padding: Style.space(5)
