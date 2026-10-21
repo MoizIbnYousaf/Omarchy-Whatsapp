@@ -135,6 +135,44 @@ TestCase {
     compare(Math.round(menu.y), 12)
   }
 
+  function verifyMenuInsideWindow(bubble, menu) {
+    var top = bubble.mapToItem(null, menu.x, menu.y)
+    verify(top.x >= 0, "the menu must not start before the window's left edge")
+    verify(top.x + menu.width <= testCase.width,
+      "the menu must not run past the window's right edge: right=" + (top.x + menu.width)
+        + " window=" + testCase.width)
+    verify(top.y >= 0, "the menu must not start above the window")
+    verify(top.y + menu.height <= testCase.height,
+      "the menu must not run past the window: bottom=" + (top.y + menu.height)
+        + " window=" + testCase.height)
+  }
+
+  function test_the_menu_stays_inside_the_window_near_the_bottom() {
+    // The owner saw the menu cut off at the bottom edge of a full-height
+    // conversation: the last message's actions opened past the window.
+    var bubble = createTemporaryObject(bubbleComponent, testCase)
+    bubble.y = testCase.height - 70
+    hoverRow(bubble)
+    var more = findChild(bubble, "messageAction-more")
+    verify(more !== null)
+    mouseClick(more, more.width / 2, more.height / 2)
+    wait(80)
+    var menu = findChild(bubble, "messageActionMenu")
+    verify(menu.opened)
+    verifyMenuInsideWindow(bubble, menu)
+  }
+
+  function test_a_right_clicked_menu_stays_inside_the_window_near_the_bottom() {
+    var bubble = createTemporaryObject(bubbleComponent, testCase)
+    bubble.y = testCase.height - 70
+    var surface = findChild(bubble, "messageBubbleSurface")
+    mouseClick(surface, Math.round(surface.width / 2), Math.round(surface.height / 2), Qt.RightButton)
+    wait(80)
+    var menu = findChild(bubble, "messageActionMenu")
+    verify(menu.opened)
+    verifyMenuInsideWindow(bubble, menu)
+  }
+
   SignalSpy { id: saveSpy; signalName: "saveRequested" }
 
   function test_save_as_is_offered_for_media_only() {
