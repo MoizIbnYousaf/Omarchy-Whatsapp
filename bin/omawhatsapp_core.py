@@ -559,6 +559,20 @@ NOTIFY_EXPIRE_MS = 8000
 LID_ALIASES_FILE = "lid-aliases.json"
 MAX_LID_ALIASES = 256
 MAX_LID_ALIASES_STATE = 64 * 1024
+# A group mention keeps WhatsApp's placeholder in the stored text: "@" plus
+# the mentioned person's LID (or their phone on older messages). The app shows
+# the name instead, resolving each placeholder once and remembering it. A phone
+# is answered from the local mirror; a LID goes through `wacli --read-only
+# contacts show` (never session.db), like the @lid chat folding above.
+MENTION_NAMES_FILE = "mention-names.json"
+MAX_MENTION_NAMES = 1024
+MAX_MENTION_NAMES_STATE = 256 * 1024
+MAX_MENTION_RESOLUTIONS = 12
+# An unresolved mention is retried after this long: a later sync can add the
+# person's LID mapping.
+MENTION_MISS_TTL = 60 * 60
+# The "@" must not be the tail of a word, an email or another mention.
+MENTION_TOKEN = re.compile(r"(?<![\w.@%+-])@([0-9]{5,22})")
 # The sticker picker: recent distinct stickers, and how many missing files one
 # open may fetch (media download --read-only runs beside the live sync).
 MAX_STICKER_CHOICES = 60
@@ -3310,6 +3324,128 @@ class Backend:
             pass
         return aliases
 
+    def _phone_mention_names(self, tokens: list[str]) -> dict[str, str]:
+        """The names the mirror already knows for phone-number mentions."""
+        if not tokens:
+            return {}
+        names: dict[str, str] = {}
+        wanted = set(tokens)
+        try:
+            with closing(self._connect()) as connection:
+                has_aliases = self._has_table(connection, "contact_aliases")
+                alias = ("(SELECT alias FROM contact_aliases WHERE contact_aliases.jid = contacts.jid)"
+                         if has_aliases else "''")
+                # Two placeholders per token; keep each statement well inside
+                # SQLite's variable limit.
+                for start in range(0, len(tokens), 400):
+                    chunk = tokens[start:start + 400]
+                    placeholders = ",".join("?" for _ in chunk)
+                    rows = connection.execute(
+                        f"""SELECT contacts.jid AS jid, contacts.phone AS phone,
+                              COALESCE(NULLIF({alias}, ''), NULLIF(contacts.full_name, ''),
+                              NULLIF(contacts.business_name, ''), NULLIF(contacts.push_name, ''),
+                              NULLIF(contacts.system_name, ''), NULLIF(contacts.first_name, '')) AS name
+                            FROM contacts
+                            WHERE contacts.phone IN ({placeholders})
+                               OR contacts.jid IN ({placeholders})""",
+                        [*chunk, *[f"{token}@s.whatsapp.net" for token in chunk]],
+                    ).fetchall()
+                    for row in rows:
+                        cleaned = " ".join(str(row["name"] or "").split())[:128]
+                        if not cleaned:
+                            continue
+                        user = str(row["jid"] or "").split("@", 1)[0]
+                        for candidate in (str(row["phone"] or ""), user):
+                            if candidate in wanted:
+                                names[candidate] = cleaned
+        except sqlite3.Error:
+            return names
+        return names
+
+    def _mention_names(self, tokens: set[str]) -> dict[str, str]:
+        """The display name for each group-mention token, cached per account.
+
+        A token is the user part of the mentioned JID: a LID on current
+        WhatsApp, or a phone number on older messages. A phone is answered from
+        the local mirror; a LID is resolved once through wacli's read-only
+        contact lookup. An unresolved token is retried after a while, since a
+        later sync can add the mapping; anything left past the per-call bound
+        waits for the next page.
+        """
+        if not tokens:
+            return {}
+        key = hashlib.sha256(self.active.key.encode("utf-8")).hexdigest()[:24]
+        cache = self._read_state_json(MENTION_NAMES_FILE, MAX_MENTION_NAMES_STATE, {})
+        cache = cache if isinstance(cache, dict) else {}
+        entry = cache.get(key) if isinstance(cache.get(key), dict) else {}
+        cached = entry.get("names") if isinstance(entry.get("names"), dict) else {}
+        misses = entry.get("misses") if isinstance(entry.get("misses"), dict) else {}
+        found = {token: str(cached[token]) for token in tokens
+                 if isinstance(cached.get(token), str) and cached[token]}
+        now = int(time.time())
+        pending = sorted(
+            token for token in tokens
+            if token not in cached
+            and (not isinstance(misses.get(token), int)
+                 or now - int(misses[token]) >= MENTION_MISS_TTL))
+        if not pending:
+            return found
+        names = {str(token): str(name) for token, name in cached.items()
+                 if isinstance(token, str) and isinstance(name, str) and name}
+        fresh_misses = {str(token): int(value) for token, value in misses.items()
+                        if isinstance(token, str) and isinstance(value, int)
+                        and now - int(value) < MENTION_MISS_TTL}
+        phone_names = self._phone_mention_names(pending)
+        for token, name in phone_names.items():
+            names[token] = name
+            found[token] = name
+        unresolved = [token for token in pending if token not in phone_names]
+        for token in unresolved[:MAX_MENTION_RESOLUTIONS]:
+            name = ""
+            try:
+                result = self._run(["--read-only", "--json", "contacts", "show",
+                                    "--jid", f"{token}@lid"], timeout=8)
+                data = json.loads(result.stdout or "{}").get("data")
+                if isinstance(data, dict):
+                    name = " ".join(str(data.get("name") or data.get("phone") or "").split())[:128]
+            except (OmaWhatsAppError, ValueError, AttributeError):
+                name = ""
+            if name:
+                names[token] = name
+                found[token] = name
+            else:
+                fresh_misses[token] = now
+        try:
+            with self._state_lock("mention-names.lock"):
+                current = self._read_state_json(MENTION_NAMES_FILE, MAX_MENTION_NAMES_STATE, {})
+                current = current if isinstance(current, dict) else {}
+                current[key] = {
+                    "names": dict(list(names.items())[-MAX_MENTION_NAMES:]),
+                    "misses": dict(list(fresh_misses.items())[-MAX_MENTION_NAMES:]),
+                }
+                self._write_state_json(MENTION_NAMES_FILE, current, MAX_MENTION_NAMES_STATE)
+        except (OmaWhatsAppError, OSError):
+            pass
+        return found
+
+    def _resolve_mentions(self, items: list[dict[str, Any]], fields: tuple[str, ...]) -> None:
+        """Replace each group-mention placeholder with the person's name."""
+        tokens: set[str] = set()
+        for item in items:
+            for field in fields:
+                tokens.update(MENTION_TOKEN.findall(str(item.get(field) or "")))
+        if not tokens:
+            return
+        names = self._mention_names(tokens)
+        if not names:
+            return
+        for item in items:
+            for field in fields:
+                value = item.get(field)
+                if isinstance(value, str) and "@" in value:
+                    item[field] = MENTION_TOKEN.sub(
+                        lambda match: "@" + names.get(match.group(1), match.group(1)), value)
+
     def _chat_jids(self, jid: str) -> list[str]:
         """A phone chat and the @lid chats wacli filed some of its rows under."""
         if not jid.endswith("@s.whatsapp.net"):
@@ -3839,6 +3975,8 @@ class Backend:
                 "mentioned": bool(mentioned.get(jid)) and unread > 0,
             })
         self._fold_lid_latest(chats)
+        # A group's last message may open with a mention; show the name there too.
+        self._resolve_mentions([chat for chat in chats if chat["kind"] == "group"], ("preview",))
         return chats
 
     def _fold_lid_latest(self, chats: list[dict[str, Any]]) -> None:
@@ -4749,6 +4887,9 @@ class Backend:
                 values[-1]["poll"] = polls[message_id]
                 # "Poll: question" is wacli's text for the poll; the card shows it.
                 values[-1]["text"] = ""
+        if chat["kind"] == "group":
+            # A group mention is stored as an identifier; show the person's name.
+            self._resolve_mentions(values, ("text", "quoted_text"))
         return {"ok": True, "chat": chat, "query": cleaned, "messages": values,
                 "has_more": has_more}
 

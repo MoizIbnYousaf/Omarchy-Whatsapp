@@ -11,6 +11,10 @@
   @XNinety9 for the onboarding/status fixes in #23.
 - Preserve the distinction between a missing dependency capability and an
   unlinked account when the private doctor probe cannot run.
+- Show the person's name for a group `@` mention in a message and in the chat
+  preview instead of WhatsApp's stored identifier. Each mention's LID is
+  resolved once through wacli's local read-only contact lookup and remembered; a
+  phone-number mention is answered from the local mirror.
 
 
 ## 0.18.4 — Private reads, safe saves, and stable group titles

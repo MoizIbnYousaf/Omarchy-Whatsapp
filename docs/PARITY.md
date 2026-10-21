@@ -88,6 +88,7 @@ button must remain reachable at every supported size.
 | Content/state | Store evidence | App |
 |---|---|---|
 | Plain text and links | `messages.text` | done |
+| Incoming group mention names | `messages.text` placeholder + local contact/LID lookup | done |
 | Reply quote | `quoted_msg_id`, `quoted_sender_jid` | building |
 | Forwarded marker | `is_forwarded` | building |
 | Edited marker | `edited`, `edited_ts` | building |
