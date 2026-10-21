@@ -567,12 +567,13 @@ MAX_LID_ALIASES_STATE = 64 * 1024
 MENTION_NAMES_FILE = "mention-names.json"
 MAX_MENTION_NAMES = 1024
 MAX_MENTION_NAMES_STATE = 256 * 1024
-MAX_MENTION_RESOLUTIONS = 12
+MAX_MENTION_RESOLUTIONS = 2
+MENTION_LOOKUP_SECONDS = 2.0
 # An unresolved mention is retried after this long: a later sync can add the
 # person's LID mapping.
 MENTION_MISS_TTL = 60 * 60
 # The "@" must not be the tail of a word, an email or another mention.
-MENTION_TOKEN = re.compile(r"(?<![\w.@%+-])@([0-9]{5,22})")
+MENTION_TOKEN = re.compile(r"(?<![\w.@%+-])@([0-9]{5,22})(?![\w.])")
 # The sticker picker: recent distinct stickers, and how many missing files one
 # open may fetch (media download --read-only runs beside the live sync).
 MAX_STICKER_CHOICES = 60
@@ -771,7 +772,7 @@ SUPPORTED_CHAT_WHERE = f"""({chat_kind_sql()} = 'dm' OR (
 # (or newer) is accepted; leaves unknown to the registry keep failing closed.
 # Bumped with manifest.json (scripts/test checks it). The app compares it with
 # the plugin it loaded: an update that replaced only the plugin says so.
-HELPER_VERSION = "0.18.5"  # x-release-please-version
+HELPER_VERSION = "0.18.6"  # x-release-please-version
 WACLI_MINIMUM_VERSION = "0.17.1"
 WACLI_PARITY_VERSION = "0.19.0"
 # Leaves that only exist from a given wacli release. The parity check accepts
@@ -3400,11 +3401,15 @@ class Backend:
             names[token] = name
             found[token] = name
         unresolved = [token for token in pending if token not in phone_names]
+        deadline = time.monotonic() + MENTION_LOOKUP_SECONDS
         for token in unresolved[:MAX_MENTION_RESOLUTIONS]:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             name = ""
             try:
                 result = self._run(["--read-only", "--json", "contacts", "show",
-                                    "--jid", f"{token}@lid"], timeout=8)
+                                    "--jid", f"{token}@lid"], timeout=remaining, stdout_limit=64 * 1024)
                 data = json.loads(result.stdout or "{}").get("data")
                 if isinstance(data, dict):
                     name = " ".join(str(data.get("name") or data.get("phone") or "").split())[:128]

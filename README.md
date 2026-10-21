@@ -84,7 +84,7 @@ omarchy plugin add https://github.com/MoizIbnYousaf/Omarchy-Whatsapp --enable
 The native clipboard-safe editors and isolated media worker build locally against your installed Qt on first launch (and rebuild after a Qt update). No code is downloaded during that build. Media previews use bounded child processes; FFmpeg regenerates audio/video previews without original metadata. Oversized or unsupported previews show an error, and original attachments remain available to save. See [media limits](docs/MEDIA-SECURITY.md). If the compiler or matching Qt headers are unavailable, the app keeps its editors unloaded and reports the problem.
 
 To link your phone, and for sending and other mutations, also install the
-privacy-enabled wacli using the verified prebuilt or pinned-source route under
+privacy-enabled wacli using the pinned-source build under
 [Private command transport](#private-command-transport). `wacli-bin` alone can
 read an existing store but cannot show the QR code.
 The first time the app opens it walks you through the rest:
@@ -212,13 +212,12 @@ This is a small maintained extension of upstream wacli, not an upstream release.
 An ordinary older binary still supports direct local SQLite reads; the app refuses affected
 operations with an upgrade message and never falls back to exposed arguments.
 
-Install the [commit-pinned prebuilt archive](dependencies/README.md#verified-prebuilt-linux-x86-64)
-or use the [pinned-source build](dependencies/README.md#build-and-install).
-The prebuilt installer verifies both archive and executable SHA256 against
-`dependencies/wacli-prebuilt.json` in this reviewed checkout, before replacing
-any executable. A checksum downloaded alongside a mutable release is not the
-trust anchor. Review changes to the pin file when updating; the protocol probe
-checks compatibility, not provenance.
+Build and install from the [pinned source and bundled patch](dependencies/README.md#build-and-install).
+Prebuilt downloads from earlier releases are not offered for installation: their
+published hashes establish byte integrity but do not independently establish
+that those bytes were built from the reviewed source. The source builder and CI
+record input and output digests for audit; the supported installation route
+builds the executable locally.
 
 Restart the app after upgrading. No relinking, account migration or chat-store
 change is required. Package-manager upgrades replacing wacli with an ordinary

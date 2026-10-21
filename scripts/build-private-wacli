@@ -4,6 +4,8 @@
 No download or installation: the caller provides the source and output path.
 """
 import argparse
+import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -15,6 +17,7 @@ parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument("source",type=Path)
 parser.add_argument("output",type=Path)
 parser.add_argument("--test",action="store_true")
+parser.add_argument("--provenance",type=Path,help="Write source, toolchain and output build evidence")
 args=parser.parse_args()
 source=args.source.resolve();destination=args.output.resolve()
 head=subprocess.check_output(["git","-C",str(source),"rev-parse","HEAD"],text=True).strip()
@@ -25,6 +28,7 @@ with tempfile.TemporaryDirectory(prefix="omawhatsapp-wacli-") as temp:
  archive=root/"source.tar"
  with archive.open("wb") as out:subprocess.run(["git","-C",str(source),"archive",BASE],stdout=out,check=True)
  with tarfile.open(archive) as tar:tar.extractall(root,filter="data")
+ source_digest=hashlib.sha256(archive.read_bytes()).hexdigest()
  archive.unlink()
  subprocess.run(["git","apply","--unidiff-zero",str(patch)],cwd=root,check=True)
  env=dict(os.environ,CGO_ENABLED="1",CGO_CFLAGS="-Wno-error=missing-braces")
@@ -37,4 +41,14 @@ with tempfile.TemporaryDirectory(prefix="omawhatsapp-wacli-") as temp:
  # copy rather than retaining any source or generated credentials/state
  import shutil
  shutil.copyfile(root/"wacli",destination);destination.chmod(0o755)
+ evidence={"upstream_commit":BASE,"source_archive_sha256":source_digest,
+  "patch_sha256":hashlib.sha256(patch.read_bytes()).hexdigest(),
+  "binary_sha256":hashlib.sha256(destination.read_bytes()).hexdigest(),
+  "go_version":subprocess.check_output(["go","version"],cwd=root,env=env,text=True).strip(),
+  "cc_version":subprocess.check_output(["cc","--version"],text=True).splitlines()[0],
+  "build_flags":["-trimpath","-buildvcs=false","-tags=sqlite_fts5","-ldflags=-s -w"],
+  "cgo_enabled":"1","cgo_cflags":env["CGO_CFLAGS"]}
+ if args.provenance:
+  args.provenance.write_text(json.dumps(evidence,sort_keys=True,indent=2)+"\n")
+ print(json.dumps(evidence,sort_keys=True))
  print(destination)

@@ -1259,6 +1259,24 @@ class BackendTests(unittest.TestCase):
                 self.backend._mention_names({"1111111111"})
         self.assertEqual(len(calls), 2, "asked again after a later sync could add the mapping")
 
+    def test_mention_lookups_share_a_total_deadline(self) -> None:
+        calls = []
+        def run(args, **kwargs):
+            calls.append(kwargs)
+            return subprocess.CompletedProcess(args, 0, '{"data": {}}', '')
+        with mock.patch.object(self.backend, "_run", side_effect=run), \
+             mock.patch.object(backend_module.time, "monotonic", side_effect=[0.0, 0.1, 2.1]):
+            self.backend._mention_names({"1111111111", "2222222222", "3333333333"})
+        self.assertEqual(len(calls), 1)
+        self.assertLessEqual(calls[0]["timeout"], 2.0)
+        self.assertEqual(calls[0]["stdout_limit"], 64 * 1024)
+
+    def test_mention_matching_does_not_rewrite_email_or_identifier_prefixes(self) -> None:
+        items = [{"text": "mail a@1234567890.com @1234567890suffix @123456789012345678901234"}]
+        with mock.patch.object(self.backend, "_mention_names") as lookup:
+            self.backend._resolve_mentions(items, ("text",))
+        lookup.assert_not_called()
+
     def _insert_sticker(self, msg_id: str, ts: int, sha: bytes, path: str = "") -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.execute(

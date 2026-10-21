@@ -87,5 +87,13 @@ jobs:
           # Permission regressions must run as an ordinary Unix account.
           useradd --create-home --uid 1001 oma-ci
           chown -R oma-ci:oma-ci "$GITHUB_WORKSPACE"
-          runuser -u oma-ci -- python scripts/build-private-wacli .wacli-source /tmp/wacli-private --test
+          runuser -u oma-ci -- python scripts/build-private-wacli .wacli-source /tmp/wacli-private --test --provenance /tmp/wacli-build-evidence.json
           runuser -u oma-ci -- python tests/private_wacli_smoke.py /tmp/wacli-private
+
+      - name: Record the tested source-to-binary build evidence
+        run: |
+          cat /tmp/wacli-build-evidence.json
+          sha256sum /tmp/wacli-private
+          printf '### Private wacli build evidence\n```json\n' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/wacli-build-evidence.json >> "$GITHUB_STEP_SUMMARY"
+          printf '\n```\nSource-built in this run; no prebuilt executable is offered for installation.\n' >> "$GITHUB_STEP_SUMMARY"
