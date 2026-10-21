@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.18.6 — Source-build evidence, reachable menus and mention names
+
+- Withdraw historical prebuilt installation paths and require the reviewed pinned-source
+  build. Record source archive, patch, toolchain and output digests in CI build evidence.
+- Keep message action menus inside the window, flipping above bottom-edge messages.
+- Resolve group mention names in messages, quotes and previews with bounded private
+  read-only lookups and a per-account cache. Keep unresolved identifiers intact.
+- Thanks to @zulhamsy for the menu and mention fixes in #24 and #25.
+
 ## 0.18.5 — Verified dependency install and clear onboarding
 
 - Bind the supported prebuilt wacli archive and binary SHA256 values to this
@@ -11,10 +20,6 @@
   @XNinety9 for the onboarding/status fixes in #23.
 - Preserve the distinction between a missing dependency capability and an
   unlinked account when the private doctor probe cannot run.
-- Keep a message's action menu inside the window. Reached from the ellipsis on
-  a message at the bottom of a full-height conversation, the menu opened below
-  it, ran past the window edge and lost its lower entries; it now flips above
-  the message when it does not fit below.
 
 
 ## 0.18.4 — Private reads, safe saves, and stable group titles

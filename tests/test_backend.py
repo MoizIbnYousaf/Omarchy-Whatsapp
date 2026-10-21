@@ -1194,6 +1194,71 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn("SENT-FILE", ids, "a row is never shown in a chat it cannot be tied to")
         self.assertEqual(first.call_count, 1)
 
+    def _insert_group_mention(self) -> None:
+        # A group message keeps WhatsApp's mention placeholder in its text: the
+        # mentioned person's LID, or their phone on older messages.
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                   ts, from_me, text, reaction_to_id, media_type, mime_type, local_path)
+                   VALUES ('team@g.us', 'Design team', 'm1', 'member@s.whatsapp.net', 'Sam',
+                           35, 0, 'hey @1234567890 and @15551234567 welcome', '', '', '', '')""")
+
+    def _resolve_mention_lid(self, lid: str, name: str):
+        def run(args, **_kwargs):
+            if args[:4] == ["--read-only", "--json", "contacts", "show"] and args[-1] == lid:
+                return subprocess.CompletedProcess(args, 0, json.dumps(
+                    {"success": True, "data": {"jid": "15551112222@s.whatsapp.net",
+                                               "name": name}}), "")
+            raise AssertionError(args)
+        return mock.patch.object(self.backend, "_run", side_effect=run)
+
+    def test_a_group_mention_shows_the_persons_name(self) -> None:
+        self._insert_group_mention()
+        with self._resolve_mention_lid("1234567890@lid", "Robin") as run:
+            messages = self.backend.messages("team@g.us")["messages"]
+            preview = next(chat["preview"] for chat in self.backend.chats()["chats"]
+                           if chat["jid"] == "team@g.us")
+        text = next(m["text"] for m in messages if m["id"] == "m1")
+        self.assertEqual(text, "hey @Robin and @Sam Rivera welcome",
+                         "a LID mention and a phone mention both show a name")
+        self.assertEqual(preview, "hey @Robin and @Sam Rivera welcome")
+        self.assertEqual(run.call_count, 1, "the LID is resolved once and then cached")
+        with mock.patch.object(self.backend, "_run") as again:
+            self.backend.messages("team@g.us")
+            self.backend.chats()
+        again.assert_not_called()
+
+    def test_an_unresolved_mention_keeps_its_identifier_and_is_asked_once(self) -> None:
+        with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
+            connection.execute(
+                """INSERT INTO messages (chat_jid, chat_name, msg_id, sender_jid, sender_name,
+                   ts, from_me, text, reaction_to_id, media_type, mime_type, local_path)
+                   VALUES ('team@g.us', 'Design team', 'm1', 'member@s.whatsapp.net', 'Sam',
+                           35, 0, 'ping @1111111111 please', '', '', '', '')""")
+        def run(args, **_kwargs):
+            return subprocess.CompletedProcess(args, 0, json.dumps({"success": True, "data": {}}), "")
+        with mock.patch.object(self.backend, "_run", side_effect=run) as first:
+            messages = self.backend.messages("team@g.us")["messages"]
+            self.backend.messages("team@g.us")
+        text = next(m["text"] for m in messages if m["id"] == "m1")
+        self.assertEqual(text, "ping @1111111111 please", "an unknown mention is left as stored")
+        self.assertEqual(first.call_count, 1, "an unresolved mention is not asked again")
+
+    def test_an_unresolved_mention_is_retried_once_the_mapping_could_exist(self) -> None:
+        calls = []
+        def run(args, **_kwargs):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, json.dumps({"success": True, "data": {}}), "")
+        with mock.patch.object(self.backend, "_run", side_effect=run):
+            self.backend._mention_names({"1111111111"})
+            self.backend._mention_names({"1111111111"})
+            self.assertEqual(len(calls), 1, "not asked again inside the retry window")
+            with mock.patch.object(backend_module.time, "time",
+                                   return_value=time.time() + backend_module.MENTION_MISS_TTL + 1):
+                self.backend._mention_names({"1111111111"})
+        self.assertEqual(len(calls), 2, "asked again after a later sync could add the mapping")
+
     def _insert_sticker(self, msg_id: str, ts: int, sha: bytes, path: str = "") -> None:
         with closing(sqlite3.connect(self.store / "wacli.db")) as connection, connection:
             connection.execute(
