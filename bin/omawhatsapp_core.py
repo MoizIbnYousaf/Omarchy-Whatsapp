@@ -573,7 +573,7 @@ MENTION_LOOKUP_SECONDS = 2.0
 # person's LID mapping.
 MENTION_MISS_TTL = 60 * 60
 # The "@" must not be the tail of a word, an email or another mention.
-MENTION_TOKEN = re.compile(r"(?<![\w.@%+-])@([0-9]{5,22})(?![\w.])")
+MENTION_TOKEN = re.compile(r"(?<![\w.@%+-])@([0-9]{5,22})(?!\w)(?!\.[A-Za-z0-9])")
 # The sticker picker: recent distinct stickers, and how many missing files one
 # open may fetch (media download --read-only runs beside the live sync).
 MAX_STICKER_CHOICES = 60

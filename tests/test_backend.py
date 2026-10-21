@@ -1271,6 +1271,12 @@ class BackendTests(unittest.TestCase):
         self.assertLessEqual(calls[0]["timeout"], 2.0)
         self.assertEqual(calls[0]["stdout_limit"], 64 * 1024)
 
+    def test_mention_at_sentence_end_keeps_punctuation(self) -> None:
+        items = [{"text": "Hello @1234567890."}]
+        with mock.patch.object(self.backend, "_mention_names", return_value={"1234567890": "Robin"}):
+            self.backend._resolve_mentions(items, ("text",))
+        self.assertEqual(items[0]["text"], "Hello @Robin.")
+
     def test_mention_matching_does_not_rewrite_email_or_identifier_prefixes(self) -> None:
         items = [{"text": "mail a@1234567890.com @1234567890suffix @123456789012345678901234"}]
         with mock.patch.object(self.backend, "_mention_names") as lookup:
