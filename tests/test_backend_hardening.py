@@ -83,6 +83,50 @@ class BackendHardeningTests(unittest.TestCase):
             [], 0, json.dumps({"success": True, "data": data}), ""
         )
 
+    def test_private_operation_shares_its_deadline_with_wacli(self) -> None:
+        with mock.patch.object(self.backend, "_require_private_transport"), \
+                mock.patch.object(backend_module, "run_bounded", return_value=self.completed()) as run:
+            self.backend._run(["--json", "send", "text", "--message", "SYNTHETIC"],
+                              timeout=45, account=None)
+        self.assertEqual(run.call_args.args[0], [str(self.wacli), "--private-args-stdin"])
+        private = json.loads(run.call_args.kwargs["input_bytes"])
+        self.assertEqual(private[:2], ["--timeout", "45s"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 45 + backend_module.WACLI_EXIT_GRACE)
+        self.assertNotIn("SYNTHETIC", " ".join(run.call_args.args[0]))
+
+    def test_explicit_transport_deadline_keeps_precedence(self) -> None:
+        with mock.patch.object(self.backend, "_require_private_transport"), \
+                mock.patch.object(backend_module, "run_bounded", return_value=self.completed()) as run:
+            self.backend._run(["--json", "--timeout", "10s", "doctor"],
+                              timeout=15, account=None)
+        private = json.loads(run.call_args.kwargs["input_bytes"])
+        self.assertEqual(private[:5], ["--timeout", "15s", "--json", "--timeout", "10s"])
+
+    def test_backend_deadline_answer_arrives_before_helper_kills_the_client(self) -> None:
+        self.wacli.write_text("""#!/usr/bin/python3
+import json, sys, time
+args = json.load(sys.stdin)
+budget = float(args[args.index('--timeout') + 1].removesuffix('s'))
+time.sleep(budget + 0.04)
+print(json.dumps({'success': False, 'error': 'Synthetic backend deadline; it was not sent'}))
+sys.exit(1)
+""", encoding="utf-8")
+        started = time.monotonic()
+        with mock.patch.object(self.backend, "_require_private_transport"):
+            result = self.backend._run(["--json", "send", "text"], timeout=0.1, account=None)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("it was not sent", result.stdout)
+        self.assertLess(time.monotonic() - started, 1)
+
+    def test_uncertain_timeout_never_retries_or_stops_sync(self) -> None:
+        with mock.patch.object(self.backend, "_require_private_transport"), \
+                mock.patch.object(backend_module, "run_bounded", side_effect=subprocess.TimeoutExpired([], 50)) as run, \
+                mock.patch.object(self.backend, "_yield_active_sync") as stop_sync:
+            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "too long"):
+                self.backend._write(["--json", "send", "text"], timeout=45)
+        run.assert_called_once()
+        stop_sync.assert_not_called()
+
     def test_existing_account_config_fails_closed_on_discovery_errors(self) -> None:
         config = self.root / "config.yaml"
         config.write_text("accounts: {}\n", encoding="utf-8")
