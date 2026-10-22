@@ -2288,6 +2288,20 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(backend_module.shortcut_conflict({}, True), "")
         self.assertEqual(backend_module.shortcut_conflict({}, False), "")
 
+    def test_numbered_chat_shortcuts_persist_and_check_conflicts(self) -> None:
+        for number in range(1, 10):
+            self.assertEqual(backend_module.SHORTCUT_ACTIONS[f"chat{number}"]["keys"],
+                             [f"Alt+{number}"])
+        bindings = {"chat1": ["Alt+G"], "chat2": []}
+        self.backend.settings({"shortcuts": bindings})
+        self.assertEqual(self.backend.settings()["shortcuts"], bindings)
+        for override in ({"find": ["Alt+3"]}, {"chat1": ["Alt+2"]}, {"chat1": ["1"]}):
+            with self.subTest(override=override):
+                with self.assertRaises(backend_module.OmaWhatsAppError):
+                    self.backend.settings({"shortcuts": override})
+                self.assertEqual(self.backend.settings()["shortcuts"], bindings)
+        self.backend.settings({"shortcuts": {"find": ["Alt+3"], "chat3": []}})
+
     def test_sender_receipts_require_separate_opt_in(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
         self.assertFalse(self.backend.settings()["sender_read_receipts"])
