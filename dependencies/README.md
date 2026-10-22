@@ -1,7 +1,8 @@
 # Private wacli input extension
 
-The application uses wacli 0.19.0 plus the small `wacli-private-input.patch` in
-this directory. Upstream base: `b87e6178b7b1e571ce2821ab516039cfa0c6ecf6`.
+The application uses wacli 0.19.0 plus `wacli-private-input.patch` and
+`wacli-send-queue.patch` in this directory.
+Upstream base: `b87e6178b7b1e571ce2821ab516039cfa0c6ecf6`.
 This is an OmaWhatsApp-maintained extension, not an official upstream release.
 Upstream source and its MIT license remain at https://github.com/openclaw/wacli.
 
@@ -38,7 +39,7 @@ install -m 755 "$build_dir/wacli" "$HOME/.local/bin/wacli"
 ```
 
 The builder refuses a different upstream HEAD, exports only committed source
-(ignoring working-tree edits), applies only the bundled patch, runs plain/FTS
+(ignoring working-tree edits), applies only the two bundled patches, runs plain/FTS
 tests and Go vet, builds locally, and checks the protocol before producing the
 output. It does not install anything or start WhatsApp. Installation happens
 only in the final explicit commands after a successful build. No account
@@ -67,3 +68,18 @@ an existing cached subject when metadata is temporarily unavailable, rather than
 substituting the current participant's push name. The app independently prefers
 the groups table's subject. Protocol version remains 1; existing private-input
 binaries protect reads, but build and install the .2 extension for the sync-name correction.
+
+## Interactive send queue
+
+The queue patch keeps slow mark-read/mark-unread app-state operations out of
+the serialized send slot. App-state recovery retains its own serialization;
+text and media sends retain theirs. Both paced and unpaced sends honor their
+caller's deadline while queued, and an expired request is refused before
+dispatch. A timeout after dispatch explicitly reports an uncertain outcome;
+it is never a reason to retry automatically.
+
+The helper passes its operation timeout to wacli and reserves five additional
+seconds to drain the result and let the CLI exit. This prevents the helper from
+killing a 45-second caller while sync still has the default five minutes to
+dispatch the request. Protocol version, account selection and private stdin
+transport are unchanged. The build evidence also records the queue patch digest.

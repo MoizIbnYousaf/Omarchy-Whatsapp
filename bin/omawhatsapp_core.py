@@ -534,6 +534,7 @@ MAX_SENT_MEDIA_HINTS = 2000
 MAX_SENT_REPLY_HINTS = 2000
 MAX_WACLI_OUTPUT = 1024 * 1024
 MAX_PROCESS_ERROR = 64 * 1024
+WACLI_EXIT_GRACE = 5
 MAX_CLIPBOARD_TYPES = 64 * 1024
 MAX_CLIPBOARD_TEXT = MAX_MESSAGE * 4
 MAX_PREFERENCES = 1024 * 1024
@@ -2229,7 +2230,11 @@ class Backend:
             account = self.active
         scope = account.cli_args if account is not None else []
         private_options = {}
-        command = [str(self.wacli), *scope, *args]
+        # Share the operation budget with sync's delegate, including queue wait.
+        # Otherwise the helper kills its caller after 45s while the daemon still
+        # has wacli's default five minutes to dispatch that same operation.
+        # Explicit transport flags follow this default and retain precedence.
+        command = [str(self.wacli), *scope, "--timeout", f"{timeout:g}s", *args]
         if private_args:
             self._require_private_transport()
             private_options["input_bytes"] = json.dumps(command[1:], ensure_ascii=False).encode("utf-8")
@@ -2237,7 +2242,7 @@ class Backend:
         try:
             return run_bounded(
                 command,
-                timeout=timeout,
+                timeout=timeout + WACLI_EXIT_GRACE,
                 stdout_limit=stdout_limit,
                 stderr_limit=stderr_limit,
                 **private_options,
