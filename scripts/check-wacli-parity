@@ -12,6 +12,9 @@ import re
 import subprocess
 import sys
 
+# Load the helper without leaving a .pyc beside it: the shell watches this
+# folder and hot-reloads on any write, which can crash it (Omarchy #11929).
+sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parent.parent
 HELPER = ROOT / "bin/omawhatsapp_core.py"

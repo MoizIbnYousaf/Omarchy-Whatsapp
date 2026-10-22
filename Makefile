@@ -3,11 +3,19 @@
 OMARCHY_SHELL_DIR ?= /usr/share/omarchy/shell
 # Arch installs the Qt tools outside PATH.
 export PATH := $(PATH):/usr/lib/qt6/bin
+# Nothing in the checkout may gain a .pyc while these checks run: the shell
+# watches this folder and hot-reloads on any write, which can crash it
+# (Omarchy #11929 / #12859). The checks below import the helper in child
+# processes, so the environment, not just -B, has to carry this.
+export PYTHONDONTWRITEBYTECODE := 1
 
 validate: test manifest lint
 
 test:
-	python3 -m py_compile bin/omawhatsapp bin/omawhatsapp_core.py bin/omawhatsapp_assets.py bin/omawhatsapp-mcp
+	# Compile-check without writing .pyc beside the sources. The shell watches
+	# this folder and hot-reloads on any write, which can crash it (Omarchy
+	# #11929 / #12859); the launcher's bytecode belongs in the user cache.
+	python3 -c "import ast,sys;[ast.parse(open(f,'rb').read(),f) for f in sys.argv[1:]]" bin/omawhatsapp bin/omawhatsapp_core.py bin/omawhatsapp_assets.py bin/omawhatsapp-mcp
 	OMAW_SCRIPT="$(CURDIR)/bin/omawhatsapp_core.py" python3 -B -m unittest discover -s tests -v
 	jq empty manifest.json
 
