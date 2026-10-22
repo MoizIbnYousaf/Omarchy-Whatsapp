@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
+import QtQml.Models
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -1515,6 +1516,14 @@ Item {
     chatList.positionViewAtIndex(chatCursorIndex, ListView.Contain)
   }
 
+  // Positions always refer to the same filtered, account-scoped rows the rail renders.
+  function openChatAt(index) {
+    if (index < 0 || index >= root.visibleChats.length) return
+    root.chatCursorIndex = index
+    root.selectChat(root.visibleChats[index], "composer")
+    chatList.positionViewAtIndex(index, ListView.Contain)
+  }
+
   function openChatCursor() {
     if (visibleChats.length === 0) return
     chatCursorIndex = keyboardNavigation.openChat(visibleChats.length)
@@ -2383,6 +2392,22 @@ Item {
         enabled: root.opened && !root.settingsOpen && !mediaViewer.opened && !forwardPicker.opened
         context: Qt.WindowShortcut
         onActivated: root.openQuickSwitcher()
+      }
+
+      Instantiator {
+        model: 9
+        delegate: Shortcut {
+          required property int index
+          sequences: root.shortcutSequences("chat" + (index + 1))
+          autoRepeat: false
+          context: Qt.WindowShortcut
+          enabled: root.opened && !root.settingsOpen && !root.onboarding
+            && !mediaViewer.opened && !root.contactDraft
+            && !quickSwitcher.visible && !newChatDialog.visible && !groupDialog.visible
+            && !forwardPicker.visible && !pollComposer.visible && !outputConfirm.visible
+            && !deleteConfirm.visible && !batchDeleteConfirm.visible && !removeLocalConfirm.visible
+          onActivated: root.openChatAt(index)
+        }
       }
 
       Process {

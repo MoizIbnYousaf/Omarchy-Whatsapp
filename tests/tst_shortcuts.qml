@@ -61,6 +61,20 @@ TestCase {
     verify(Model.captureError("find", "Tab") !== "")
     verify(Model.captureError("find", "Escape") !== "")
   }
+  function test_numbered_chat_shortcuts_are_editable_and_conflict_checked() {
+    for (var n = 1; n <= 9; n++) {
+      compare(Model.bindings("chat" + n, {}, true), ["Alt+" + n])
+      verify(Model.conflict("find", ["Alt+" + n], {}, true) !== "")
+      verify(Model.captureError("chat" + n, String(n)) !== "")
+    }
+    var h = create(true)
+    h.view.edit("chat2", 0)
+    h.view.candidate = "Alt+G"
+    verify(h.view.save())
+    compare(h.view.keys("chat2"), ["Alt+G"])
+    verify(h.view.reset("chat2"))
+    compare(h.view.keys("chat2"), ["Alt+2"])
+  }
   function test_click_capture_cancel_save_and_failure() {
     var h=create()
     mouseClick(findChild(h.view, "shortcut-find-0"))

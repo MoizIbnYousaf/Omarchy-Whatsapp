@@ -12,10 +12,13 @@ The following are the defaults. A custom Send message binding takes precedence o
 | Show or hide chat list | `Ctrl+B` |
 | Start a new chat | `Ctrl+N` |
 | Go to a chat by name | `Ctrl+K` |
+| Open chat 1–9 | `Alt+1` … `Alt+9` |
 | Attach documents | `Ctrl+O` |
 | Attach photos and videos | `Ctrl+Shift+O` |
 | Record or stop a voice note | `Ctrl+Shift+V` |
 | Quit OmaWhatsApp | `Ctrl+Q` |
+
+Alt+1–9 opens the corresponding conversation in the current chat list, respecting its order, search, view and account filter. It works while typing and with the sidebar hidden, preserves each chat’s draft, and focuses the selected chat’s composer. A position beyond the list does nothing. Settings, dialogs and the media viewer keep these shortcuts inactive. Each position can be changed or disabled separately in Settings → Shortcuts.
 
 ## Navigation
 
