@@ -184,6 +184,38 @@ class ProtocolTests(ToolCase):
         self.assertIn("Offline mode is on.", text)
         self.assertIn("committed", text)
 
+    def test_a_send_outcome_tells_the_agent_whether_it_may_have_gone(self) -> None:
+        answers = {
+            "uncertain": ("WhatsApp did not confirm this in time. It may still have gone through, "
+                          "so check before trying again.", "do not retry"),
+            "not-sent": ("WhatsApp was busy with an earlier request, so this was not sent. "
+                         "You can try again.", "Nothing was delivered"),
+        }
+        for outcome, (error, hint) in answers.items():
+            with self.subTest(outcome=outcome):
+                reply = subprocess.CompletedProcess(
+                    [], 1, json.dumps({"ok": False, "error": error, "outcome": outcome}), "")
+                with mock.patch.object(mcp.subprocess, "run", return_value=reply) as run:
+                    text = self.tool_error("send_message", jid="a@s.whatsapp.net", text="hi")
+                run.assert_called_once()
+                self.assertIn(error, text)
+                self.assertIn(hint, text)
+
+    def test_send_individually_reports_the_outcome_where_it_stopped(self) -> None:
+        def send(payload: dict, args: tuple) -> dict:
+            if payload["jid"] == "b@s.whatsapp.net":
+                return mcp.ToolError("It may still have gone through.", None, "uncertain")
+            return {}
+        recorder = self.use(chats={"chats": [chat("a@s.whatsapp.net", "Ana"),
+                                             chat("b@s.whatsapp.net", "Bruno"),
+                                             chat("c@s.whatsapp.net", "Caio")]}, send=send)
+        answer = self.run_tool("send_individually", text="hi",
+                               jids=["a@s.whatsapp.net", "b@s.whatsapp.net", "c@s.whatsapp.net"])
+        self.assertEqual(answer["stopped_at"], "b@s.whatsapp.net")
+        self.assertEqual(answer["stopped_outcome"], "uncertain")
+        self.assertEqual(answer["not_sent"], ["c@s.whatsapp.net"])
+        self.assertEqual(len(recorder.of("send")), 2, "nothing is retried")
+
     def test_times_are_local_and_dates_parse_in_local_time(self) -> None:
         self.assertEqual(mcp.local_time(0), "")
         self.assertEqual(mcp.local_time(1790000000), mcp.local_time(1790000000000))
@@ -819,6 +851,11 @@ data = {}
 if " groups create " in joined:
     data = {"JID": "new@g.us", "GroupName": {"Name": "Obra"}}
 elif " send text " in joined:
+    if os.environ.get("FAKE_WACLI_SEND_ERROR"):
+        # The private-mode envelope: a fixed message on stderr.
+        print(json.dumps({"success": False, "data": None,
+                          "error": os.environ["FAKE_WACLI_SEND_ERROR"]}), file=sys.stderr)
+        raise SystemExit(1)
     data = {"id": "SENT-1"}
 elif " messages export " in joined:
     output = arguments[arguments.index("--output") + 1]
@@ -921,6 +958,22 @@ class EndToEndTests(unittest.TestCase):
         send = next(call for call in self.wacli_calls() if "send" in call and "text" in call)
         self.assertEqual(send[send.index("--to") + 1], "alex@s.whatsapp.net")
         self.assertEqual(send[send.index("--message") + 1], "yes!")
+
+    def test_a_send_outcome_travels_from_wacli_to_the_agent(self) -> None:
+        cases = {"Private WhatsApp command outcome is unknown.": "Outcome: uncertain",
+                 "Private WhatsApp command was not sent.": "Outcome: not sent"}
+        for message, outcome in cases.items():
+            with self.subTest(outcome=outcome):
+                self.log.unlink(missing_ok=True)
+                self.environment["FAKE_WACLI_SEND_ERROR"] = message
+                (result,) = self.session(("send_message", {"jid": "alex@s.whatsapp.net",
+                                                           "text": "yes!"}))
+                self.assertTrue(result["isError"])
+                text = result["content"][0]["text"]
+                self.assertIn(outcome, text)
+                self.assertNotIn("Private WhatsApp command", text)
+                sends = [call for call in self.wacli_calls() if "send" in call and "text" in call]
+                self.assertEqual(len(sends), 1, "never retried")
 
     def test_the_helper_accepts_every_token_the_server_sends(self) -> None:
         export = self.root / "exports" / "alex.json"

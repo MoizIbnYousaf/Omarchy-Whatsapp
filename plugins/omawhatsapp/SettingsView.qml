@@ -256,7 +256,8 @@ Rectangle {
     if (section === "shortcuts") return [{ kind: "shortcuts" }]
     if (section === "about") return [
       { kind: "info", title: "OmaWhatsApp", value: (about.app_version || "—") + (about.install_mode ? " · " + about.install_mode : "") },
-      { kind: "info", title: "wacli", value: (about.wacli_version || "—") + " · supports "
+      { kind: "info", title: "wacli", value: (about.wacli_version || "—")
+          + (about.wacli_build ? " · " + about.wacli_build : "") + " · supports "
           + (about.wacli_minimum_version || "0.17.1") + " and newer, tested with " + (about.wacli_tested_version || "0.18.3") },
       { kind: "info", title: "Source", value: "github.com/MoizIbnYousaf/Omarchy-Whatsapp" },
       { kind: "note", text: "Settings live in a private preferences file on this device. Chats stay in wacli's local mirror; nothing here sends chat data anywhere." }

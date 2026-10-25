@@ -39,7 +39,7 @@ class PrivateTransportTests(unittest.TestCase):
    result=backend._run(args,account=None,private_args=True)
    value=json.loads(result.stdout)
    self.assertEqual(value['argv'],['--private-args-stdin'])
-   self.assertEqual(value['input'],['--timeout','30s',*args])
+   self.assertEqual(value['input'],['--timeout','27000ms',*args])
    self.assertNotIn(secret,str(value['cmdline']))
    self.assertNotIn(secret,str(value['env']))
  def test_old_binary_is_refused_before_content_dispatch(self):

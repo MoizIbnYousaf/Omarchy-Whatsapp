@@ -52,9 +52,11 @@ OmaWhatsApp reads the user's local WhatsApp mirror and acts on WhatsApp for them
 
 
 class ToolError(Exception):
-    def __init__(self, message: str, partial: Any = None) -> None:
+    def __init__(self, message: str, partial: Any = None, outcome: str = "") -> None:
         super().__init__(message)
         self.partial = partial
+        # The helper's delivery outcome for a failed write: "not-sent" or "uncertain".
+        self.outcome = outcome
 
 
 # ------------------------------------------------------------------ helper
@@ -80,7 +82,9 @@ def helper(command: str, payload: dict[str, Any] | None = None, *args: str,
     if not isinstance(value, dict) or value.get("ok") is not True:
         message = value.get("error") if isinstance(value, dict) else ""
         partial = value.get("partial") if isinstance(value, dict) else None
-        raise ToolError(str(message or "OmaWhatsApp could not complete that request."), partial)
+        outcome = value.get("outcome") if isinstance(value, dict) else ""
+        raise ToolError(str(message or "OmaWhatsApp could not complete that request."), partial,
+                        outcome if outcome in ("not-sent", "uncertain") else "")
     return value
 
 
@@ -1256,6 +1260,7 @@ def send_individually(jids: list[str], text: str, pause_seconds: int = 4,
         except ToolError as exc:
             return compact({"done": False, "sent": len(sent_to), "sent_to": sent_to,
                             "stopped_at": jid, "error": str(exc),
+                            "stopped_outcome": exc.outcome,
                             "not_sent": people[index + 1:]})
         sent_to.append(jid)
         if index < len(people) - 1:
@@ -1555,6 +1560,10 @@ def call_tool(name: str, arguments: Any) -> dict[str, Any]:
         result = entry["handler"](**values)
     except ToolError as exc:
         text = str(exc)
+        if exc.outcome == "uncertain":
+            text += "\nOutcome: uncertain. It may already have been delivered; do not retry."
+        elif exc.outcome == "not-sent":
+            text += "\nOutcome: not sent. Nothing was delivered."
         if exc.partial:
             text += "\nPartly done: " + json.dumps(exc.partial, ensure_ascii=False)
         return {"content": [{"type": "text", "text": text}], "isError": True}

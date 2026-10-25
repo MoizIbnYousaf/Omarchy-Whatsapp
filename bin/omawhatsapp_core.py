@@ -630,7 +630,17 @@ MAX_SENT_MEDIA_HINTS = 2000
 MAX_SENT_REPLY_HINTS = 2000
 MAX_WACLI_OUTPUT = 1024 * 1024
 MAX_PROCESS_ERROR = 64 * 1024
-WACLI_EXIT_GRACE = 5
+# wacli gets the caller's budget less this margin, so it answers before the
+# helper's hard limit: a tenth of the budget, from 0.5 to 5 s, at most half.
+WACLI_REPLY_MARGIN = (0.5, 5.0)
+# Fixed private-mode errors. Builds before omawhatsapp.3 print only the first.
+WACLI_PRIVATE_FAILED = "Private WhatsApp command failed."
+WACLI_NOT_SENT = "Private WhatsApp command was not sent."
+WACLI_OUTCOME_UNKNOWN = "Private WhatsApp command outcome is unknown."
+TIMEOUT_ERROR = "WhatsApp took too long to respond."
+NOT_SENT_ERROR = "WhatsApp was busy with an earlier request, so this was not sent. You can try again."
+UNCERTAIN_ERROR = ("WhatsApp did not confirm this in time. It may still have gone through, "
+                   "so check before trying again.")
 MAX_CLIPBOARD_TYPES = 64 * 1024
 MAX_CLIPBOARD_TEXT = MAX_MESSAGE * 4
 MAX_PREFERENCES = 1024 * 1024
@@ -1165,6 +1175,18 @@ class OmaWhatsAppError(RuntimeError):
     pass
 
 
+class OmaWhatsAppTimeout(OmaWhatsAppError):
+    """wacli gave no confirmed answer within its budget."""
+
+
+class OmaWhatsAppOutcomeError(OmaWhatsAppError):
+    """A failed write whose delivery is known: "not-sent" or "uncertain"."""
+
+    def __init__(self, message: str, outcome: str) -> None:
+        super().__init__(message)
+        self.outcome = outcome
+
+
 class OmaWhatsAppAuthRejected(OmaWhatsAppError):
     """The terminal reported a logout, regardless of its exit status."""
 
@@ -1189,6 +1211,26 @@ def emit(value: dict[str, Any], code: int = 0) -> int:
 def clean_error(value: Any, fallback: str) -> str:
     text = " ".join(str(value or "").split())
     return (text or fallback)[:512]
+
+
+def wacli_timeout_ms(timeout: float) -> int:
+    """wacli's own --timeout in whole milliseconds, below any budget from 2 ms."""
+    low, high = WACLI_REPLY_MARGIN
+    margin = min(high, max(low, timeout / 10), timeout / 2)
+    return max(1, int((timeout - margin) * 1000))
+
+
+def wacli_failure(result: subprocess.CompletedProcess[str]) -> str:
+    """The error wacli printed last on stderr, as plain text."""
+    lines = [line.strip() for line in str(result.stderr or "").splitlines() if line.strip()]
+    if not lines:
+        return ""
+    try:
+        value = json.loads(lines[-1])
+    except json.JSONDecodeError:
+        return lines[-1]
+    error = value.get("error") if isinstance(value, dict) else None
+    return str(error.get("message") if isinstance(error, dict) else error or "")
 
 
 def bounded_int(value: Any, fallback: int, minimum: int, maximum: int) -> int:
@@ -2302,17 +2344,28 @@ class Backend:
         cached = getattr(self, "_private_transport_probe", None)
         if cached is not None and cached[0] == identity:
             return cached[1]
+        build = ""
         try:
             result = run_bounded([str(self.wacli), "--private-args-version"],
                                  timeout=5, stdout_limit=1024, stderr_limit=1024)
             capability = json.loads(result.stdout)
             supported = result.returncode == 0 and capability.get("protocol") == 1 \
                 and capability.get("max_bytes") == 65536
+            # Older private builds have no label; other keys are ignored.
+            label = capability.get("build") if supported else ""
+            build = label if isinstance(label, str) and re.fullmatch(r"[a-z0-9.-]{1,32}", label) else ""
         except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired, ProcessOutputLimitExceeded):
             supported = False
         # Keyed by the binary's identity: installing another wacli re-probes.
-        self._private_transport_probe = (identity, supported)
+        self._private_transport_probe = (identity, supported, build)
         return supported
+
+    def _private_transport_build(self) -> str:
+        """The private build's label, such as omawhatsapp.3; empty if older."""
+        if not self._private_transport_supported():
+            return ""
+        probe = getattr(self, "_private_transport_probe", None)
+        return str(probe[2]) if isinstance(probe, tuple) and len(probe) > 2 else ""
 
     def _require_private_transport(self) -> None:
         if not self._private_transport_supported():
@@ -2334,19 +2387,21 @@ class Backend:
             account = self.active
         scope = account.cli_args if account is not None else []
         private_options = {}
-        # Share the operation budget with sync's delegate, including queue wait.
-        # Otherwise the helper kills its caller after 45s while the daemon still
-        # has wacli's default five minutes to dispatch that same operation.
+        # Share the operation budget with sync's delegate, including queue wait,
+        # so the daemon never dispatches after the helper gave up. wacli's own
+        # deadline falls inside the hard limit below, so wacli answers first.
         # Explicit transport flags follow this default and retain precedence.
-        command = [str(self.wacli), *scope, "--timeout", f"{timeout:g}s", *args]
+        budget_ms = wacli_timeout_ms(timeout)
+        command = [str(self.wacli), *scope, "--timeout", f"{budget_ms}ms", *args]
         if private_args:
             self._require_private_transport()
             private_options["input_bytes"] = json.dumps(command[1:], ensure_ascii=False).encode("utf-8")
             command = [str(self.wacli), "--private-args-stdin"]
+        started = time.monotonic()
         try:
-            return run_bounded(
+            result = run_bounded(
                 command,
-                timeout=timeout + WACLI_EXIT_GRACE,
+                timeout=timeout,
                 stdout_limit=stdout_limit,
                 stderr_limit=stderr_limit,
                 **private_options,
@@ -2354,9 +2409,19 @@ class Backend:
         except ProcessOutputLimitExceeded as exc:
             raise OmaWhatsAppError("WhatsApp returned too much data.") from exc
         except subprocess.TimeoutExpired as exc:
-            raise OmaWhatsAppError("WhatsApp took too long to respond.") from exc
+            raise OmaWhatsAppTimeout(TIMEOUT_ERROR) from exc
         except OSError as exc:
             raise OmaWhatsAppError("wacli could not be started.") from exc
+        if result.returncode != 0:
+            failure = wacli_failure(result)
+            # Older private builds mask a deadline as the generic failure; at
+            # or after wacli's own deadline it is a timeout, as it was when the
+            # helper's limit came first.
+            if failure == WACLI_OUTCOME_UNKNOWN or (
+                    failure == WACLI_PRIVATE_FAILED
+                    and time.monotonic() - started >= budget_ms / 1000):
+                raise OmaWhatsAppTimeout(TIMEOUT_ERROR)
+        return result
 
     @staticmethod
     def _locked(result: subprocess.CompletedProcess[str]) -> bool:
@@ -2416,6 +2481,7 @@ class Backend:
             "app_version": app_version,
             "install_mode": install_mode,
             "wacli_version": wacli_version,
+            "wacli_build": self._private_transport_build(),
             "wacli_minimum_version": WACLI_MINIMUM_VERSION,
             "wacli_tested_version": WACLI_PARITY_VERSION,
             "stores": stores,
@@ -3210,9 +3276,13 @@ class Backend:
         return result
 
     def _write(self, args: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
-        return self._mutate(
-            args, timeout=timeout, require_online=True, private_args=True
-        )
+        try:
+            return self._mutate(
+                args, timeout=timeout, require_online=True, private_args=True
+            )
+        except OmaWhatsAppTimeout as exc:
+            # Never retried: an unconfirmed write may still have gone through.
+            raise OmaWhatsAppOutcomeError(UNCERTAIN_ERROR, "uncertain") from exc
 
     def _profile_picture_metadata(
         self, account: Account, candidates: list[dict[str, str]],
@@ -5708,6 +5778,8 @@ class Backend:
         error = value.get("error") if isinstance(value, dict) else None
         message = error.get("message") if isinstance(error, dict) else error
         cleaned = clean_error(message or result.stderr, "WhatsApp rejected the request.")
+        if cleaned == WACLI_NOT_SENT:
+            raise OmaWhatsAppOutcomeError(NOT_SENT_ERROR, "not-sent")
         if "store is locked" in cleaned.casefold() or "another wacli is running" in cleaned.casefold():
             cleaned = "WhatsApp is busy with maintenance. Your draft is safe; try again shortly."
         raise OmaWhatsAppError(cleaned)
@@ -6759,6 +6831,9 @@ class Backend:
                         "sent_paths": [str(value) for value in values[:sent]],
                         "remaining_paths": [str(value) for value in values[sent:]],
                         "items": sent_items,
+                        # The first remaining attachment's own outcome.
+                        **({"outcome": exc.outcome}
+                           if isinstance(exc, OmaWhatsAppOutcomeError) else {}),
                     },
                 ) from exc
             raise
@@ -7579,6 +7654,8 @@ class Backend:
             detail = Backend._redact_transport_value(
                 str(error or result.stderr or raw), sensitive
             )
+            if wacli_failure(result) == WACLI_NOT_SENT:
+                raise OmaWhatsAppOutcomeError(NOT_SENT_ERROR, "not-sent")
             raise OmaWhatsAppError(clean_error(detail, "wacli rejected the request."))
         if isinstance(value, dict) and value.get("success") is False:
             error = value.get("error")
@@ -7732,16 +7809,21 @@ class Backend:
                     ("messages", "purge"),
                     ("store", "cleanup"),
                 }
-                result = self._mutate(
-                    command,
-                    timeout=timeout + 5,
-                    require_online=policy in {
-                        "remote-read", "sync", "whatsapp-write", "destructive"
-                    } and not local_destructive,
-                    stdout_limit=output_limit,
-                    stderr_limit=output_limit if include_events else MAX_PROCESS_ERROR,
-                    account=None,
-                )
+                try:
+                    result = self._mutate(
+                        command,
+                        timeout=timeout + 5,
+                        require_online=policy in {
+                            "remote-read", "sync", "whatsapp-write", "destructive"
+                        } and not local_destructive,
+                        stdout_limit=output_limit,
+                        stderr_limit=output_limit if include_events else MAX_PROCESS_ERROR,
+                        account=None,
+                    )
+                except OmaWhatsAppTimeout as exc:
+                    if policy not in {"whatsapp-write", "destructive"}:
+                        raise
+                    raise OmaWhatsAppOutcomeError(UNCERTAIN_ERROR, "uncertain") from exc
         return self._transport_result(
             result, path, policy, include_events, sensitive
         )
@@ -8273,7 +8355,10 @@ def main() -> int:
             "partial": exc.partial,
         }, 1)
     except OmaWhatsAppError as exc:
-        return emit({"ok": False, "error": clean_error(exc, "OmaWhatsApp failed.")}, 1)
+        answer = {"ok": False, "error": clean_error(exc, "OmaWhatsApp failed.")}
+        if isinstance(exc, OmaWhatsAppOutcomeError):
+            answer["outcome"] = exc.outcome
+        return emit(answer, 1)
     return emit({"ok": False, "error": "Unknown command."}, 2)
 
 

@@ -83,49 +83,137 @@ class BackendHardeningTests(unittest.TestCase):
             [], 0, json.dumps({"success": True, "data": data}), ""
         )
 
-    def test_private_operation_shares_its_deadline_with_wacli(self) -> None:
-        with mock.patch.object(self.backend, "_require_private_transport"), \
-                mock.patch.object(backend_module, "run_bounded", return_value=self.completed()) as run:
-            self.backend._run(["--json", "send", "text", "--message", "SYNTHETIC"],
-                              timeout=45, account=None)
-        self.assertEqual(run.call_args.args[0], [str(self.wacli), "--private-args-stdin"])
-        private = json.loads(run.call_args.kwargs["input_bytes"])
-        self.assertEqual(private[:2], ["--timeout", "45s"])
-        self.assertEqual(run.call_args.kwargs["timeout"], 45 + backend_module.WACLI_EXIT_GRACE)
-        self.assertNotIn("SYNTHETIC", " ".join(run.call_args.args[0]))
+    def private_wacli(self, body: str) -> Path:
+        """A fake private-input wacli; body runs with the decoded private argv.
 
-    def test_explicit_transport_deadline_keeps_precedence(self) -> None:
-        with mock.patch.object(self.backend, "_require_private_transport"), \
-                mock.patch.object(backend_module, "run_bounded", return_value=self.completed()) as run:
-            self.backend._run(["--json", "--timeout", "10s", "doctor"],
-                              timeout=15, account=None)
-        private = json.loads(run.call_args.kwargs["input_bytes"])
-        self.assertEqual(private[:5], ["--timeout", "15s", "--json", "--timeout", "10s"])
+        Errors use the real private-mode envelope on stderr. Each dispatched
+        command is appended to the returned log.
+        """
+        log = self.root / "dispatched.log"
+        self.wacli.write_text(
+            f"#!{sys.executable}\nimport json, sys, time\n"
+            "if sys.argv[1:] == ['--private-args-version']:\n"
+            "    print(json.dumps({'protocol': 1, 'max_bytes': 65536}))\n"
+            "    raise SystemExit(0)\n"
+            "args = json.load(sys.stdin)\n"
+            f"with open({str(log)!r}, 'a') as handle:\n"
+            "    handle.write(json.dumps(args) + '\\n')\n"
+            "def fail(message):\n"
+            "    print(json.dumps({'success': False, 'data': None, 'error': message}), file=sys.stderr)\n"
+            "    raise SystemExit(1)\n"
+            "def budget():\n"
+            "    value = args[args.index('--timeout') + 1] if '--timeout' in args else '300s'\n"
+            "    return float(value[:-2]) / 1000 if value.endswith('ms') else float(value[:-1])\n"
+            + body, encoding="utf-8")
+        self.wacli.chmod(0o700)
+        return log
 
-    def test_backend_deadline_answer_arrives_before_helper_kills_the_client(self) -> None:
-        self.wacli.write_text("""#!/usr/bin/python3
-import json, sys, time
-args = json.load(sys.stdin)
-budget = float(args[args.index('--timeout') + 1].removesuffix('s'))
-time.sleep(budget + 0.04)
-print(json.dumps({'success': False, 'error': 'Synthetic backend deadline; it was not sent'}))
-sys.exit(1)
-""", encoding="utf-8")
+    def test_wacli_deadline_stays_strictly_inside_the_callers_hard_limit(self) -> None:
+        expected = {0.05: "25ms", 2: "1500ms", 8: "7200ms", 45: "40500ms",
+                    120: "115000ms", 7205: "7200000ms", 1e6: "999995000ms"}
+        for timeout, budget in expected.items():
+            with self.subTest(timeout=timeout), \
+                    mock.patch.object(self.backend, "_require_private_transport"), \
+                    mock.patch.object(backend_module, "run_bounded", return_value=self.completed()) as run:
+                self.backend._run(["--json", "send", "text", "--message", "SYNTHETIC"],
+                                  timeout=timeout, account=None)
+            self.assertEqual(run.call_args.args[0], [str(self.wacli), "--private-args-stdin"])
+            self.assertEqual(run.call_args.kwargs["timeout"], timeout, "the hard limit is the caller's")
+            private = json.loads(run.call_args.kwargs["input_bytes"])
+            self.assertEqual(private[:2], ["--timeout", budget])
+            self.assertRegex(private[1], r"^[1-9][0-9]*ms$", "Go durations never use exponents")
+            self.assertLess(int(private[1].removesuffix("ms")) / 1000, timeout)
+        self.assertEqual(backend_module.wacli_timeout_ms(1e-05), 1)
+
+    def test_stalled_wacli_cannot_stretch_the_total_mention_budget(self) -> None:
+        # Ledger A10: every inline lookup shares one 2 s budget, even when
+        # wacli ignores its own --timeout.
+        log = self.private_wacli("time.sleep(30)\n")
         started = time.monotonic()
-        with mock.patch.object(self.backend, "_require_private_transport"):
-            result = self.backend._run(["--json", "send", "text"], timeout=0.1, account=None)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("it was not sent", result.stdout)
-        self.assertLess(time.monotonic() - started, 1)
+        names = self.backend._mention_names({"1111111111", "2222222222", "3333333333"})
+        elapsed = time.monotonic() - started
+        self.assertEqual(names, {})
+        self.assertLess(elapsed, backend_module.MENTION_LOOKUP_SECONDS + 0.5)
+        self.assertGreaterEqual(len(log.read_text().splitlines()), 1)
 
-    def test_uncertain_timeout_never_retries_or_stops_sync(self) -> None:
-        with mock.patch.object(self.backend, "_require_private_transport"), \
-                mock.patch.object(backend_module, "run_bounded", side_effect=subprocess.TimeoutExpired([], 50)) as run, \
-                mock.patch.object(self.backend, "_yield_active_sync") as stop_sync:
-            with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "too long"):
-                self.backend._write(["--json", "send", "text"], timeout=45)
-        run.assert_called_once()
-        stop_sync.assert_not_called()
+    def test_stalled_wacli_cannot_stretch_a_send_budget(self) -> None:
+        log = self.private_wacli("time.sleep(30)\n")
+        started = time.monotonic()
+        with self.assertRaises(backend_module.OmaWhatsAppError) as raised:
+            self.backend._write(["--json", "send", "text", "--to", "alex@s.whatsapp.net",
+                                 "--message", "SYNTHETIC"], timeout=1.0)
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertEqual(getattr(raised.exception, "outcome", ""), "uncertain")
+        self.assertIn("may still have gone through", str(raised.exception))
+        self.assertEqual(len(log.read_text().splitlines()), 1, "never retried")
+
+    def test_old_private_build_failing_at_its_deadline_reads_as_uncertain(self) -> None:
+        # A 0.18.6 build masks wacli's own deadline as the generic failure.
+        self.private_wacli("time.sleep(budget() + 0.05)\nfail('Private WhatsApp command failed.')\n")
+        with self.assertRaises(backend_module.OmaWhatsAppError) as raised:
+            self.backend._write(["--json", "send", "text", "--to", "alex@s.whatsapp.net",
+                                 "--message", "SYNTHETIC"], timeout=1.0)
+        self.assertEqual(getattr(raised.exception, "outcome", ""), "uncertain")
+        self.assertIn("may still have gone through", str(raised.exception))
+
+    def test_generic_failure_before_the_deadline_stays_an_ordinary_failure(self) -> None:
+        self.private_wacli("fail('Private WhatsApp command failed.')\n")
+        with self.assertRaises(backend_module.OmaWhatsAppError) as raised:
+            self.backend.send("alex@s.whatsapp.net", "SYNTHETIC")
+        self.assertNotIsInstance(raised.exception, backend_module.OmaWhatsAppOutcomeError)
+        self.assertEqual(str(raised.exception), "Private WhatsApp command failed.")
+
+    def test_unconfirmed_write_is_uncertain_once_and_never_retried(self) -> None:
+        log = self.private_wacli("fail('Private WhatsApp command outcome is unknown.')\n")
+        with mock.patch.object(self.backend, "_yield_active_sync") as yield_sync, \
+                self.assertRaises(backend_module.OmaWhatsAppError) as raised:
+            self.backend.send("alex@s.whatsapp.net", "SYNTHETIC")
+        self.assertEqual(getattr(raised.exception, "outcome", ""), "uncertain")
+        self.assertIn("may still have gone through", str(raised.exception))
+        self.assertEqual(len(log.read_text().splitlines()), 1)
+        yield_sync.assert_not_called()
+
+    def test_unconfirmed_read_keeps_the_plain_timeout_message(self) -> None:
+        self.private_wacli("fail('Private WhatsApp command outcome is unknown.')\n")
+        with self.assertRaises(backend_module.OmaWhatsAppTimeout) as raised:
+            self.backend._run(["--read-only", "--json", "doctor"], timeout=2)
+        self.assertEqual(str(raised.exception), "WhatsApp took too long to respond.")
+        self.assertNotIsInstance(raised.exception, backend_module.OmaWhatsAppOutcomeError)
+
+    def test_send_outcomes_reach_the_helper_json(self) -> None:
+        cases = {
+            "Private WhatsApp command was not sent.": ("not-sent", "so this was not sent"),
+            "Private WhatsApp command outcome is unknown.": ("uncertain", "may still have gone through"),
+        }
+        for message, (outcome, text) in cases.items():
+            with self.subTest(outcome=outcome):
+                log = self.private_wacli(f"fail({message!r})\n")
+                log.unlink(missing_ok=True)
+                home = self.root / "cli-home"
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), "send"],
+                    input=json.dumps({"jid": "alex@s.whatsapp.net", "text": "SYNTHETIC"}),
+                    capture_output=True, text=True, timeout=60, check=False,
+                    env=dict(os.environ, HOME=str(home), XDG_STATE_HOME=str(home / "state"),
+                             XDG_CONFIG_HOME=str(home / "config"), WACLI_BIN=str(self.wacli),
+                             WACLI_STORE_DIR=str(self.store)))
+                answer = json.loads(result.stdout)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse(answer["ok"])
+                self.assertEqual(answer["outcome"], outcome)
+                self.assertIn(text, answer["error"])
+                self.assertNotIn("Private WhatsApp command", answer["error"])
+                self.assertEqual(len(log.read_text().splitlines()), 1, "dispatched once")
+
+    def test_transport_timeout_follows_the_helper_default_and_keeps_its_limit(self) -> None:
+        log = self.private_wacli("print(json.dumps({'success': True, 'data': []}))\n")
+        with mock.patch.object(backend_module, "run_bounded", wraps=backend_module.run_bounded) as run:
+            self.backend.transport({"args": ["chats", "list"], "timeout": 10})
+        private = json.loads(log.read_text().splitlines()[-1])
+        flags = [private[index + 1] for index, item in enumerate(private) if item == "--timeout"]
+        # wacli keeps the last value given, so the request's own timeout wins.
+        self.assertEqual(flags, ["13500ms", "10s"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 15)
 
     def test_existing_account_config_fails_closed_on_discovery_errors(self) -> None:
         config = self.root / "config.yaml"
@@ -760,6 +848,21 @@ sys.exit(1)
         promoted = Path(error.partial["items"][1]["local_path"])
         self.assertRegex(promoted.name, backend_module.CLIPBOARD_SENT_PATTERN)
         self.assertTrue(promoted.exists())
+
+    def test_partial_send_marks_an_unconfirmed_next_attachment(self) -> None:
+        first, second = self.root / "first.pdf", self.root / "second.pdf"
+        first.write_bytes(b"first")
+        second.write_bytes(b"second")
+        answers = [{"ok": True, "kind": "file", "id": "sent-1", "local_path": str(first),
+                    "mime_type": "application/pdf", "media_type": "document"},
+                   backend_module.OmaWhatsAppOutcomeError(backend_module.UNCERTAIN_ERROR, "uncertain")]
+        with mock.patch.object(self.backend, "send_file", side_effect=answers), \
+                self.assertRaises(backend_module.OmaWhatsAppPartialError) as raised:
+            self.backend.send_files("team@g.us", [str(first), str(second)])
+        self.assertEqual(raised.exception.partial["remaining_paths"], [str(second)])
+        self.assertEqual(raised.exception.partial["outcome"], "uncertain",
+                         "the first remaining attachment may already have arrived")
+        self.assertIn("may still have gone through", str(raised.exception))
 
     def test_preview_bookkeeping_never_makes_a_delivered_file_retryable(self) -> None:
         delivered = self.root / "delivered.pdf"

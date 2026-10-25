@@ -114,6 +114,8 @@ Item {
     || actionMenu.opened
   // The message menu, as data: tests and the right-click path share it.
   readonly property bool sendFailed: pending && message.send_state === "failed"
+  // WhatsApp gave no answer in time: the text may have arrived anyway.
+  readonly property bool sendUncertain: sendFailed && message.send_outcome === "uncertain"
   readonly property var menuActions: sendFailed
     ? [{ label: "Try again", action: "retry-send", show: true },
        { label: "Copy text", action: "copy", show: true },
@@ -870,8 +872,10 @@ Item {
         font.pixelSize: Style.font.caption
         HoverHandler { id: pendingHover }
         Ui.PanelToolTip {
+          objectName: "messagePendingTip"
           visible: pendingHover.hovered
-          text: root.sendFailed ? "Not sent · right-click to try again"
+          text: root.sendUncertain ? "May have been sent · check the chat before trying again"
+            : root.sendFailed ? "Not sent · right-click to try again"
             : root.message.send_state === "sent" ? "Sent · saving it on this computer"
             : root.message.send_state === "queued" ? "Waiting for the message before it…"
             : "Sending…"

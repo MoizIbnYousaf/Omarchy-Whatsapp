@@ -219,7 +219,7 @@ Item {
         media_type: String(item.media_type || ""),
         mime_type: item.media_type === "sticker" ? "image/webp" : "",
         local_path: String(item.local_path || ""), tags: [], quoted_id: item.reply_id,
-        pending: true, send_state: item.state }
+        pending: true, send_state: item.state, send_outcome: String(item.outcome || "") }
     })
     var page = older.length > 0 ? messages.concat(older) : messages
     // A star shows at once; WhatsApp can take seconds to accept it.
@@ -980,7 +980,7 @@ Item {
       return false
     }
     sendQueue = sendQueue.concat([{ payload: item.request, chatRef: item.chatRef, owner: item.owner }])
-    updatePendingSend(id, { state: "queued", error: "", created: Date.now() })
+    updatePendingSend(id, { state: "queued", error: "", outcome: "", created: Date.now() })
     runNextQueuedSend()
     return true
   }
@@ -2769,8 +2769,10 @@ Item {
         if (finishedKind === "voice") root.voiceOwner = "service"
         if (finishedKind === "files" || finishedKind === "sticker")
           root.dropPendingSend(finishedRequest.local_id)
+        // "uncertain": it may still have gone through; retrying stays the user's call.
         if (finishedKind === "send")
-          root.updatePendingSend(finishedRequest.local_id, { state: "failed", error: message })
+          root.updatePendingSend(finishedRequest.local_id, { state: "failed", error: message,
+            outcome: String(payload && payload.outcome || "") })
         if (finishedKind === "chat-action") {
           root.lastChatsRaw = ""
           refreshDelay.restart()

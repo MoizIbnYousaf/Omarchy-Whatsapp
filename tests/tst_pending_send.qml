@@ -117,6 +117,25 @@ TestCase {
     verify(!service.resolvePendingSend("pending:404", "retry"))
   }
 
+  function test_an_unconfirmed_send_may_have_gone_and_waits_for_the_user() {
+    var service = createService()
+    var process = findChild(service, "writeProcess")
+    verify(service.sendText(target, "maybe delivered", "", [], "app"))
+    finish(service, 1, { ok: false, outcome: "uncertain",
+      error: "WhatsApp did not confirm this in time. It may still have gone through, so check before trying again." })
+    var failed = service.selectedMessages[0]
+    compare(failed.send_state, "failed")
+    compare(failed.send_outcome, "uncertain")
+    verify(!process.running, "never sent again on its own")
+    compare(service.sendQueue.length, 0)
+    verify(service.resolvePendingSend(failed.id, "retry"), "the user may still choose to")
+    compare(service.selectedMessages[0].send_state, "sending")
+    compare(service.selectedMessages[0].send_outcome, "", "a new attempt has no outcome yet")
+    finish(service, 1, { ok: false, outcome: "not-sent",
+      error: "WhatsApp was busy with an earlier request, so this was not sent. You can try again." })
+    compare(service.selectedMessages[0].send_outcome, "not-sent")
+  }
+
   function test_a_queued_text_that_can_no_longer_go_is_marked_not_sent() {
     var service = createService()
     var process = findChild(service, "writeProcess")
@@ -192,7 +211,30 @@ TestCase {
     }
   }
 
+  Component {
+    id: uncertainBubbleComponent
+    Oma.MessageBubble {
+      width: 420
+      message: ({ id: "pending:3", text: "maybe delivered", sender: "You", timestamp: 1787540100,
+        from_me: true, media_type: "", reactions: [], pending: true, send_state: "failed",
+        send_outcome: "uncertain" })
+      foreground: "#eeeeee"; background: "#111111"; accent: "#66ccaa"
+      dim: "#999999"; dimmer: "#777777"; fontFamily: "monospace"
+    }
+  }
+
   SignalSpy { id: pendingSpy; signalName: "pendingSendRequested" }
+
+  function test_an_unconfirmed_bubble_never_claims_it_was_not_sent() {
+    var failed = createTemporaryObject(failedBubbleComponent, testCase)
+    compare(findChild(failed, "messagePendingTip").text, "Not sent · right-click to try again")
+    var bubble = createTemporaryObject(uncertainBubbleComponent, testCase)
+    verify(bubble.sendUncertain)
+    compare(findChild(bubble, "messagePendingTip").text,
+      "May have been sent · check the chat before trying again")
+    compare(bubble.menuActions.map(function(item) { return item.action }),
+      ["retry-send", "copy", "discard-send"], "trying again stays an explicit choice")
+  }
 
   function test_a_failed_bubble_offers_try_again_and_discard() {
     var bubble = createTemporaryObject(failedBubbleComponent, testCase)
