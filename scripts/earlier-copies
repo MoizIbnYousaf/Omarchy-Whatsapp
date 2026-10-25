@@ -29,6 +29,9 @@ FILES = ("omawhatsapp", "omawhatsapp-mcp", "omawhatsapp_core.py", "omawhatsapp_a
 SKILL = "skills/omawhatsapp/"
 OUTPUT = ROOT / "bin" / "earlier-copies.json"
 
+# Load the helper without leaving a .pyc beside it: the shell watches this
+# folder and hot-reloads on any write, which can crash it (Omarchy #11929).
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "bin"))
 from omawhatsapp_core import tree_digest  # noqa: E402
 

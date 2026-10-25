@@ -3088,6 +3088,56 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(len(compiled), 1, "the module's bytecode is cached once")
             self.assertFalse((bin_dir / "__pycache__").exists(), "nothing is written beside the helper")
 
+    def test_tools_run_by_hand_write_no_bytecode_into_the_checkout(self) -> None:
+        # The shell reloads an installed plugin on any write in its folder,
+        # which can crash it (Omarchy #11929). Run by hand, these tools import
+        # the helper or a test module without the release gate's
+        # PYTHONDONTWRITEBYTECODE, so each has to turn bytecode off itself.
+        repository = SCRIPT.parent.parent
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "checkout"
+            for name in ("bin/omawhatsapp_core.py", "bin/omawhatsapp_assets.py",
+                         "scripts/earlier-copies", "scripts/check-wacli-parity",
+                         "tests/write_media_fixtures.py", "tests/test_media_worker.py"):
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_bytes((repository / name).read_bytes())
+                (root / name).chmod(0o755)
+            environment = dict(os.environ, HOME=temporary, WACLI_BIN=str(Path(temporary) / "no-wacli"))
+            environment.pop("PYTHONDONTWRITEBYTECODE", None)
+            environment.pop("PYTHONPYCACHEPREFIX", None)
+
+            def bytecode() -> list[str]:
+                return sorted(str(path.relative_to(root)) for path in root.rglob("__pycache__"))
+
+            def clear() -> None:
+                for cache in list(root.rglob("__pycache__")):
+                    for compiled in cache.iterdir():
+                        compiled.unlink()
+                    cache.rmdir()
+
+            # Control: in this environment a plain import of the helper does
+            # write beside it, so a clean result below means something.
+            control = subprocess.run([sys.executable, "-c", "import omawhatsapp_core"], cwd=root / "bin",
+                                     text=True, capture_output=True, check=False, env=environment)
+            self.assertEqual(control.returncode, 0, control.stderr)
+            self.assertEqual(bytecode(), ["bin/__pycache__"])
+
+            runs = {
+                "earlier-copies": ([str(root / "scripts" / "earlier-copies"), "--help"], 0, "--check"),
+                # Fails for the missing wacli only after it has loaded the helper.
+                "check-wacli-parity": ([str(root / "scripts" / "check-wacli-parity")], 1, "no-wacli"),
+                "write_media_fixtures": ([sys.executable, str(root / "tests" / "write_media_fixtures.py"),
+                                          str(Path(temporary) / "fixtures")], 0, ""),
+            }
+            for name, (command, returncode, output) in runs.items():
+                clear()
+                with self.subTest(name):
+                    result = subprocess.run(command, text=True, capture_output=True, check=False,
+                                            env=environment)
+                    self.assertEqual(result.returncode, returncode, result.stderr)
+                    self.assertIn(output, result.stdout + result.stderr)
+                    self.assertEqual(bytecode(), [], f"{name} wrote bytecode into the checkout")
+
 
     def test_a_person_chat_wacli_turned_unknown_stays_in_the_rail(self) -> None:
         # Found after sending a poll: wacli 0.18.3 filed it under the phone chat

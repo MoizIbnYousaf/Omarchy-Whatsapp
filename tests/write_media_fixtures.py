@@ -5,7 +5,11 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 import sys
-from test_media_worker import bomb
+
+# Load the test module without leaving a .pyc beside it: the shell watches
+# this folder and hot-reloads on any write, which can crash it (Omarchy #11929).
+sys.dont_write_bytecode = True
+from test_media_worker import bomb  # noqa: E402
 
 
 FIXTURES = {
