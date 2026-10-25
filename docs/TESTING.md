@@ -211,9 +211,26 @@ never fall back to ordinary Qt editors.
 exit, stalled readers, process argv/environment inspection, old-binary refusal
 and exact account scope through lock handoff. The synthetic MCP recorder now
 reads the same stdin protocol. `private_wacli_smoke.py BINARY` exercises the real
-patched dependency with read-only dispatch and no store or network access.
-The CI private-transport job builds the bundled patch against the exact audited
-upstream commit and runs plain/FTS dependency tests and vet.
+patched dependency with read-only dispatch and no account store or network
+access. It checks the `omawhatsapp.3` build label and, through a synthetic sync
+delegate (a held lock and socket in an empty temporary store), the fixed
+not-sent, outcome-unknown and generic private-mode messages.
+The CI private-transport job builds the three bundled patches against the exact
+audited upstream commit, runs plain/FTS dependency tests, a `-race` run of the
+queue, read-mark and outcome tests and vet, and publishes every patch digest.
+The dependency's own regressions are upstream's `send_queue_deadline_test.go`
+and OmaWhatsApp's `TestOmaReadMarkDoesNotBlockSend`,
+`TestOmaReceiptReadMarkStaysInSendQueue`, `TestOmaExpiredQueuedSendIsNotDispatched`
+and `TestOmaPrivate*`/`TestOma*Reports*` outcome tests.
+
+Deadlines and outcomes are tested above the dependency too. In
+`test_backend_hardening.py`, fake private builds that ignore `--timeout` and
+sleep prove that the 2-second total for inline mention lookups and a send budget
+hold; others print the real private-mode envelopes and check the helper's JSON
+`outcome`, the old-build rule (a generic failure at wacli's deadline is
+uncertain) and that nothing is retried. `tst_pending_send.qml` checks that an
+unconfirmed bubble says it may have been sent and waits for an explicit Try
+again, and `test_mcp.py` follows both outcomes from a fake wacli to the agent.
 
 `test_agent_requests.py` executes the Bash examples extracted directly from the
 shipped agent skill. Synthetic Unicode, quotes, newlines, recipient IDs, paths,

@@ -98,7 +98,10 @@ final helper pipe does not protect private data exposed by an earlier process.
    interactive mode only for account linking or a foreground sync requested
    by the user.
 5. Inspect the JSON result. Report success only when `ok` is true; otherwise
-   surface the sanitized error and stop.
+   surface the sanitized error and stop. A failed write can carry `outcome`:
+   `uncertain` means it may already have been delivered, so ask the user to
+   check the chat and never send it again yourself; `not-sent` means nothing
+   was delivered, and it is sent again only if the user asks.
 
 Read [references/operations.md](references/operations.md) for focused chat,
 message, attachment, notification, and offline-mode contracts. Read

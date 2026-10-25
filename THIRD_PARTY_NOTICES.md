@@ -13,7 +13,10 @@ assets.
 
 WhatsApp linking, synchronization, messaging, and media transfer are provided
 through the public [`openclaw/wacli`](https://github.com/openclaw/wacli) CLI.
-OmaWhatsApp does not vendor or modify wacli.
+OmaWhatsApp ships reviewable patches (`dependencies/*.patch`) that are applied
+to pinned upstream source and built locally under upstream's MIT License. One is
+an exact backport of an upstream commit, credited to its authors in
+`dependencies/README.md`. No wacli source or binary is vendored.
 
 ## Omasnap
 

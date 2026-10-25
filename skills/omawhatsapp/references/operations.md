@@ -106,6 +106,13 @@ oma_request jid "$resolved_jid" caption "$caption" paths "$local_paths_json" \
   | jq '.paths |= fromjson' | "$oma" files
 ```
 
+A failed send answers `{"ok": false, "error": ...}`. When WhatsApp's answer
+did not arrive in time it adds `"outcome": "uncertain"`: the message may have
+been delivered, so report that and let the user check the chat; never retry it.
+`"outcome": "not-sent"` means the request was refused before dispatch and
+nothing was delivered. A partial multi-file result's `partial.outcome`
+describes the first remaining attachment in the same way.
+
 The other bounded message commands accept these objects:
 
 | Command | JSON fields |

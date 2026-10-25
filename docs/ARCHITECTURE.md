@@ -203,7 +203,9 @@ exact `private-export:` path). The server resolves names to chats for reads,
 requires exact JIDs for writes, turns times into the local zone, and trims
 answers; it never opens `wacli.db`. Writes are annotated as not read-only, and
 destructive ones as destructive, so hosts can ask before each call. A write is
-never retried: a timeout may still have been delivered.
+never retried: a timeout may still have been delivered. The helper's `outcome`
+field (`uncertain` or `not-sent`) reaches the agent with the error, so it can
+say which happened.
 
 Three helper commands exist for it: `attachments` (attachments across the
 rail, folding @lid rows into the phone chat), `contact-tags`, and a `tag`
