@@ -633,6 +633,9 @@ MAX_PROCESS_ERROR = 64 * 1024
 # wacli gets the caller's budget less this margin, so it answers before the
 # helper's hard limit: a tenth of the budget, from 0.5 to 5 s, at most half.
 WACLI_REPLY_MARGIN = (0.5, 5.0)
+# Sync answers a delegated request up to this much, or a tenth of the budget,
+# before wacli's deadline (upstream's sendDelegateReplyMargin).
+WACLI_DELEGATE_REPLY_MARGIN = 0.5
 # Fixed private-mode errors. Builds before omawhatsapp.3 print only the first.
 WACLI_PRIVATE_FAILED = "Private WhatsApp command failed."
 WACLI_NOT_SENT = "Private WhatsApp command was not sent."
@@ -2414,12 +2417,14 @@ class Backend:
             raise OmaWhatsAppError("wacli could not be started.") from exc
         if result.returncode != 0:
             failure = wacli_failure(result)
-            # Older private builds mask a deadline as the generic failure; at
-            # or after wacli's own deadline it is a timeout, as it was when the
-            # helper's limit came first.
+            # Older private builds mask a deadline as the generic failure; from
+            # sync's reply margin before wacli's own deadline it is a timeout,
+            # as it was when the helper's limit came first.
+            budget = budget_ms / 1000
             if failure == WACLI_OUTCOME_UNKNOWN or (
                     failure == WACLI_PRIVATE_FAILED
-                    and time.monotonic() - started >= budget_ms / 1000):
+                    and time.monotonic() - started
+                    >= budget - min(WACLI_DELEGATE_REPLY_MARGIN, budget / 10)):
                 raise OmaWhatsAppTimeout(TIMEOUT_ERROR)
         return result
 

@@ -156,6 +156,15 @@ class BackendHardeningTests(unittest.TestCase):
         self.assertEqual(getattr(raised.exception, "outcome", ""), "uncertain")
         self.assertIn("may still have gone through", str(raised.exception))
 
+    def test_old_private_build_answered_inside_the_sync_reply_margin_is_uncertain(self) -> None:
+        # A rebuilt sync answers up to 0.5 s (or a tenth) before the caller's
+        # deadline; an older client still masks that answer as the generic one.
+        self.private_wacli("time.sleep(budget() * 0.92)\nfail('Private WhatsApp command failed.')\n")
+        with self.assertRaises(backend_module.OmaWhatsAppError) as raised:
+            self.backend._write(["--json", "send", "text", "--to", "alex@s.whatsapp.net",
+                                 "--message", "SYNTHETIC"], timeout=2.0)
+        self.assertEqual(getattr(raised.exception, "outcome", ""), "uncertain")
+
     def test_generic_failure_before_the_deadline_stays_an_ordinary_failure(self) -> None:
         self.private_wacli("fail('Private WhatsApp command failed.')\n")
         with self.assertRaises(backend_module.OmaWhatsAppError) as raised:
@@ -194,9 +203,13 @@ class BackendHardeningTests(unittest.TestCase):
                     [sys.executable, str(SCRIPT), "send"],
                     input=json.dumps({"jid": "alex@s.whatsapp.net", "text": "SYNTHETIC"}),
                     capture_output=True, text=True, timeout=60, check=False,
-                    env=dict(os.environ, HOME=str(home), XDG_STATE_HOME=str(home / "state"),
-                             XDG_CONFIG_HOME=str(home / "config"), WACLI_BIN=str(self.wacli),
-                             WACLI_STORE_DIR=str(self.store)))
+                    # setUp's private XDG_RUNTIME_DIR and no session bus keep
+                    # systemctl away from the developer's own units.
+                    env={**{key: value for key, value in os.environ.items()
+                            if key != "DBUS_SESSION_BUS_ADDRESS"},
+                         "HOME": str(home), "XDG_STATE_HOME": str(home / "state"),
+                         "XDG_CONFIG_HOME": str(home / "config"), "WACLI_BIN": str(self.wacli),
+                         "WACLI_STORE_DIR": str(self.store)})
                 answer = json.loads(result.stdout)
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertFalse(answer["ok"])

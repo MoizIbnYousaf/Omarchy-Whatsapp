@@ -170,12 +170,13 @@ What the app shows:
 | wacli reports | App result | Retry |
 | --- | --- | --- |
 | "…was not sent." | "WhatsApp was busy with an earlier request, so this was not sent. You can try again." (`outcome: "not-sent"`) | Safe; only on the user's request |
-| "…outcome is unknown.", or a generic failure at or after wacli's own deadline (older builds) | "WhatsApp did not confirm this in time. It may still have gone through, so check before trying again." (`outcome: "uncertain"`); reads keep "WhatsApp took too long to respond." | Never automatic |
+| "…outcome is unknown.", or a generic failure near or after wacli's own deadline (older builds) | "WhatsApp did not confirm this in time. It may still have gone through, so check before trying again." (`outcome: "uncertain"`); reads keep "WhatsApp took too long to respond." | Never automatic |
 | Any other failure | The generic failure, as before | Only on the user's request |
 
 The uncertain outcome is reported when the caller's deadline, or a single send
 attempt's 45-second deadline, expires after dispatch, and when the sync process
 never answers. A failed send bubble then says it may have been sent, and Try
 again stays an explicit choice. An older private build reports only the generic
-failure; the app treats it as uncertain when it arrives at or after wacli's
-deadline, so its result is never less cautious than before.
+failure; the app treats it as uncertain when it arrives at wacli's deadline, or
+within the half second (a tenth of shorter budgets) by which a rebuilt sync
+answers before it, so its result is never less cautious than before.
