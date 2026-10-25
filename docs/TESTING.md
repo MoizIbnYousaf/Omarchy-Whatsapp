@@ -42,6 +42,15 @@ derives from it. The gate also copies only the distributed files into
 an empty home's plugins folder, as `omarchy plugin add` would, validates it,
 and checks that its helper finds itself there.
 
+The gate writes nothing into the checkout, because the shell reloads an
+installed plugin on any write in its folder (Omarchy #11929). Python runs with
+`PYTHONDONTWRITEBYTECODE=1`, the syntax checks call `compile()` instead of
+`py_compile`, and the scripts that import the helper turn bytecode off
+themselves. At the end the gate compares the untracked and ignored paths that
+`git status --ignored` reports with a snapshot from its start, and fails on any
+new one. Paths that were already there do not count; outside a git work tree
+the check is skipped with a notice.
+
 To run one of the media QML tests on its own, generate that module first:
 
 ```bash
