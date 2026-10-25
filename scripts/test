@@ -102,8 +102,14 @@ done < <(find tests -maxdepth 1 -type f -name 'tst_*.qml' -print0 | sort -z)
 
 bash -n scripts/test scripts/dev-sync
 # Syntax-check without py_compile: compiling writes .pyc beside the sources,
-# which is exactly what the export above avoids.
-python3 -c "import ast,sys;[ast.parse(open(f,'rb').read(),f) for f in sys.argv[1:]]" bin/omawhatsapp_assets.py scripts/check-wacli-parity scripts/earlier-copies tests/write_media_fixtures.py
+# which is exactly what the export above avoids. This is py_compile's own
+# check, compile() exactly as its loader calls it, minus that write.
+python3 -c '
+import sys
+for path in sys.argv[1:]:
+    with open(path, "rb") as source:
+        compile(source.read(), path, "exec", dont_inherit=True)
+' bin/omawhatsapp_assets.py scripts/check-wacli-parity scripts/earlier-copies tests/write_media_fixtures.py
 git diff --check
 
 jq -e '.id == "io.github.moizibnyousaf.omawhatsapp"' manifest.json >/dev/null || {
