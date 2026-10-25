@@ -82,7 +82,7 @@ jobs:
           repository: openclaw/wacli
           ref: b87e6178b7b1e571ce2821ab516039cfa0c6ecf6
           path: .wacli-source
-      - name: Test and build the private input extension
+      - name: Test and build the private wacli extension from its three bundled patches
         run: |
           # Permission regressions must run as an ordinary Unix account.
           useradd --create-home --uid 1001 oma-ci
@@ -93,7 +93,9 @@ jobs:
       - name: Record the tested source-to-binary build evidence
         run: |
           cat /tmp/wacli-build-evidence.json
-          sha256sum /tmp/wacli-private
+          sha256sum /tmp/wacli-private dependencies/*.patch
           printf '### Private wacli build evidence\n```json\n' >> "$GITHUB_STEP_SUMMARY"
           cat /tmp/wacli-build-evidence.json >> "$GITHUB_STEP_SUMMARY"
-          printf '\n```\nSource-built in this run; no prebuilt executable is offered for installation.\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '```\n```text\n' >> "$GITHUB_STEP_SUMMARY"
+          sha256sum dependencies/*.patch >> "$GITHUB_STEP_SUMMARY"
+          printf '```\nSource-built in this run, including the -race queue and outcome tests; no prebuilt executable is offered for installation.\n' >> "$GITHUB_STEP_SUMMARY"

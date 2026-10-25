@@ -1,0 +1,598 @@
+OmaWhatsApp dependency patch 3 of 3: downstream outcomes (omawhatsapp.3).
+
+Not upstream code. Apply to upstream openclaw/wacli
+b87e6178b7b1e571ce2821ab516039cfa0c6ecf6 after wacli-private-input.patch
+and wacli-send-queue.patch. git apply ignores this header. Each change is
+OmaWhatsApp-specific:
+
+1. App-state read marks bypass the send slot (cmd/wacli/send_ipc.go).
+   chats mark-read and mark-unread without --receipts can wait minutes on
+   app-state recovery, and the app already serializes them on its own
+   chat-state slot; in the send slot they held up interactive sends.
+   Receipt-mode read marks never enter recovery and stay serialized and
+   paced, as upstream keeps them. The bypass and writeDelegateResult follow
+   upstream bb80227 (#454), which does the same for chat_state. A read mark
+   can now overlap a reconnect started by a failed send; it then fails like
+   any other read-mark failure and can be repeated. Behaviour by Brunno Vert
+   (OmaWhatsApp #28).
+2. Fixed private-mode outcomes (omawhatsapp_outcomes.go, root.go,
+   send_ipc.go). Private input replaces every error with "Private WhatsApp
+   command failed.", which hid upstream's "it was not sent" and "may still
+   have gone through" reports (#456). The daemon's exact pre-dispatch
+   refusals now print "Private WhatsApp command was not sent."; a request
+   that failed after dispatch at its deadline, an unanswered delegate and
+   any other deadline print "Private WhatsApp command outcome is unknown."
+   Both are fixed strings: no socket path, wrapped error, identifier or
+   content. The store-lock message is unchanged and takes precedence.
+3. A send attempt's own 45s deadline counts as a deadline
+   (send_helpers.go). OmaWhatsApp gives file, voice and sticker sends 120s,
+   and an attempt cut at 45s after its frame was written was reported as a
+   definite failure. The text is unchanged; the error now unwraps to
+   context.DeadlineExceeded, so upstream's wrapping reports it as uncertain.
+4. --private-args-version adds "build":"omawhatsapp.3" (main.go). Probes
+   that read only protocol and max_bytes are unaffected.
+5. Tests: omawhatsapp_send_latency_test.go (from OmaWhatsApp #28, with a
+   receipt-mode case added) and omawhatsapp_outcomes_test.go.
+
+diff --git a/cmd/wacli/main.go b/cmd/wacli/main.go
+index 257676f..4cf019f 100644
+--- a/cmd/wacli/main.go
++++ b/cmd/wacli/main.go
+@@ -14,7 +14,7 @@ import (
+ func main() {
+ 	configureOutputSignals()
+ 	if len(os.Args) == 2 && os.Args[1] == "--private-args-version" {
+-		fmt.Println(`{"protocol":1,"max_bytes":65536}`)
++		fmt.Println(privateArgsCapability)
+ 		return
+ 	}
+ 	applyDeviceLabel()
+diff --git a/cmd/wacli/omawhatsapp_outcomes.go b/cmd/wacli/omawhatsapp_outcomes.go
+new file mode 100644
+index 0000000..81cc5d8
+--- /dev/null
++++ b/cmd/wacli/omawhatsapp_outcomes.go
+@@ -0,0 +1,88 @@
++package main
++
++// OmaWhatsApp downstream extension omawhatsapp.3; not part of upstream wacli.
++// Private-mode callers see no error text, so a failed delegated request needs
++// a fixed, content-free outcome: refused before dispatch (not sent), or
++// dispatched without a confirmed result (may have gone through).
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"net"
++	"strings"
++	"time"
++)
++
++// Printed by --private-args-version. Callers match protocol and max_bytes and
++// ignore other keys, so the build label stays compatible with older probes.
++const privateArgsCapability = `{"protocol":1,"max_bytes":65536,"build":"omawhatsapp.3"}`
++
++const (
++	privateNotSentMessage   = "Private WhatsApp command was not sent."
++	privateUncertainMessage = "Private WhatsApp command outcome is unknown."
++)
++
++// The bypass refusal uses upstream's wording for its own app-state bypass.
++const delegateBypassRefusal = "request deadline passed before dispatch; it was not sent"
++
++var (
++	errDelegateNotSent        = errors.New("delegated request was not sent")
++	errDelegateOutcomeUnknown = errors.New("delegated request outcome is unknown")
++)
++
++// The daemon's exact pre-dispatch refusals. Matching whole messages keeps an
++// operation's own error text from ever reading as "not sent".
++var delegateRefusals = map[string]bool{
++	"request timed out in the send queue before dispatch; it was not sent":   true,
++	"send spacing exceeded request timeout before dispatch; it was not sent": true,
++	delegateBypassRefusal: true,
++}
++
++const delegateUncertainMarker = " failed after dispatch and may still have gone through; check before retrying: "
++
++type delegateOutcomeError struct {
++	err     error
++	outcome error
++}
++
++func (e delegateOutcomeError) Error() string   { return e.err.Error() }
++func (e delegateOutcomeError) Unwrap() []error { return []error{e.err, e.outcome} }
++
++// delegateFailure keeps the daemon's message and marks the outcome it states.
++func delegateFailure(message string) error {
++	err := errors.New(message)
++	switch {
++	case strings.HasPrefix(message, "delegated ") && strings.Contains(message, delegateUncertainMarker):
++		return delegateOutcomeError{err: err, outcome: errDelegateOutcomeUnknown}
++	case delegateRefusals[message]:
++		return delegateOutcomeError{err: err, outcome: errDelegateNotSent}
++	}
++	return err
++}
++
++// privateOutcomeMessage returns a fixed outcome, or "" for an ordinary failure.
++// Any deadline or timeout is uncertain: the request may already be on the wire.
++func privateOutcomeMessage(err error) string {
++	var netErr net.Error
++	switch {
++	case errors.Is(err, errDelegateOutcomeUnknown),
++		errors.Is(err, context.DeadlineExceeded),
++		errors.Is(err, context.Canceled),
++		errors.As(err, &netErr) && netErr.Timeout():
++		return privateUncertainMessage
++	case errors.Is(err, errDelegateNotSent):
++		return privateNotSentMessage
++	}
++	return ""
++}
++
++// One send attempt's own 45s deadline can expire after the message frame was
++// written, inside a longer command budget. Keep upstream's text, but let it
++// count as a deadline so delegated and direct sends report it as uncertain.
++type sendAttemptTimeoutError struct{ timeout time.Duration }
++
++func (e sendAttemptTimeoutError) Error() string {
++	return fmt.Sprintf("send timed out after %s", e.timeout)
++}
++func (e sendAttemptTimeoutError) Unwrap() error { return context.DeadlineExceeded }
+diff --git a/cmd/wacli/omawhatsapp_outcomes_test.go b/cmd/wacli/omawhatsapp_outcomes_test.go
+new file mode 100644
+index 0000000..c137200
+--- /dev/null
++++ b/cmd/wacli/omawhatsapp_outcomes_test.go
+@@ -0,0 +1,227 @@
++package main
++
++import (
++	"context"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"io"
++	"net"
++	"os"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/openclaw/wacli/internal/lock"
++)
++
++// OmaWhatsApp downstream regressions: private-mode callers must still learn
++// whether a failed delegated request was sent. Executors are synthetic.
++
++const omaSyntheticContent = "SYNTHETIC private text +15550000000"
++
++func TestOmaPrivateArgsCapabilityNamesBuild(t *testing.T) {
++	var capability map[string]any
++	if err := json.Unmarshal([]byte(privateArgsCapability), &capability); err != nil {
++		t.Fatal(err)
++	}
++	if capability["protocol"] != float64(1) || capability["max_bytes"] != float64(privateArgsLimit) || capability["build"] != "omawhatsapp.3" {
++		t.Fatalf("capability = %v", capability)
++	}
++}
++
++func TestOmaPrivateOutcomeClassification(t *testing.T) {
++	for _, tc := range []struct {
++		name string
++		err  error
++		want string
++	}{
++		{"queue refusal", delegateFailure("request timed out in the send queue before dispatch; it was not sent"), privateNotSentMessage},
++		{"paced refusal", delegateFailure("send spacing exceeded request timeout before dispatch; it was not sent"), privateNotSentMessage},
++		{"bypass refusal", delegateFailure(delegateBypassRefusal), privateNotSentMessage},
++		{"after dispatch", delegateFailure("delegated text failed after dispatch and may still have gone through; check before retrying: context deadline exceeded"), privateUncertainMessage},
++		{"caller deadline", fmt.Errorf("send: %w", context.DeadlineExceeded), privateUncertainMessage},
++		{"attempt deadline", sendAttemptTimeoutError{timeout: 45 * time.Second}, privateUncertainMessage},
++		{"socket timeout", fmt.Errorf("no reply: %w", os.ErrDeadlineExceeded), privateUncertainMessage},
++		{"content not a refusal", delegateFailure(omaSyntheticContent + "; it was not sent"), ""},
++		{"ordinary failure", delegateFailure(omaSyntheticContent), ""},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			if got := privateOutcomeMessage(tc.err); got != tc.want {
++				t.Fatalf("outcome = %q, want %q", got, tc.want)
++			}
++		})
++	}
++	if got := (sendAttemptTimeoutError{timeout: 20 * time.Millisecond}).Error(); got != "send timed out after 20ms" {
++		t.Fatalf("attempt timeout text changed: %q", got)
++	}
++}
++
++func omaDelegateServer(t *testing.T, execute sendDelegateExecutor) string {
++	t.Helper()
++	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
++	dir := shortPresenceDelegateStoreDir(t)
++	stop, err := startSendDelegateServerForStore(context.Background(), dir, sendSpacing{}, execute)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(stop)
++	return dir
++}
++
++func TestOmaQueuedRefusalReportsNotSent(t *testing.T) {
++	release := make(chan struct{})
++	started := make(chan struct{}, 1)
++	dir := omaDelegateServer(t, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
++		if req.Message == "slow" {
++			started <- struct{}{}
++			<-release
++		}
++		return sendDelegateResponse{OK: true, Sent: true}, nil
++	})
++	slow := make(chan struct{})
++	go func() {
++		defer close(slow)
++		_, _ = delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: 5 * time.Second}, sendDelegateRequest{Kind: "text", Message: "slow"})
++	}()
++	<-started
++	_, err := delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: sendDelegateReplyMargin + 300*time.Millisecond}, sendDelegateRequest{Kind: "text", Message: omaSyntheticContent})
++	close(release)
++	<-slow
++	if err == nil || !strings.Contains(err.Error(), "it was not sent") {
++		t.Fatalf("queued error = %v, want upstream's refusal text", err)
++	}
++	if got := privateOutcomeMessage(err); got != privateNotSentMessage {
++		t.Fatalf("private outcome = %q", got)
++	}
++}
++
++func TestOmaExpiredReadMarkBypassReportsNotSent(t *testing.T) {
++	serverConn, clientConn := net.Pipe()
++	defer clientConn.Close()
++	sendSlot := make(chan struct{}, 1)
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		handleSendDelegateConn(context.Background(), serverConn, unexpectedExecute(t), sendSlot, newSendPacer(sendSpacing{}))
++	}()
++	resp := roundTripDelegate(t, clientConn, sendDelegateRequest{
++		Version: sendDelegateVersion, Kind: markReadKind, TimeoutMS: 10000,
++		DeadlineUnixMS: time.Now().Add(-time.Second).UnixMilli(),
++	})
++	<-done
++	if resp.OK || privateOutcomeMessage(delegateFailure(resp.Error)) != privateNotSentMessage {
++		t.Fatalf("expired read mark response: %+v", resp)
++	}
++}
++
++func TestOmaDispatchedDeadlineReportsUncertain(t *testing.T) {
++	dir := omaDelegateServer(t, func(ctx context.Context, _ sendDelegateRequest) (sendDelegateResponse, error) {
++		<-ctx.Done()
++		return sendDelegateResponse{}, ctx.Err()
++	})
++	_, err := delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: time.Second}, sendDelegateRequest{Kind: "text"})
++	if got := privateOutcomeMessage(err); got != privateUncertainMessage {
++		t.Fatalf("outcome = %q for %v", got, err)
++	}
++}
++
++func TestOmaAttemptTimeoutInsideLargerBudgetReportsUncertain(t *testing.T) {
++	wrote := make(chan struct{}, 1)
++	dir := omaDelegateServer(t, func(ctx context.Context, _ sendDelegateRequest) (sendDelegateResponse, error) {
++		// The frame is written; the acknowledgement outlives this attempt
++		// while the request's own budget is still live.
++		return runSendAttempt(ctx, 50*time.Millisecond, func(ctx context.Context) (sendDelegateResponse, error) {
++			wrote <- struct{}{}
++			<-ctx.Done()
++			return sendDelegateResponse{}, ctx.Err()
++		})
++	})
++	_, err := delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: 5 * time.Second}, sendDelegateRequest{Kind: "file"})
++	<-wrote
++	if err == nil || !strings.Contains(err.Error(), "may still have gone through") {
++		t.Fatalf("error = %v, want an uncertain outcome", err)
++	}
++	if got := privateOutcomeMessage(err); got != privateUncertainMessage {
++		t.Fatalf("outcome = %q", got)
++	}
++}
++
++func TestOmaUnansweredDelegateReportsUncertain(t *testing.T) {
++	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
++	dir := shortPresenceDelegateStoreDir(t)
++	ln, err := net.Listen("unix", sendDelegateSocketPath(dir))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer ln.Close()
++	go func() {
++		conn, err := ln.Accept()
++		if err != nil {
++			return
++		}
++		defer conn.Close()
++		var req sendDelegateRequest
++		_ = json.NewDecoder(conn).Decode(&req)
++		time.Sleep(time.Second)
++	}()
++	_, err = delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: 200 * time.Millisecond}, sendDelegateRequest{Kind: "text"})
++	if got := privateOutcomeMessage(err); got != privateUncertainMessage {
++		t.Fatalf("outcome = %q for %v", got, err)
++	}
++}
++
++func TestOmaOrdinaryDelegateFailureStaysGeneric(t *testing.T) {
++	dir := omaDelegateServer(t, func(context.Context, sendDelegateRequest) (sendDelegateResponse, error) {
++		return sendDelegateResponse{}, errors.New(omaSyntheticContent)
++	})
++	_, err := delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: time.Second}, sendDelegateRequest{Kind: "text"})
++	if err == nil || privateOutcomeMessage(err) != "" {
++		t.Fatalf("ordinary failure classified: %v", err)
++	}
++}
++
++// The actual private-mode stderr envelope carries only the fixed text.
++func TestOmaPrivateRootErrorCarriesOnlyFixedOutcome(t *testing.T) {
++	socket := sendDelegateSocketPath(t.TempDir())
++	for _, tc := range []struct {
++		err  error
++		want string
++	}{
++		{fmt.Errorf("no reply from %s (%s): %w", socket, omaSyntheticContent, os.ErrDeadlineExceeded), privateUncertainMessage},
++		{delegateFailure("request timed out in the send queue before dispatch; it was not sent"), privateNotSentMessage},
++		{fmt.Errorf("%s: %w", socket, lock.ErrLocked), "store is locked"},
++		{fmt.Errorf("%s at %s", omaSyntheticContent, socket), "Private WhatsApp command failed."},
++	} {
++		got := omaCapturePrivateRootError(t, tc.err)
++		var envelope struct {
++			Success bool   `json:"success"`
++			Error   string `json:"error"`
++		}
++		if err := json.Unmarshal([]byte(got), &envelope); err != nil || envelope.Success || envelope.Error != tc.want {
++			t.Fatalf("stderr = %q, want error %q", got, tc.want)
++		}
++		if strings.Contains(got, socket) || strings.Contains(got, "SYNTHETIC") {
++			t.Fatalf("private error leaked detail: %q", got)
++		}
++	}
++}
++
++func omaCapturePrivateRootError(t *testing.T, err error) string {
++	t.Helper()
++	reader, writer, pipeErr := os.Pipe()
++	if pipeErr != nil {
++		t.Fatal(pipeErr)
++	}
++	stderr, mode := os.Stderr, privateInputMode
++	os.Stderr, privateInputMode = writer, true
++	writeRootError(rootFlags{asJSON: true}, err)
++	os.Stderr, privateInputMode = stderr, mode
++	_ = writer.Close()
++	data, readErr := io.ReadAll(reader)
++	_ = reader.Close()
++	if readErr != nil {
++		t.Fatal(readErr)
++	}
++	return strings.TrimSpace(string(data))
++}
+diff --git a/cmd/wacli/omawhatsapp_send_latency_test.go b/cmd/wacli/omawhatsapp_send_latency_test.go
+new file mode 100644
+index 0000000..4aa607d
+--- /dev/null
++++ b/cmd/wacli/omawhatsapp_send_latency_test.go
+@@ -0,0 +1,137 @@
++package main
++
++import (
++	"context"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++// OmaWhatsApp downstream regressions, originally by Brunno Vert (PR #28).
++// Executors are synthetic: no account, database, or WhatsApp connection.
++
++// A slow app-state repair must not take the slot needed by an interactive send.
++func TestOmaReadMarkDoesNotBlockSend(t *testing.T) {
++	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
++	entered := make(chan struct{})
++	release := make(chan struct{})
++	dir := shortPresenceDelegateStoreDir(t)
++	stop, err := startSendDelegateServerForStore(context.Background(), dir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
++		if req.Kind == markReadKind {
++			close(entered)
++			<-release
++			return sendDelegateResponse{OK: true}, nil
++		}
++		return sendDelegateResponse{OK: true, Sent: true}, nil
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer stop()
++	finished := make(chan struct{})
++	go func() {
++		defer close(finished)
++		_, _ = delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: 2 * time.Second}, sendDelegateRequest{Kind: markReadKind})
++	}()
++	select {
++	case <-entered:
++	case <-time.After(time.Second):
++		close(release)
++		t.Fatal("read mark never started")
++	}
++	started := time.Now()
++	response, sendErr := delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: 300 * time.Millisecond}, sendDelegateRequest{Kind: "text"})
++	close(release)
++	<-finished
++	if sendErr != nil || !response.Sent {
++		t.Fatalf("send was held by slow read mark (%s): %v", time.Since(started), sendErr)
++	}
++	if time.Since(started) > 250*time.Millisecond {
++		t.Fatal("interactive send waited for app state")
++	}
++}
++
++// Receipt-mode read marks never enter app-state recovery, so they keep the
++// send slot (and its pacing), as upstream does.
++func TestOmaReceiptReadMarkStaysInSendQueue(t *testing.T) {
++	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
++	entered := make(chan struct{})
++	release := make(chan struct{})
++	var texts atomic.Int32
++	dir := shortPresenceDelegateStoreDir(t)
++	stop, err := startSendDelegateServerForStore(context.Background(), dir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
++		if req.Kind == markReadReceiptsKind {
++			close(entered)
++			<-release
++			return sendDelegateResponse{OK: true}, nil
++		}
++		texts.Add(1)
++		return sendDelegateResponse{OK: true, Sent: true}, nil
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer stop()
++	finished := make(chan struct{})
++	go func() {
++		defer close(finished)
++		_, _ = delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: 2 * time.Second}, sendDelegateRequest{Kind: markReadReceiptsKind})
++	}()
++	select {
++	case <-entered:
++	case <-time.After(time.Second):
++		close(release)
++		t.Fatal("receipt read mark never started")
++	}
++	_, sendErr := delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: sendDelegateReplyMargin + 300*time.Millisecond}, sendDelegateRequest{Kind: "text"})
++	close(release)
++	<-finished
++	if sendErr == nil || !strings.Contains(sendErr.Error(), "it was not sent") {
++		t.Fatalf("send did not queue behind the receipt read mark: %v", sendErr)
++	}
++	time.Sleep(50 * time.Millisecond)
++	if got := texts.Load(); got != 0 {
++		t.Fatalf("queued send ran beside the receipt read mark: executions=%d", got)
++	}
++}
++
++func TestOmaExpiredQueuedSendIsNotDispatched(t *testing.T) {
++	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
++	entered := make(chan struct{})
++	release := make(chan struct{})
++	var executed atomic.Int32
++	dir := shortPresenceDelegateStoreDir(t)
++	stop, err := startSendDelegateServerForStore(context.Background(), dir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
++		if executed.Add(1) == 1 {
++			close(entered)
++			<-release
++		}
++		return sendDelegateResponse{OK: true, Sent: true}, nil
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer stop()
++	finished := make(chan struct{})
++	go func() {
++		defer close(finished)
++		_, _ = delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: 2 * time.Second}, sendDelegateRequest{Kind: "text"})
++	}()
++	select {
++	case <-entered:
++	case <-time.After(time.Second):
++		close(release)
++		t.Fatal("first send never started")
++	}
++	_, queuedErr := delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: 100 * time.Millisecond}, sendDelegateRequest{Kind: "text"})
++	close(release)
++	<-finished
++	time.Sleep(50 * time.Millisecond)
++	if queuedErr == nil || !strings.Contains(queuedErr.Error(), "it was not sent") {
++		t.Errorf("missing pre-dispatch refusal: %v", queuedErr)
++	}
++	if got := executed.Load(); got != 1 {
++		t.Errorf("expired queued send ran late: executions=%d", got)
++	}
++}
+diff --git a/cmd/wacli/root.go b/cmd/wacli/root.go
+index 018e169..35d46a6 100644
+--- a/cmd/wacli/root.go
++++ b/cmd/wacli/root.go
+@@ -118,6 +118,9 @@ func writeRootError(flags rootFlags, err error) {
+ 		message := "Private WhatsApp command failed."
+ 		if errors.Is(err, lock.ErrLocked) {
+ 			message = "store is locked"
++		} else if outcome := privateOutcomeMessage(err); outcome != "" {
++			// OmaWhatsApp: a fixed outcome, never the error's own text.
++			message = outcome
+ 		}
+ 		_ = out.WriteError(os.Stderr, flags.asJSON, fmt.Errorf("%s", message))
+ 		return
+diff --git a/cmd/wacli/send_helpers.go b/cmd/wacli/send_helpers.go
+index 8508da8..9b388b8 100644
+--- a/cmd/wacli/send_helpers.go
++++ b/cmd/wacli/send_helpers.go
+@@ -59,13 +59,13 @@ func runSendAttempt[T any](ctx context.Context, timeout time.Duration, op func(c
+ 	case res := <-ch:
+ 		if errors.Is(res.err, context.DeadlineExceeded) && errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+ 			var zero T
+-			return zero, fmt.Errorf("send timed out after %s", timeout)
++			return zero, sendAttemptTimeoutError{timeout: timeout}
+ 		}
+ 		return res.value, res.err
+ 	case <-attemptCtx.Done():
+ 		var zero T
+ 		if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+-			return zero, fmt.Errorf("send timed out after %s", timeout)
++			return zero, sendAttemptTimeoutError{timeout: timeout}
+ 		}
+ 		return zero, attemptCtx.Err()
+ 	}
+diff --git a/cmd/wacli/send_ipc.go b/cmd/wacli/send_ipc.go
+index 40b1a5e..337de0c 100644
+--- a/cmd/wacli/send_ipc.go
++++ b/cmd/wacli/send_ipc.go
+@@ -130,7 +130,7 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
+ 		return sendDelegateResponse{}, err
+ 	}
+ 	if !resp.OK {
+-		return sendDelegateResponse{}, errors.New(resp.Error)
++		return sendDelegateResponse{}, delegateFailure(resp.Error)
+ 	}
+ 	return resp, nil
+ }
+@@ -246,6 +246,20 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
+ 	// transport alive through its budget and the final response write.
+ 	_ = conn.SetDeadline(deadline.Add(sendDelegateResponseGrace))
+ 
++	if req.Kind == markReadKind {
++		// OmaWhatsApp: an app-state read mark can wait minutes on recovery,
++		// and the app already serializes it on its chat-state slot, so it must
++		// not hold the message-send queue. Receipt-mode read marks never enter
++		// recovery and stay serialized and paced below, as upstream keeps them.
++		if requestCtx.Err() != nil || !time.Now().Before(deadline) {
++			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: delegateBypassRefusal})
++			return
++		}
++		resp, err := execute(requestCtx, req)
++		writeDelegateResult(conn, requestCtx, req, resp, err)
++		return
++	}
++
+ 	refuse := func() {
+ 		msg := "request timed out in the send queue before dispatch; it was not sent"
+ 		if pacer.enabled() {
+@@ -290,6 +304,10 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
+ 		// Starting the gap here prevents a slow operation from consuming it.
+ 		pacer.record()
+ 	}
++	writeDelegateResult(conn, requestCtx, req, resp, err)
++}
++
++func writeDelegateResult(conn net.Conn, requestCtx context.Context, req sendDelegateRequest, resp sendDelegateResponse, err error) {
+ 	if err != nil {
+ 		if requestCtx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+ 			err = fmt.Errorf("delegated %s failed after dispatch and may still have gone through; check before retrying: %w", req.Kind, err)

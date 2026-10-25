@@ -1,108 +1,22 @@
-diff --git i/cmd/wacli/omawhatsapp_send_latency_test.go w/cmd/wacli/omawhatsapp_send_latency_test.go
-new file mode 100644
-index 0000000..897891f
---- /dev/null
-+++ w/cmd/wacli/omawhatsapp_send_latency_test.go
-@@ -0,0 +1,95 @@
-+package main
-+
-+import (
-+	"context"
-+	"strings"
-+	"sync/atomic"
-+	"testing"
-+	"time"
-+)
-+
-+// A slow app-state repair must not take the slot needed by an interactive send.
-+// The executor is synthetic: no account, database, or WhatsApp connection is used.
-+func TestOmaReadMarkDoesNotBlockSend(t *testing.T) {
-+	for _, kind := range []string{markReadKind, markReadReceiptsKind} {
-+		t.Run(kind, func(t *testing.T) {
-+			skipPresenceDelegateSocketTestOnUnsupportedOS(t)
-+			entered := make(chan struct{})
-+			release := make(chan struct{})
-+			dir := shortPresenceDelegateStoreDir(t)
-+			stop, err := startSendDelegateServerForStore(context.Background(), dir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
-+				if req.Kind == kind {
-+					close(entered)
-+					<-release
-+					return sendDelegateResponse{OK: true}, nil
-+				}
-+				return sendDelegateResponse{OK: true, Sent: true}, nil
-+			})
-+			if err != nil {
-+				t.Fatal(err)
-+			}
-+			defer stop()
-+			finished := make(chan struct{})
-+			go func() {
-+				defer close(finished)
-+				_, _ = delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: 2 * time.Second}, sendDelegateRequest{Kind: kind})
-+			}()
-+			select {
-+			case <-entered:
-+			case <-time.After(time.Second):
-+				close(release)
-+				t.Fatal("read mark never started")
-+			}
-+			started := time.Now()
-+			response, sendErr := delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: 300 * time.Millisecond}, sendDelegateRequest{Kind: "text"})
-+			close(release)
-+			<-finished
-+			if sendErr != nil || !response.Sent {
-+				t.Fatalf("send was held by slow read mark (%s): %v", time.Since(started), sendErr)
-+			}
-+			if time.Since(started) > 250*time.Millisecond {
-+				t.Fatal("interactive send waited for app state")
-+			}
-+		})
-+	}
-+}
-+
-+func TestOmaExpiredQueuedSendIsNotDispatched(t *testing.T) {
-+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
-+	entered := make(chan struct{})
-+	release := make(chan struct{})
-+	var executed atomic.Int32
-+	dir := shortPresenceDelegateStoreDir(t)
-+	stop, err := startSendDelegateServerForStore(context.Background(), dir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
-+		if executed.Add(1) == 1 {
-+			close(entered)
-+			<-release
-+		}
-+		return sendDelegateResponse{OK: true, Sent: true}, nil
-+	})
-+	if err != nil {
-+		t.Fatal(err)
-+	}
-+	defer stop()
-+	finished := make(chan struct{})
-+	go func() {
-+		defer close(finished)
-+		_, _ = delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: 2 * time.Second}, sendDelegateRequest{Kind: "text"})
-+	}()
-+	select {
-+	case <-entered:
-+	case <-time.After(time.Second):
-+		close(release)
-+		t.Fatal("first send never started")
-+	}
-+	_, queuedErr := delegateSend(context.Background(), &rootFlags{storeDir: dir, timeout: 100 * time.Millisecond}, sendDelegateRequest{Kind: "text"})
-+	close(release)
-+	<-finished
-+	time.Sleep(50 * time.Millisecond)
-+	if queuedErr == nil || !strings.Contains(queuedErr.Error(), "it was not sent") {
-+		t.Errorf("missing pre-dispatch refusal: %v", queuedErr)
-+	}
-+	if got := executed.Load(); got != 1 {
-+		t.Errorf("expired queued send ran late: executions=%d", got)
-+	}
-+}
-diff --git i/cmd/wacli/send_ipc.go w/cmd/wacli/send_ipc.go
-index 3d74b26..92d7397 100644
---- i/cmd/wacli/send_ipc.go
-+++ w/cmd/wacli/send_ipc.go
+OmaWhatsApp dependency patch 2 of 3: exact upstream backport, unmodified.
+
+This is upstream openclaw/wacli commit
+7c1b3bfbeb26b929ca60e3cbae1511ad9c58a02d, "fix(sync): refuse delegated
+operations still queued at the caller's deadline" (#456, released in wacli
+v0.20.0), limited to cmd/wacli. Its only parent is the pinned base
+b87e6178b7b1e571ce2821ab516039cfa0c6ecf6. Upstream author: Tsavo Knott;
+co-authors: Peter Steinberger and Claude. MIT licence, as upstream.
+
+Everything from the first diff line onward is byte-for-byte the output of
+  git diff b87e6178 7c1b3bfb -- cmd/wacli
+in an upstream clone with git's default diff settings (for example with
+GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1). git apply ignores this
+header. Upstream's CHANGELOG.md and docs/sync.md hunks are not included.
+
+diff --git a/cmd/wacli/send_ipc.go b/cmd/wacli/send_ipc.go
+index 3d74b26..40b1a5e 100644
+--- a/cmd/wacli/send_ipc.go
++++ b/cmd/wacli/send_ipc.go
 @@ -8,7 +8,6 @@ import (
  	"net"
  	"os"
@@ -111,15 +25,18 @@ index 3d74b26..92d7397 100644
  	"time"
  
  	"github.com/openclaw/wacli/internal/app"
-@@ -22,6 +21,7 @@ const (
+@@ -22,6 +21,10 @@ const (
  	sendDelegateVersion       = 1
  	sendDelegateSocketName    = ".send.sock"
  	sendDelegateResponseGrace = 5 * time.Second
-+	sendDelegateReplyMargin   = 500 * time.Millisecond
++	// sendDelegateReplyMargin is reserved before the caller's deadline so a
++	// refusal can reach the caller before it gives up on the connection. An
++	// explicit "not sent" is only useful if it arrives.
++	sendDelegateReplyMargin = 500 * time.Millisecond
  )
  
  var errSendDelegateUnavailable = errors.New("send delegate unavailable")
-@@ -118,6 +118,12 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
+@@ -118,6 +121,12 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
  	}
  	var resp sendDelegateResponse
  	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
@@ -132,7 +49,7 @@ index 3d74b26..92d7397 100644
  		return sendDelegateResponse{}, err
  	}
  	if !resp.OK {
-@@ -162,12 +168,11 @@ func startSendDelegateServerForStore(ctx context.Context, storeDir string, spaci
+@@ -162,12 +171,11 @@ func startSendDelegateServerForStore(ctx context.Context, storeDir string, spaci
  	}
  
  	done := make(chan struct{})
@@ -150,7 +67,7 @@ index 3d74b26..92d7397 100644
  	// One pacer shared across connections: it spaces the serialized delegated
  	// sends so a burst of `wacli send` processes delegating to this daemon
  	// leaves the wire paced instead of back-to-back. Disabled = no-op.
-@@ -179,7 +184,7 @@ func startSendDelegateServerForStore(ctx context.Context, storeDir string, spaci
+@@ -179,7 +187,7 @@ func startSendDelegateServerForStore(ctx context.Context, storeDir string, spaci
  			if err != nil {
  				return
  			}
@@ -159,7 +76,7 @@ index 3d74b26..92d7397 100644
  		}
  	}()
  
-@@ -205,7 +210,7 @@ func removeStaleSendDelegateSocket(path string) error {
+@@ -205,7 +213,7 @@ func removeStaleSendDelegateSocket(path string) error {
  	return os.Remove(path)
  }
  
@@ -168,7 +85,7 @@ index 3d74b26..92d7397 100644
  	defer conn.Close()
  	_ = conn.SetDeadline(time.Now().Add(5 * time.Minute))
  
-@@ -214,58 +219,79 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
+@@ -214,58 +222,67 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
  		_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: err.Error()})
  		return
  	}
@@ -180,15 +97,6 @@ index 3d74b26..92d7397 100644
 -			if callerDeadline.Before(deadline) {
 -				deadline = callerDeadline
 -			}
--		}
--		var cancel context.CancelFunc
--		requestCtx, cancel = context.WithDeadline(ctx, deadline)
--		defer cancel()
--		if requestDeadline, ok := requestCtx.Deadline(); ok {
--			// The fixed initial deadline only protects request decoding. A paced
--			// request may intentionally run longer than five minutes, so keep the
--			// transport alive through its budget and the final response write.
--			_ = conn.SetDeadline(requestDeadline.Add(sendDelegateResponseGrace))
 +
 +	// Every request gets one budget: its own timeout, capped by the caller's
 +	// absolute deadline less the reply margin. Queueing, pacing and the
@@ -199,7 +107,15 @@ index 3d74b26..92d7397 100644
 +		if callerDeadline.Before(deadline) {
 +			deadline = callerDeadline
  		}
- 	}
+-		var cancel context.CancelFunc
+-		requestCtx, cancel = context.WithDeadline(ctx, deadline)
+-		defer cancel()
+-		if requestDeadline, ok := requestCtx.Deadline(); ok {
+-			// The fixed initial deadline only protects request decoding. A paced
+-			// request may intentionally run longer than five minutes, so keep the
+-			// transport alive through its budget and the final response write.
+-			_ = conn.SetDeadline(requestDeadline.Add(sendDelegateResponseGrace))
++	}
 +	// Reserve at most a tenth of the remaining budget for the reply, so
 +	// sub-second requests still have time to execute.
 +	if remaining := time.Until(deadline); remaining > 0 {
@@ -212,6 +128,14 @@ index 3d74b26..92d7397 100644
 +	// paced request may intentionally run longer than five minutes, so keep the
 +	// transport alive through its budget and the final response write.
 +	_ = conn.SetDeadline(deadline.Add(sendDelegateResponseGrace))
++
++	refuse := func() {
++		msg := "request timed out in the send queue before dispatch; it was not sent"
++		if pacer.enabled() {
++			msg = "send spacing exceeded request timeout before dispatch; it was not sent"
+ 		}
++		_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: msg})
+ 	}
  
 -	if pacer.enabled() {
 -		select {
@@ -220,33 +144,15 @@ index 3d74b26..92d7397 100644
 -				OK:    false,
 -				Error: "send spacing exceeded request timeout before dispatch",
 -			})
-+	if req.Kind == markReadKind || req.Kind == markReadReceiptsKind {
-+		// App-state writes are serialized by the app and can wait minutes on
-+		// recovery, so they must not hold the send queue.
-+		if requestCtx.Err() != nil {
-+			_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: "request deadline passed before dispatch; it was not sent"})
- 			return
+-			return
 -		case <-pacedSendSlot:
 -			defer func() { pacedSendSlot <- struct{}{} }()
- 		}
+-		}
 -	} else {
 -		// Preserve the original unpaced serialization path exactly when the
 -		// opt-in flag is unset.
 -		sendMu.Lock()
 -		defer sendMu.Unlock()
-+		resp, err := execute(requestCtx, req)
-+		writeDelegateResult(conn, requestCtx, req, resp, err)
-+		return
-+	}
-+
-+	refuse := func() {
-+		msg := "request timed out in the send queue before dispatch; it was not sent"
-+		if pacer.enabled() {
-+			msg = "send spacing exceeded request timeout before dispatch; it was not sent"
-+		}
-+		_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: msg})
-+	}
-+
 +	select {
 +	case <-requestCtx.Done():
 +		refuse()
@@ -286,14 +192,9 @@ index 3d74b26..92d7397 100644
  	resp, err := execute(requestCtx, req)
  	if pacer.enabled() {
  		// Record completion, not handler entry: recipient resolution, media
-@@ -273,7 +299,14 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
- 		// Starting the gap here prevents a slow operation from consuming it.
+@@ -274,6 +291,9 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
  		pacer.record()
  	}
-+	writeDelegateResult(conn, requestCtx, req, resp, err)
-+}
-+
-+func writeDelegateResult(conn net.Conn, requestCtx context.Context, req sendDelegateRequest, resp sendDelegateResponse, err error) {
  	if err != nil {
 +		if requestCtx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 +			err = fmt.Errorf("delegated %s failed after dispatch and may still have gone through; check before retrying: %w", req.Kind, err)
@@ -301,10 +202,306 @@ index 3d74b26..92d7397 100644
  		resp = sendDelegateResponse{OK: false, Error: err.Error()}
  	}
  	_ = json.NewEncoder(conn).Encode(resp)
-diff --git i/cmd/wacli/send_spacing_test.go w/cmd/wacli/send_spacing_test.go
+diff --git a/cmd/wacli/send_queue_deadline_test.go b/cmd/wacli/send_queue_deadline_test.go
+new file mode 100644
+index 0000000..da10671
+--- /dev/null
++++ b/cmd/wacli/send_queue_deadline_test.go
+@@ -0,0 +1,277 @@
++package main
++
++import (
++	"context"
++	"encoding/json"
++	"net"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++// Regressions for #446: without --send-spacing, a delegated operation still
++// queued behind an earlier one when its caller gives up must be refused, never
++// dispatched late.
++
++func unexpectedExecute(t *testing.T) sendDelegateExecutor {
++	return func(context.Context, sendDelegateRequest) (sendDelegateResponse, error) {
++		t.Error("operation executed after its caller's deadline")
++		return sendDelegateResponse{OK: true, Sent: true}, nil
++	}
++}
++
++func roundTripDelegate(t *testing.T, conn net.Conn, req sendDelegateRequest) sendDelegateResponse {
++	t.Helper()
++	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
++		t.Fatalf("set client deadline: %v", err)
++	}
++	if err := json.NewEncoder(conn).Encode(req); err != nil {
++		t.Fatalf("encode request: %v", err)
++	}
++	var resp sendDelegateResponse
++	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	return resp
++}
++
++func TestUnpacedQueueWaitHonorsRequestTimeout(t *testing.T) {
++	serverConn, clientConn := net.Pipe()
++	defer clientConn.Close()
++
++	sendSlot := make(chan struct{}, 1) // empty: an earlier send owns it
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		handleSendDelegateConn(context.Background(), serverConn, unexpectedExecute(t), sendSlot, newSendPacer(sendSpacing{}))
++	}()
++
++	resp := roundTripDelegate(t, clientConn, sendDelegateRequest{
++		Version:   sendDelegateVersion,
++		Kind:      "text",
++		TimeoutMS: 20,
++	})
++	<-done
++	if resp.OK || !strings.Contains(resp.Error, "it was not sent") {
++		t.Fatalf("response = %+v, want an explicit not-sent refusal", resp)
++	}
++}
++
++func TestUnpacedRefusesExpiredCallerDeadlineWithFreeSlot(t *testing.T) {
++	serverConn, clientConn := net.Pipe()
++	defer clientConn.Close()
++
++	sendSlot := make(chan struct{}, 1)
++	sendSlot <- struct{}{}
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		handleSendDelegateConn(context.Background(), serverConn, unexpectedExecute(t), sendSlot, newSendPacer(sendSpacing{}))
++	}()
++
++	resp := roundTripDelegate(t, clientConn, sendDelegateRequest{
++		Version:        sendDelegateVersion,
++		Kind:           "text",
++		TimeoutMS:      durationMillis(10 * time.Minute),
++		DeadlineUnixMS: time.Now().Add(-time.Second).UnixMilli(),
++	})
++	<-done
++	if resp.OK || !strings.Contains(resp.Error, "it was not sent") {
++		t.Fatalf("response = %+v, want an expired caller deadline to block dispatch", resp)
++	}
++	if len(sendSlot) != 1 {
++		t.Fatal("refused request did not return the send slot")
++	}
++}
++
++func TestUnpacedReplyMarginLeavesRoomForRefusal(t *testing.T) {
++	serverConn, clientConn := net.Pipe()
++	defer clientConn.Close()
++
++	sendSlot := make(chan struct{}, 1) // held by an earlier send
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		handleSendDelegateConn(context.Background(), serverConn, unexpectedExecute(t), sendSlot, newSendPacer(sendSpacing{}))
++	}()
++
++	// The caller stops reading at its deadline. The refusal must arrive first.
++	callerDeadline := time.Now().Add(sendDelegateReplyMargin + 200*time.Millisecond)
++	if err := clientConn.SetDeadline(callerDeadline); err != nil {
++		t.Fatalf("set client deadline: %v", err)
++	}
++	req := sendDelegateRequest{
++		Version:        sendDelegateVersion,
++		Kind:           "text",
++		TimeoutMS:      durationMillis(10 * time.Minute),
++		DeadlineUnixMS: callerDeadline.UnixMilli(),
++	}
++	if err := json.NewEncoder(clientConn).Encode(req); err != nil {
++		t.Fatalf("encode request: %v", err)
++	}
++	var resp sendDelegateResponse
++	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
++		t.Fatalf("refusal did not arrive before the caller's deadline: %v", err)
++	}
++	<-done
++	if resp.OK || !strings.Contains(resp.Error, "it was not sent") {
++		t.Fatalf("response = %+v, want an explicit not-sent refusal", resp)
++	}
++}
++
++// The #446 scenario end to end: a send queued behind a slow operation times out
++// on the client and must not reach the wire once the slow operation finishes.
++func TestProductionServerDropsQueuedSendAfterCallerTimeout(t *testing.T) {
++	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
++	storeDir := shortPresenceDelegateStoreDir(t)
++
++	release := make(chan struct{})
++	started := make(chan struct{}, 1)
++	var executed atomic.Int32
++	stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
++		executed.Add(1)
++		if req.Message == "slow" {
++			started <- struct{}{}
++			<-release
++		}
++		return sendDelegateResponse{OK: true, Sent: true, ID: req.Message}, nil
++	})
++	if err != nil {
++		t.Fatalf("start delegate server: %v", err)
++	}
++	defer stop()
++	t.Cleanup(func() {
++		select {
++		case <-release:
++		default:
++			close(release)
++		}
++	})
++
++	slowFlags := &rootFlags{storeDir: storeDir, timeout: 10 * time.Second}
++	slowDone := make(chan error, 1)
++	go func() {
++		_, err := delegateSend(context.Background(), slowFlags, sendDelegateRequest{Kind: "text", Message: "slow"})
++		slowDone <- err
++	}()
++	<-started
++
++	queuedFlags := &rootFlags{storeDir: storeDir, timeout: sendDelegateReplyMargin + 300*time.Millisecond}
++	_, err = delegateSend(context.Background(), queuedFlags, sendDelegateRequest{Kind: "text", Message: "queued"})
++	if err == nil || !strings.Contains(err.Error(), "it was not sent") {
++		t.Fatalf("queued send error = %v, want an explicit not-sent refusal", err)
++	}
++
++	close(release)
++	if err := <-slowDone; err != nil {
++		t.Fatalf("slow send: %v", err)
++	}
++	time.Sleep(200 * time.Millisecond) // give a late dispatch the chance to happen
++	if got := executed.Load(); got != 1 {
++		t.Fatalf("executed %d operations, want only the slow one", got)
++	}
++}
++
++func TestDelegateSendTimeoutWarnsAgainstBlindRetry(t *testing.T) {
++	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
++	storeDir := shortPresenceDelegateStoreDir(t)
++	ln, err := net.Listen("unix", sendDelegateSocketPath(storeDir))
++	if err != nil {
++		t.Fatalf("listen: %v", err)
++	}
++	defer ln.Close()
++	go func() {
++		conn, err := ln.Accept()
++		if err != nil {
++			return
++		}
++		defer conn.Close()
++		var req sendDelegateRequest
++		_ = json.NewDecoder(conn).Decode(&req)
++		time.Sleep(2 * time.Second) // accepted, never answers in time
++	}()
++
++	flags := &rootFlags{storeDir: storeDir, timeout: 200 * time.Millisecond}
++	_, err = delegateSend(context.Background(), flags, sendDelegateRequest{Kind: "text", Message: "hi"})
++	if err == nil || !strings.Contains(err.Error(), "may still have gone through") {
++		t.Fatalf("error = %v, want a warning that the send may have gone through", err)
++	}
++}
++
++func TestUnpacedShortTimeoutCanDispatch(t *testing.T) {
++	serverConn, clientConn := net.Pipe()
++	defer clientConn.Close()
++	sendSlot := make(chan struct{}, 1)
++	sendSlot <- struct{}{}
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		handleSendDelegateConn(context.Background(), serverConn, func(ctx context.Context, _ sendDelegateRequest) (sendDelegateResponse, error) {
++			return sendDelegateResponse{OK: true, Sent: true}, ctx.Err()
++		}, sendSlot, newSendPacer(sendSpacing{}))
++	}()
++	resp := roundTripDelegate(t, clientConn, sendDelegateRequest{
++		Version: sendDelegateVersion, Kind: "text", TimeoutMS: 200,
++		DeadlineUnixMS: time.Now().Add(200 * time.Millisecond).UnixMilli(),
++	})
++	<-done
++	if !resp.OK || !resp.Sent {
++		t.Fatalf("short request refused: %+v", resp)
++	}
++}
++
++// Models a deadline whose cancellation callback has not run yet.
++type delayedDeadlineContext struct {
++	context.Context
++	deadline time.Time
++}
++
++func (c delayedDeadlineContext) Deadline() (time.Time, bool) { return c.deadline, true }
++
++func TestDelegateRefusesElapsedDeadlineBeforeDispatch(t *testing.T) {
++	for _, paced := range []bool{false, true} {
++		t.Run(map[bool]string{false: "unpaced", true: "paced"}[paced], func(t *testing.T) {
++			serverConn, clientConn := net.Pipe()
++			defer clientConn.Close()
++			sendSlot := make(chan struct{}, 1)
++			sendSlot <- struct{}{}
++			deadline := time.Now().Add(-time.Second)
++			pacer := newSendPacer(sendSpacing{})
++			if paced {
++				deadline = time.Now().Add(20 * time.Millisecond)
++				pacer = newSendPacer(sendSpacing{min: time.Second, max: time.Second})
++				pacer.record()
++				pacer.sleep = func(context.Context, time.Duration) { time.Sleep(50 * time.Millisecond) }
++			}
++			parent := delayedDeadlineContext{Context: context.Background(), deadline: deadline}
++			done := make(chan struct{})
++			go func() {
++				defer close(done)
++				handleSendDelegateConn(parent, serverConn, unexpectedExecute(t), sendSlot, pacer)
++			}()
++			resp := roundTripDelegate(t, clientConn, sendDelegateRequest{Version: sendDelegateVersion, Kind: "text", TimeoutMS: 10000})
++			<-done
++			if resp.OK || !strings.Contains(resp.Error, "it was not sent") {
++				t.Fatalf("expired request response: %+v", resp)
++			}
++		})
++	}
++}
++
++func TestDelegateDispatchedDeadlineWarnsAgainstBlindRetry(t *testing.T) {
++	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
++	storeDir := shortPresenceDelegateStoreDir(t)
++	stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(ctx context.Context, _ sendDelegateRequest) (sendDelegateResponse, error) {
++		<-ctx.Done()
++		return sendDelegateResponse{}, ctx.Err()
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer stop()
++	_, err = delegateSend(context.Background(), &rootFlags{storeDir: storeDir, timeout: time.Second}, sendDelegateRequest{Kind: "text"})
++	if err == nil || !strings.Contains(err.Error(), "may still have gone through") {
++		t.Fatalf("error = %v, want retry warning after dispatch", err)
++	}
++}
+diff --git a/cmd/wacli/send_spacing.go b/cmd/wacli/send_spacing.go
+index 0e21d53..33bf91d 100644
+--- a/cmd/wacli/send_spacing.go
++++ b/cmd/wacli/send_spacing.go
+@@ -50,7 +50,7 @@ func parseSendSpacing(raw string) (sendSpacing, error) {
+ 
+ // sendPacer enforces sendSpacing across the daemon's serialized delegated
+ // sends. It is NOT safe for concurrent use: callers invoke wait and record while
+-// holding the send mutex, so sends are already serialized and the pacer just
++// holding the send slot, so sends are already serialized and the pacer just
+ // adds the gap between them. The clock, sleeper, and RNG are injectable for tests.
+ type sendPacer struct {
+ 	spacing sendSpacing
+diff --git a/cmd/wacli/send_spacing_test.go b/cmd/wacli/send_spacing_test.go
 index 64b0a0a..c6cacff 100644
---- i/cmd/wacli/send_spacing_test.go
-+++ w/cmd/wacli/send_spacing_test.go
+--- a/cmd/wacli/send_spacing_test.go
++++ b/cmd/wacli/send_spacing_test.go
 @@ -5,7 +5,6 @@ import (
  	"encoding/json"
  	"net"

@@ -8,11 +8,25 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tarfile
 import tempfile
 
 BASE = "b87e6178b7b1e571ce2821ab516039cfa0c6ecf6"
+EXTENSION = "omawhatsapp.3"
+# Applied in this order. Each digest covers exactly the bytes given to git
+# apply, and sentinels prove that patch's changes are in the built tree.
+PATCHES = (
+ ("patch_sha256","wacli-private-input.patch",["--unidiff-zero"],
+  (("cmd/wacli/private_args.go","privateArgsFlag"),("internal/wa/contacts.go","chatNameFallback"))),
+ ("send_queue_patch_sha256","wacli-send-queue.patch",[],
+  (("cmd/wacli/send_ipc.go","sendDelegateReplyMargin"),("cmd/wacli/send_queue_deadline_test.go","TestProductionServerDropsQueuedSendAfterCallerTimeout"))),
+ ("outcomes_patch_sha256","wacli-omawhatsapp-outcomes.patch",[],
+  (("cmd/wacli/omawhatsapp_outcomes.go",'"build":"'+EXTENSION+'"'),("cmd/wacli/send_ipc.go","delegateBypassRefusal"))),
+)
+# Delegated queue, read-mark and outcome regressions, also run under -race.
+RACE_TESTS = "TestOma|TestUnpaced|TestProductionServer|TestDelegate|TestSendPacing|TestRunSendAttempt"
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument("source",type=Path)
 parser.add_argument("output",type=Path)
@@ -22,8 +36,8 @@ args=parser.parse_args()
 source=args.source.resolve();destination=args.output.resolve()
 head=subprocess.check_output(["git","-C",str(source),"rev-parse","HEAD"],text=True).strip()
 if head!=BASE:raise SystemExit("Expected the audited wacli 0.19.0 commit "+BASE)
-patch=Path(__file__).resolve().parents[1]/"dependencies/wacli-private-input.patch"
-queue_patch=patch.with_name("wacli-send-queue.patch")
+patch_dir=Path(__file__).resolve().parents[1]/"dependencies"
+patches=[(key,name,flags,sentinels,(patch_dir/name).read_bytes()) for key,name,flags,sentinels in PATCHES]
 with tempfile.TemporaryDirectory(prefix="omawhatsapp-wacli-") as temp:
  root=Path(temp)
  archive=root/"source.tar"
@@ -31,21 +45,33 @@ with tempfile.TemporaryDirectory(prefix="omawhatsapp-wacli-") as temp:
  with tarfile.open(archive) as tar:tar.extractall(root,filter="data")
  source_digest=hashlib.sha256(archive.read_bytes()).hexdigest()
  archive.unlink()
- subprocess.run(["git","apply","--unidiff-zero",str(patch)],cwd=root,check=True)
- subprocess.run(["git","apply",str(queue_patch)],cwd=root,check=True)
+ # Never let git find an enclosing repository: it would silently skip paths.
+ git_env={k:v for k,v in os.environ.items() if k not in ("GIT_DIR","GIT_WORK_TREE","GIT_INDEX_FILE")}
+ git_env["GIT_CEILING_DIRECTORIES"]=str(root.parent)
+ for key,name,flags,sentinels,data in patches:
+  files={line.split()[-1].split("/",1)[1] for line in data.decode().splitlines() if line.startswith("diff --git ")}
+  result=subprocess.run(["git","apply","--verbose",*flags,"-"],input=data,cwd=root,env=git_env,capture_output=True)
+  report=(result.stdout+result.stderr).decode(errors="replace")
+  applied=set(re.findall(r"(?m)^Applied patch (.+) cleanly\.$",report))
+  if result.returncode!=0 or "Skipped patch" in report or applied!=files:
+   raise SystemExit(f"{name} did not apply completely:\n{report}")
+  for path,text in sentinels:
+   target=root/path
+   if not target.is_file() or text not in target.read_text():raise SystemExit(f"{name} is missing from {path}")
  env=dict(os.environ,CGO_ENABLED="1",CGO_CFLAGS="-Wno-error=missing-braces")
  if args.test:
-  for command in (["go","test","./..."],["go","test","-tags","sqlite_fts5","./..."],["go","vet","./..."]):
+  for command in (["go","test","./..."],["go","test","-tags","sqlite_fts5","./..."],
+                  ["go","test","-race","-run",RACE_TESTS,"./cmd/wacli"],["go","vet","./..."]):
    subprocess.run(command,cwd=root,env=env,check=True,timeout=900)
  subprocess.run(["go","build","-trimpath","-buildvcs=false","-tags","sqlite_fts5","-ldflags=-s -w","-o",str(root/"wacli"),"./cmd/wacli"],cwd=root,env=env,check=True,timeout=900)
- subprocess.run([str(root/"wacli"),"--private-args-version"],check=True)
+ capability=json.loads(subprocess.check_output([str(root/"wacli"),"--private-args-version"],text=True))
+ if capability!={"protocol":1,"max_bytes":65536,"build":EXTENSION}:raise SystemExit("Unexpected private input capability: "+json.dumps(capability))
  destination.parent.mkdir(parents=True,exist_ok=True)
  # copy rather than retaining any source or generated credentials/state
  import shutil
  shutil.copyfile(root/"wacli",destination);destination.chmod(0o755)
- evidence={"upstream_commit":BASE,"source_archive_sha256":source_digest,
-  "patch_sha256":hashlib.sha256(patch.read_bytes()).hexdigest(),
-  "send_queue_patch_sha256":hashlib.sha256(queue_patch.read_bytes()).hexdigest(),
+ evidence={"upstream_commit":BASE,"source_archive_sha256":source_digest,"extension":EXTENSION,
+  **{key:hashlib.sha256(data).hexdigest() for key,_,_,_,data in patches},
   "binary_sha256":hashlib.sha256(destination.read_bytes()).hexdigest(),
   "go_version":subprocess.check_output(["go","version"],cwd=root,env=env,text=True).strip(),
   "cc_version":subprocess.check_output(["cc","--version"],text=True).splitlines()[0],
