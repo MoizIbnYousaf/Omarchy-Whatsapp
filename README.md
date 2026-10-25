@@ -45,7 +45,7 @@ silence its notifications on its own.
 real layouts from a wide window down to 360 px. Quit with `Ctrl+Q`, and choose
 whether it starts with the system.
 
-**Your keyboard, your way.** Settings → Shortcuts lets you click a key to change it, add alternatives, resolve conflicts, or restore defaults across 37 actions. [Shortcut reference](docs/SHORTCUTS.md).
+**Your keyboard, your way.** Settings → Shortcuts lets you click a key to change it, add alternatives, resolve conflicts, or restore defaults across 46 actions. [Shortcut reference](docs/SHORTCUTS.md).
 
 **Private by design.** No account, server or telemetry of its own. Reading a
 chat sends no sender receipt by default. A separate per-account opt-in

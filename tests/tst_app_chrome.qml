@@ -223,6 +223,152 @@ TestCase {
     Oma.App { width: 1000; height: 700 }
   }
 
+  function test_alt_number_opens_each_position_data() {
+    var rows = []
+    for (var n = 1; n <= 9; n++) rows.push({tag: "chat-" + n, position: n})
+    return rows
+  }
+
+  function test_alt_number_opens_each_position(data) {
+    var chats = []
+    for (var n = 1; n <= 9; n++)
+      chats.push({account: "work", jid: "synthetic-" + n + "@example",
+        name: "Synthetic chat " + n, kind: "dm", unread: 0})
+    var h = createHarness({chats: chats})
+    h.app.focusComposer()
+    keyClick(Qt.Key_0 + data.position, Qt.AltModifier)
+    compare(h.service.selectedChatJid, chats[data.position - 1].jid)
+    compare(h.app.chatCursorIndex, data.position - 1)
+    tryVerify(function() { return findChild(h.app, "composerInput").activeFocus })
+    compare(h.service.sentTexts.length, 0)
+  }
+
+  function test_alt_number_preserves_drafts_and_works_with_hidden_sidebar() {
+    var h = createHarness()
+    var composer = findChild(h.app, "composerInput")
+    h.app.focusComposer()
+    composer.text = "Synthetic first draft"
+    h.app.sidebarCollapsed = true
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, otherChat.jid)
+    compare(composer.text, "")
+    composer.text = "Synthetic second draft"
+    keyClick(Qt.Key_1, Qt.AltModifier)
+    compare(h.service.selectedChatJid, workChat.jid)
+    compare(composer.text, "Synthetic first draft")
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(composer.text, "Synthetic second draft")
+    compare(h.service.sentTexts.length, 0)
+  }
+
+  function test_alt_number_respects_filters_accounts_search_and_live_order() {
+    var home = {account: "home", jid: workChat.jid, name: "Synthetic home", kind: "dm", unread: 3}
+    var archived = {account: "work", jid: "archived@example", name: "Synthetic archived", kind: "dm", unread: 0, archived: true}
+    var h = createHarness({chats: [workChat, home, otherChat, archived],
+      accounts: [{account: "work", label: "Work"}, {account: "home", label: "Home"}]})
+    h.app.focusComposer()
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, workChat.jid)
+    compare(h.service.selectedChatAccount, "home", "identical JIDs keep the row's account")
+    h.app.accountScope = "work"
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, otherChat.jid)
+    compare(h.service.selectedChatAccount, "work")
+    h.app.accountScope = ""
+    h.app.chatView = "unread"
+    keyClick(Qt.Key_1, Qt.AltModifier)
+    compare(h.service.selectedChatAccount, "home")
+    h.app.chatView = "archived"
+    keyClick(Qt.Key_1, Qt.AltModifier)
+    compare(h.service.selectedChatJid, archived.jid)
+    h.app.chatView = "all"
+    h.app.focusChatSearch()
+    for (var i = 0; i < "OTHER".length; i++) keyClick("OTHER".charCodeAt(i))
+    compare(h.app.visibleChats.length, 1)
+    keyClick(Qt.Key_1, Qt.AltModifier)
+    compare(h.service.selectedChatJid, otherChat.jid)
+    h.app.focusChatSearch()
+    keyClick(Qt.Key_A, Qt.ControlModifier)
+    keyClick(Qt.Key_Backspace)
+    h.service.chats = [otherChat, workChat]
+    keyClick(Qt.Key_1, Qt.AltModifier)
+    compare(h.service.selectedChatJid, otherChat.jid, "positions follow the current row order")
+  }
+
+  function test_alt_number_missing_positions_and_other_modifiers_do_nothing() {
+    var h = createHarness()
+    var composer = findChild(h.app, "composerInput")
+    h.app.focusComposer()
+    composer.text = "Synthetic draft"
+    keyClick(Qt.Key_9, Qt.AltModifier)
+    compare(composer.text, "Synthetic draft", "a missing position must not edit the draft")
+    keyClick(Qt.Key_0, Qt.AltModifier)
+    keyClick(Qt.Key_2, Qt.ControlModifier)
+    keyClick(Qt.Key_2, Qt.AltModifier | Qt.ControlModifier)
+    keyClick(Qt.Key_2, Qt.AltModifier | Qt.ShiftModifier)
+    compare(h.service.selectedChatJid, workChat.jid)
+    composer.text = "Synthetic draft"
+    composer.cursorPosition = composer.text.length
+    keyClick(Qt.Key_2)
+    compare(composer.text, "Synthetic draft2", "plain numbers remain ordinary typing")
+    h.service.chats = []
+    keyClick(Qt.Key_1, Qt.AltModifier)
+    compare(h.service.selectedChatJid, workChat.jid)
+    compare(composer.text, "Synthetic draft2")
+  }
+
+  function test_alt_number_can_be_rebound_or_disabled() {
+    var h = createHarness({shortcuts: {chat2: ["Alt+G"]}})
+    h.app.focusComposer()
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, workChat.jid)
+    keyClick(Qt.Key_G, Qt.AltModifier)
+    compare(h.service.selectedChatJid, otherChat.jid)
+    h.service.shortcuts = {chat1: [], chat2: []}
+    keyClick(Qt.Key_1, Qt.AltModifier)
+    keyClick(Qt.Key_G, Qt.AltModifier)
+    compare(h.service.selectedChatJid, otherChat.jid)
+  }
+
+  function test_alt_number_is_inactive_in_settings_dialogs_and_media_viewer() {
+    var h = createHarness()
+    h.app.focusComposer()
+    h.app.settingsOpen = true
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, workChat.jid)
+    h.app.settingsOpen = false
+    var switcher = findChild(h.app, "quickSwitcher")
+    h.app.openQuickSwitcher()
+    tryCompare(switcher, "opened", true)
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, workChat.jid)
+    switcher.close()
+    var newChat = findChild(h.app, "newChatDialog")
+    h.app.openNewChat()
+    tryCompare(newChat, "opened", true)
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, workChat.jid)
+    newChat.close()
+    var viewer = findChild(h.app, "mediaViewer")
+    viewer.opened = true
+    h.app.focusComposer()
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, workChat.jid)
+    viewer.opened = false
+  }
+
+  function test_alt_number_opens_the_conversation_in_a_narrow_window() {
+    var h = createHarness()
+    findChild(h.app, "omawhatsappWindow").width = 400
+    h.app.focusChats()
+    verify(h.app.narrow)
+    verify(!h.app.narrowConversation)
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, otherChat.jid)
+    verify(h.app.narrowConversation)
+    tryVerify(function() { return findChild(h.app, "composerInput").activeFocus })
+  }
+
   function test_custom_window_shortcut_replaces_default_and_settings_capture_isolated() {
     var h = createHarness({shortcuts: {sidebar: ["Alt+B"]}})
     var composer = findChild(h.app, "composerInput")
@@ -1009,8 +1155,10 @@ TestCase {
   }
 
   function test_ctrl_number_chat_jumps_are_gone() {
-    var app = createHarness().app
-    verify(typeof app.selectChatAt === "undefined")
+    var h = createHarness()
+    h.app.focusComposer()
+    keyClick(Qt.Key_2, Qt.ControlModifier)
+    compare(h.service.selectedChatJid, workChat.jid)
   }
 
   function test_an_open_conversation_offers_no_read_action() {
