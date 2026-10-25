@@ -217,12 +217,15 @@ delegate (a held lock and socket in an empty temporary store), the fixed
 not-sent, outcome-unknown and generic private-mode messages.
 `test_private_build.py` runs a copy of the builder against generated patches and
 stand-ins for the source checkout, Go and the compiler, with only `git apply`
-real. Under a translated locale (German or Brazilian Portuguese; skipped where git
-has no message catalogs, as in a minimal container) and inside an enclosing git
-repository, every patch must still apply and be recorded, and a patch that does
-not apply must fail with git's untranslated report.
-The CI private-transport job builds the three bundled patches against the exact
-audited upstream commit, runs plain/FTS dependency tests, a `-race` run of the
+real. Inside an enclosing git repository, every patch must still apply and be
+recorded, in the C locale and again under a translated locale (German or Brazilian
+Portuguese; only that case is skipped where git has no message catalogs, as in a
+minimal container), and a patch that does not apply must fail with git's
+untranslated report.
+The CI private-transport job first confirms that `wacli-send-queue.patch` is
+byte-for-byte upstream `git diff b87e6178 7c1b3bfb -- cmd/wacli`, then builds the
+three bundled patches against the exact audited upstream commit, runs plain/FTS
+dependency tests, a `-race` run of the
 queue, read-mark and outcome tests and vet, and publishes every patch digest.
 The dependency's own regressions are upstream's `send_queue_deadline_test.go`
 and OmaWhatsApp's `TestOmaReadMarkDoesNotBlockSend`,

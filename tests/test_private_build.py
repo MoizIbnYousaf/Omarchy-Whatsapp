@@ -72,9 +72,10 @@ class PrivateBuildTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
-        self.environment = translated_environment(self.root)
-        if self.environment is None:
-            self.skipTest("git prints no translated messages on this system")
+        # Without git message catalogs, the enclosing-repository and sentinel
+        # checks still run in the C locale; only the translated case is skipped.
+        self.translated = translated_environment(self.root)
+        self.environment = dict(neutral_environment(), LC_ALL="C")
         self.constants = builder_constants()
         self.checkout = self.root / "checkout"
         self.source = self.root / "source"
@@ -94,10 +95,11 @@ class PrivateBuildTests(unittest.TestCase):
         self.temp_parent = self.root / "enclosing"
         subprocess.run([REAL_GIT, "init", "-q", str(self.temp_parent)], check=True,
                        env=dict(neutral_environment(), GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1"))
-        self.environment.update(
-            PATH=f"{self.root / 'bin'}{os.pathsep}{self.environment.get('PATH', os.defpath)}",
-            TMPDIR=str(self.temp_parent),
-        )
+        for environment in filter(None, (self.environment, self.translated)):
+            environment.update(
+                PATH=f"{self.root / 'bin'}{os.pathsep}{environment.get('PATH', os.defpath)}",
+                TMPDIR=str(self.temp_parent),
+            )
         self.output = self.root / "out/wacli"
         self.provenance = self.root / "build-evidence.json"
 
@@ -159,15 +161,22 @@ else:
 """)
         write_executable(bin_dir / "cc", "#!/bin/sh\necho 'cc (synthetic) 1'\n")
 
-    def build(self) -> subprocess.CompletedProcess:
+    def build(self, environment: dict | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(
             [sys.executable, "-B", str(self.checkout / "scripts/build-private-wacli"), str(self.source),
              str(self.output), "--provenance", str(self.provenance)],
-            env=self.environment, capture_output=True, text=True, timeout=120,
+            env=environment or self.environment, capture_output=True, text=True, timeout=120,
         )
 
+    def test_every_patch_applies_inside_an_enclosing_repository(self) -> None:
+        self.assert_every_patch_built(self.build())
+
     def test_translated_git_messages_still_build_every_patch(self) -> None:
-        result = self.build()
+        if self.translated is None:
+            self.skipTest("git prints no translated messages on this system")
+        self.assert_every_patch_built(self.build(self.translated))
+
+    def assert_every_patch_built(self, result: subprocess.CompletedProcess) -> None:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         evidence = json.loads(self.provenance.read_text())
         for key, name, _, _ in self.constants["PATCHES"]:

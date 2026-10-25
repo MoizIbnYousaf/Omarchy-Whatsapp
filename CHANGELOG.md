@@ -6,8 +6,8 @@
   list's order, search, view and account filter. Each position can be rebound or
   disabled in Settings → Shortcuts.
 - Keep custom shortcuts that already use a key a new default wants: your binding keeps
-  working, the new action starts unassigned, and Enter sends and other settings save
-  again. Settings' Reset names the action that holds the key.
+  working, the new action starts unassigned, and Enter sends and other settings still
+  save. Settings' Reset names the action that holds the key.
 - Read saved shortcuts entry by entry, so a rollback or upgrade between releases keeps
   every binding that is still valid instead of resetting them all. Rolling back to
   0.18.6 or earlier still resets custom shortcuts once any Open chat N entry is saved,
@@ -23,9 +23,9 @@
   sent and nothing is retried automatically; Try again stays your choice. The agent
   tools report the same not-sent or uncertain outcome. Older private builds that fail
   at their deadline are treated as uncertain.
-- Every helper operation keeps its exact time limit again, including the 2-second total
-  for inline mention lookups. wacli gets a slightly shorter deadline in whole
-  milliseconds, so it can answer first.
+- Pass each operation's deadline to wacli in whole milliseconds, slightly below the
+  helper's unchanged hard limit (including the 2-second total for inline mention
+  lookups), so wacli can answer first.
 - Private wacli build `omawhatsapp.3`: three reviewable patches on the unchanged wacli
   0.19.0 base (private input, an exact backport of upstream wacli #456 from v0.20.0,
   and a small OmaWhatsApp outcomes patch). The builder verifies that every patch
@@ -46,7 +46,8 @@
   `systemctl --user restart wacli-sync.service` and restart each running
   `wacli-sync@<account>.service`. Until sync restarts, it keeps the old send queue.
 - Thanks to Zulham Syafrawi (@zulhamsy) for the bytecode fix in #26 and Brunno Vert
-  (@caniswim) for chat positions in #27 and the read-mark and deadline work in #28.
+  (@caniswim / @BrunnoVert) for chat positions in #27 and the read-mark and deadline
+  work in #28.
   The send-queue fix is upstream wacli #456 by Tsavo Knott, with co-authors Peter
   Steinberger and Claude.
 

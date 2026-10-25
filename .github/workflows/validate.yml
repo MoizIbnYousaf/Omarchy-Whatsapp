@@ -82,6 +82,17 @@ jobs:
           repository: openclaw/wacli
           ref: b87e6178b7b1e571ce2821ab516039cfa0c6ecf6
           path: .wacli-source
+      - name: Confirm the send-queue patch is upstream wacli #456, unmodified
+        shell: bash
+        working-directory: .wacli-source
+        run: |
+          upstream=7c1b3bfbeb26b929ca60e3cbae1511ad9c58a02d
+          git fetch --no-tags --depth=2 origin "$upstream"
+          test "$(git rev-parse "$upstream^")" = b87e6178b7b1e571ce2821ab516039cfa0c6ecf6
+          # The documented check from dependencies/README.md, with git's default diff settings.
+          GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c safe.directory='*' \
+            diff b87e6178b7b1e571ce2821ab516039cfa0c6ecf6 "$upstream" -- cmd/wacli \
+            | cmp - <(sed -n '/^diff --git /,$p' ../dependencies/wacli-send-queue.patch)
       - name: Test and build the private wacli extension from its three bundled patches
         run: |
           # Permission regressions must run as an ordinary Unix account.
