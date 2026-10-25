@@ -1725,6 +1725,12 @@ Item {
     selectingMessages = false
     selectedMessageIds = []
   }
+  // A selection belongs to the chat it was made in. Any switch ends it, from
+  // the rail, a shortcut, the quick switcher, the mini client, a notification
+  // or the service's own fallback, so forward, delete and star never pair one
+  // chat's origin with another chat's messages.
+  readonly property string openChatKey: currentChatKey()
+  onOpenChatKeyChanged: if (selectingMessages) cancelSelection()
 
   // The picked messages oldest first, the order they are forwarded in.
   function selectedMessages() {

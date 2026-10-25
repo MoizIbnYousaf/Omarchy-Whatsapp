@@ -391,6 +391,30 @@ TestCase {
     compare(h.service.selectedChatJid, otherChat.jid, "other positions keep their defaults")
   }
 
+  function test_switching_chats_by_any_path_ends_message_selection() {
+    var third = {account: "work", jid: "third@example", name: "Synthetic third", kind: "dm", unread: 0}
+    var picked = {id: "synthetic-picked", text: "Synthetic picked", sender: "Synthetic",
+      timestamp: 1787540100, from_me: false, media_type: "", reactions: []}
+    var h = createHarness({chats: [workChat, otherChat, third], messages: [picked]})
+    h.app.focusComposer()
+    verify(h.app.startForward(picked))
+    keyClick(Qt.Key_1, Qt.AltModifier)
+    verify(h.app.selectingMessages, "opening the same chat again keeps the selection")
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, otherChat.jid)
+    verify(!h.app.selectingMessages, "Alt+N ends it")
+    compare(h.app.selectedMessageIds, [])
+    verify(!h.app.openForwardDialog(), "nothing picked in the first chat is forwarded from the second")
+    verify(h.app.startForward(picked))
+    mouseClick(chatPreviewRow(h.app, 2))
+    compare(h.service.selectedChatJid, third.jid)
+    verify(!h.app.selectingMessages, "a click in the chat list ends it")
+    // The mini client and notifications move the shared service themselves.
+    verify(h.app.startForward(picked))
+    h.service.selectChat(workChat)
+    verify(!h.app.selectingMessages, "a switch from another surface ends it")
+  }
+
   function test_custom_window_shortcut_replaces_default_and_settings_capture_isolated() {
     var h = createHarness({shortcuts: {sidebar: ["Alt+B"]}})
     var composer = findChild(h.app, "composerInput")
