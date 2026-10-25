@@ -74,7 +74,7 @@ jobs:
     container: archlinux:base
     steps:
       - name: Install build prerequisites
-        run: pacman -Syu --noconfirm git go gcc python shadow util-linux
+        run: pacman -Syu --noconfirm diffutils git go gcc python shadow util-linux
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Check out audited dependency source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
