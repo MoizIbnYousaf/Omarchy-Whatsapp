@@ -63,7 +63,12 @@ Column {
     return commit(next)
   }
   function reset(id) {
-    var next = Object.assign({}, overrides); delete next[id]; return commit(next)
+    if (pending) return false
+    var next = Object.assign({}, overrides); delete next[id]
+    // Name the action holding the default, such as a key saved before that default existed.
+    var taken = Shortcuts.conflict(id, Shortcuts.bindings(id, next, enterSends), next, enterSends)
+    if (taken) { error = taken; return false }
+    return commit(next)
   }
   function remove() {
     var next = Object.assign({}, overrides)

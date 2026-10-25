@@ -2302,6 +2302,68 @@ class BackendTests(unittest.TestCase):
                 self.assertEqual(self.backend.settings()["shortcuts"], bindings)
         self.backend.settings({"shortcuts": {"find": ["Alt+3"], "chat3": []}})
 
+    def _saved_preferences(self, value: dict) -> Path:
+        """A preferences file as an earlier or later release left it."""
+        state = self.root / "state"
+        state.mkdir(mode=0o700, exist_ok=True)
+        target = state / "preferences.json"
+        target.write_text(json.dumps(dict({"version": 4}, **value)), encoding="utf-8")
+        target.chmod(0o600)
+        return target
+
+    def test_saved_bindings_win_over_defaults_added_after_them(self) -> None:
+        # Each map was valid on 0.18.6, before chat1..chat9 took Alt+1..Alt+9.
+        cases = (
+            ({"sidebar": ["Alt+1"]}, {"chat1": []}),
+            ({"find": ["Ctrl+F", "Alt+3"]}, {"chat3": []}),
+            ({"switchChat": ["Alt+1"]}, {"chat1": []}),
+            ({"mono": ["Alt+4"], "newChat": ["Alt+9", "Ctrl+N"]}, {"chat4": [], "chat9": []}),
+            # The conflict model reserves window keys in the mini client too.
+            ({"expand": ["O", "Alt+5"]}, {"chat5": []}),
+            # The media viewer never competes with window actions.
+            ({"zoomIn": ["+", "Alt+2"]}, {}),
+            # A choice for the new action itself is never replaced.
+            ({"sidebar": ["Alt+1"], "chat1": ["Alt+G"]}, {}),
+        )
+        for saved, adopted in cases:
+            with self.subTest(saved=saved):
+                target = self._saved_preferences({"shortcuts": saved})
+                published = dict(saved, **adopted)
+                self.assertEqual(self.backend.settings()["shortcuts"], published)
+                self.assertEqual(self.backend.status()["shortcuts"], published)
+                self.assertEqual(backend_module.shortcut_conflict(published, True), "")
+                self.assertEqual(backend_module.adopt_shortcut_defaults(published, True), published,
+                                 "adopting again changes nothing")
+                self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["shortcuts"], saved,
+                                 "reading never writes")
+                # Settings -> Chats -> Enter sends, both ways.
+                self.assertFalse(self.backend.settings({"enter_sends": False})["enter_sends"])
+                self.assertTrue(self.backend.settings({"enter_sends": True})["enter_sends"])
+                self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["shortcuts"], published)
+                # An unrelated edit saved from the published map.
+                edited = dict(published, record=["Ctrl+Alt+R"])
+                self.assertEqual(self.backend.settings({"shortcuts": edited})["shortcuts"], edited)
+                self.assertEqual(self.backend.settings()["shortcuts"], edited)
+
+    def test_an_adopted_unbound_action_is_an_ordinary_saved_choice(self) -> None:
+        target = self._saved_preferences({"shortcuts": {"sidebar": ["Alt+1"]}})
+        self.backend.settings({"rail_density": "compact"})
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["shortcuts"],
+                         {"sidebar": ["Alt+1"], "chat1": []})
+        # Writes stay strict: a reset that would share Alt+1 again is refused.
+        with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "Open chat 1"):
+            self.backend.settings({"shortcuts": {"sidebar": ["Alt+1"]}})
+        # Once the saved binding moves, the position stays as saved until reset.
+        self.backend.settings({"shortcuts": {"chat1": []}})
+        self.assertEqual(self.backend.settings()["shortcuts"], {"chat1": []})
+        self.backend.settings({"shortcuts": {}})
+        self.assertEqual(self.backend.settings()["shortcuts"], {})
+        # The inherited send keys follow Enter sends.
+        self.assertEqual(backend_module.adopt_shortcut_defaults({"back": ["Enter"]}, True),
+                         {"back": ["Enter"], "openChat": [], "send": []})
+        self.assertEqual(backend_module.adopt_shortcut_defaults({"back": ["Enter"]}, False),
+                         {"back": ["Enter"], "openChat": []})
+
     def test_sender_receipts_require_separate_opt_in(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
         self.assertFalse(self.backend.settings()["sender_read_receipts"])

@@ -228,8 +228,10 @@ or **Reset all…** to restore the defaults after confirmation. Escape cancels
 capture. Tab moves between controls and into the save/cancel buttons.
 
 Bindings apply immediately to every account and every open app/mini-client
-window on this device, persist privately, and survive upgrades. Media viewer
-and forwarding bindings have their own contexts. Ordinary letters navigate
+window on this device, persist privately, and survive upgrades: when an update
+adds an action whose default key you already use, your binding keeps it and
+the new action starts with no key. Media viewer and forwarding bindings have
+their own contexts. Ordinary letters navigate
 only when you are not typing. Writing, forwarding and window actions require a modifier
 or function key, so assigning a shortcut cannot turn ordinary typing into a
 send or another action. Copy, cut, undo, select-all, Tab navigation, and dialog

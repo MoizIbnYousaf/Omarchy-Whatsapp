@@ -80,4 +80,4 @@ Super+Shift+W opens/closes the app once configured in Omarchy. This is a desktop
 
 Tab/Shift+Tab move focus. Escape cancels dialogs and capture. Text fields retain ordinary copy, cut, undo, select-all, caret movement, and new lines. Search/mention/dialog lists keep standard arrows and confirmation keys. These standard control behaviors are not custom action bindings. Ctrl+B formats selected text, otherwise it toggles the sidebar. Navigation letter keys never act on ordinary typed text. Forwarding requires a modified key or function key.
 
-Bindings are saved privately on this device, shared by all accounts and open surfaces, and preserved on upgrade. Demo edits do not save or send anything.
+Bindings are saved privately on this device, shared by all accounts and open surfaces, and preserved on upgrade. If an update adds an action whose default key you already use, your binding keeps the key and the new action starts unassigned. Demo edits do not save or send anything.

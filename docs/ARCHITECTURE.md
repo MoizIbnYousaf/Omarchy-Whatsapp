@@ -227,9 +227,16 @@ three agree. Only known action IDs and up to three canonical key strings per
 action are accepted. There are no command strings or executable passthroughs.
 The helper validates the complete map, rejects conflicts in overlapping contexts,
 and saves it through the existing locked, atomic private preferences path.
-Absent entries inherit defaults; an empty list disables a binding. Preferences
-are device-wide. Status and settings responses publish `shortcuts` to the
-resident service so both surfaces use the same acknowledged map.
+Absent entries inherit defaults; an empty list disables a binding. A saved
+binding wins over a default added after it: when an absent action's default
+keys would conflict with a saved binding, the helper publishes that action as
+`[]`, so status, settings and every later write see a conflict-free map. This
+is recomputed on each read rather than migrated once, needs no version bump for
+future defaults, and never changes an entry the map names; the next
+preferences write stores it as an ordinary saved choice. Preferences are
+device-wide. Status and settings responses publish `shortcuts` to the resident
+service so both surfaces use the same acknowledged map; the QML never runs
+ahead of its helper, so it uses that map as published.
 
 `ShortcutModel.js` owns event normalization, defaults, context overlap and
 conflict messages. In-app QML Shortcuts, navigation handlers, composers, the

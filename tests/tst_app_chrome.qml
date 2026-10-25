@@ -369,6 +369,28 @@ TestCase {
     tryVerify(function() { return findChild(h.app, "composerInput").activeFocus })
   }
 
+  // The helper's answer for a 0.18.6 map that already used Alt+1 and Alt+3:
+  // the saved bindings, with the positions that would share them unbound.
+  function test_a_saved_alt_number_binding_wins_over_the_new_position() {
+    var third = {account: "work", jid: "third@example", name: "Synthetic third", kind: "dm", unread: 0}
+    var h = createHarness({chats: [workChat, otherChat, third],
+      shortcuts: {sidebar: ["Alt+1"], chat1: [], find: ["Ctrl+F", "Alt+3"], chat3: []}})
+    h.service.selectChat(otherChat)
+    h.app.focusComposer()
+    keyClick(Qt.Key_1, Qt.AltModifier)
+    verify(h.app.sidebarCollapsed, "Alt+1 runs the saved action instead of being ambiguous")
+    compare(h.service.selectedChatJid, otherChat.jid, "Open chat 1 stays inert")
+    keyClick(Qt.Key_1, Qt.AltModifier)
+    verify(!h.app.sidebarCollapsed)
+    keyClick(Qt.Key_3, Qt.AltModifier)
+    compare(h.app.keyboardContext, "message-search", "Alt+3 still finds in the conversation")
+    compare(h.service.selectedChatJid, otherChat.jid, "Open chat 3 stays inert")
+    h.service.selectChat(third)
+    h.app.focusComposer()
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, otherChat.jid, "other positions keep their defaults")
+  }
+
   function test_custom_window_shortcut_replaces_default_and_settings_capture_isolated() {
     var h = createHarness({shortcuts: {sidebar: ["Alt+B"]}})
     var composer = findChild(h.app, "composerInput")

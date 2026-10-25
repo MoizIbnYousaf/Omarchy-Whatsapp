@@ -397,30 +397,56 @@ def valid_shortcuts(value: Any) -> bool:
     return True
 
 
+def shortcut_bindings(value: dict[str, Any], item: dict[str, Any], enter_sends: bool = True) -> list[str]:
+    return value.get(item["id"], ["Ctrl+Enter"] if item["id"] == "send" and not enter_sends else item["keys"])
+
+
+def shortcuts_compete(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Whether one key press can reach both actions, so they may not share a key."""
+    # Ctrl+B formats selected text and otherwise toggles the sidebar.
+    if {a["id"], b["id"]} == {"bold", "sidebar"}:
+        return False
+    if a["scope"] == b["scope"]:
+        return True
+    if a["scope"] in {"viewer", "forward"} or b["scope"] in {"viewer", "forward"}:
+        return False
+    if {a["scope"], b["scope"]} == {"navigation", "dropdown"}:
+        nav = a if a["scope"] == "navigation" else b
+        return nav["id"] in {"next", "previous", "openChat", "openMedia", "back", "search"}
+    if {a["scope"], b["scope"]} == {"navigation", "composer"}:
+        nav = a if a["scope"] == "navigation" else b
+        return nav["id"] in {"back", "pageUp", "pageDown"}
+    return a["scope"] == "window" or b["scope"] == "window"
+
+
 def shortcut_conflict(value: dict[str, Any], enter_sends: bool = True) -> str:
-    def bindings(item):
-        return value.get(item["id"], ["Ctrl+Enter"] if item["id"] == "send" and not enter_sends else item["keys"])
-
-    def overlap(a, b):
-        if a["scope"] == b["scope"]:
-            return True
-        if a["scope"] in {"viewer", "forward"} or b["scope"] in {"viewer", "forward"}:
-            return False
-        if {a["scope"], b["scope"]} == {"navigation", "dropdown"}:
-            nav = a if a["scope"] == "navigation" else b
-            return nav["id"] in {"next", "previous", "openChat", "openMedia", "back", "search"}
-        if {a["scope"], b["scope"]} == {"navigation", "composer"}:
-            nav = a if a["scope"] == "navigation" else b
-            return nav["id"] in {"back", "pageUp", "pageDown"}
-        return a["scope"] == "window" or b["scope"] == "window"
-
     for index, a in enumerate(SHORTCUT_CATALOG):
         for b in SHORTCUT_CATALOG[index + 1:]:
-            if {a["id"], b["id"]} == {"bold", "sidebar"} or not overlap(a, b):
-                continue
-            if set(bindings(a)) & set(bindings(b)):
+            if shortcuts_compete(a, b) and set(shortcut_bindings(value, a, enter_sends)) \
+                    & set(shortcut_bindings(value, b, enter_sends)):
                 return f'Shortcut conflict between {a["title"]} and {b["title"]}.'
     return ""
+
+
+def adopt_shortcut_defaults(value: dict[str, Any], enter_sends: bool = True) -> dict[str, Any]:
+    """Let saved bindings win over defaults added after they were saved.
+
+    An action the saved map does not name inherits its default keys. When a
+    competing action already has one of those keys saved, the newcomer is
+    published unbound ([]) rather than sharing the key, which would leave Qt
+    with an ambiguous shortcut and refuse every later settings write. Named
+    actions are never changed, so adopting again changes nothing. Defaults never
+    conflict with each other, so only the saved bindings need checking.
+    """
+    adopted = dict(value)
+    for item in SHORTCUT_CATALOG:
+        if item["id"] in value:
+            continue
+        keys = set(shortcut_bindings({}, item, enter_sends))
+        if any(other["id"] in value and shortcuts_compete(item, other) and keys & set(value[other["id"]])
+               for other in SHORTCUT_CATALOG):
+            adopted[item["id"]] = []
+    return adopted
 
 
 def version_tuple(text: str) -> tuple[int, ...]:
@@ -1947,6 +1973,14 @@ class Backend:
         time_format = value.get("time_format", "auto")
         if not isinstance(time_format, str) or time_format not in {"auto", "12h", "24h"}:
             time_format = "auto"
+        # Recomputed on every read instead of migrated once: a default added in
+        # any later release, or a map written by another release, is handled
+        # the same way without a version bump. Reading never writes; like the
+        # rest of this normalization, the result is stored by the next
+        # preferences write, after which an adopted [] is an ordinary saved
+        # choice, as Settings would save it with the whole published map.
+        shortcuts = value.get("shortcuts", {}) if valid_shortcuts(value.get("shortcuts", {})) else {}
+        shortcuts = adopt_shortcut_defaults(shortcuts, ui_preference(value, "enter_sends"))
         return {
             "version": PREFERENCES_VERSION,
             "show_unread_count": value.get("show_unread_count") is not False,
@@ -1955,7 +1989,7 @@ class Backend:
             "dropdown_rows": dropdown_rows,
             "composer_max_lines": composer_max_lines,
             "time_format": time_format,
-            "shortcuts": value.get("shortcuts", {}) if valid_shortcuts(value.get("shortcuts", {})) else {},
+            "shortcuts": shortcuts,
             **{name: ui_preference(value, name) for name in UI_PREFERENCES},
             # The desktop popup is a separate surface from the bar badge, so it
             # keeps its own settings. Its watermark is per account, next to the

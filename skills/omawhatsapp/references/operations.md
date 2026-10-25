@@ -232,10 +232,13 @@ exports, or store maintenance, use the complete classified gateway in
 The global `shortcuts` setting is a map of known keyboard action IDs to lists
 of up to three canonical key strings (for example `{"find":["Ctrl+Alt+F"]}`).
 An omitted action inherits its default; `[]` disables it; `{}` restores the
-entire default map. The helper rejects invalid keys, unknown actions and
-context conflicts. This is a local preference write; it does not change the
-Hyprland launcher binding or perform any WhatsApp operation. Prefer the
-Settings → Shortcuts editor for interactive capture and conflict feedback.
+entire default map. When an omitted action's default would take a key already
+saved for another action, the helper reports it as `[]`, so the saved binding
+keeps working; send the map back as reported. The helper rejects invalid keys,
+unknown actions and context conflicts. This is a local preference write; it
+does not change the Hyprland launcher binding or perform any WhatsApp
+operation. Prefer the Settings → Shortcuts editor for interactive capture and
+conflict feedback.
 
 ## Account-name clipboard
 

@@ -75,6 +75,27 @@ TestCase {
     verify(h.view.reset("chat2"))
     compare(h.view.keys("chat2"), ["Alt+2"])
   }
+  // What the helper publishes after an upgrade from 0.18.6 with sidebar on
+  // Alt+1: the saved key, and the new position that would share it unbound.
+  function test_an_adopted_unbound_position_reads_unassigned_and_other_edits_save() {
+    var h = create()
+    h.service.shortcuts = {sidebar: ["Alt+1"], chat1: []}
+    compare(h.view.keys("chat1"), [])
+    compare(Model.configurationError(h.service.shortcuts, true), "")
+    compare(Model.configurationError(h.service.shortcuts, false), "")
+    h.view.edit("find", 0); h.view.candidate = "Ctrl+Alt+F"
+    verify(h.view.save(), "an unrelated edit saves")
+    compare(h.service.writes[0].value, {sidebar: ["Alt+1"], chat1: [], find: ["Ctrl+Alt+F"]})
+    h.service.complete()
+    verify(!h.view.reset("chat1"), "Alt+1 is still taken")
+    verify(h.view.error.indexOf("Show or hide chat list") >= 0, "the error names what holds Alt+1")
+    compare(h.service.writes.length, 1)
+    verify(h.view.reset("sidebar"))
+    compare(h.service.writes[1].value, {chat1: [], find: ["Ctrl+Alt+F"]})
+    h.service.complete()
+    verify(h.view.reset("chat1"), "once Alt+1 is free the position can take it back")
+    compare(h.service.writes[2].value, {find: ["Ctrl+Alt+F"]})
+  }
   function test_click_capture_cancel_save_and_failure() {
     var h=create()
     mouseClick(findChild(h.view, "shortcut-find-0"))
