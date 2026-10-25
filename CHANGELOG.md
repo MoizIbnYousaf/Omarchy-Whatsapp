@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.19.0 — Chats by position, clear send outcomes and quiet test runs
+
+- Open a chat by its position in the full app with Alt+1–Alt+9, following the current
+  list's order, search, view and account filter. Each position can be rebound or
+  disabled in Settings → Shortcuts.
+- Keep custom shortcuts that already use a key a new default wants: your binding keeps
+  working, the new action starts unassigned, and Enter sends and other settings save
+  again. Settings' Reset names the action that holds the key.
+- Read saved shortcuts entry by entry, so a rollback or upgrade between releases keeps
+  every binding that is still valid instead of resetting them all. Rolling back to
+  0.18.6 or earlier still resets custom shortcuts once any Open chat N entry is saved,
+  including one left unassigned by an upgrade.
+- End a message selection whenever the open chat changes (rail, Alt+N, quick switcher,
+  mini client, notification), so forward, star and delete never combine one chat's
+  origin with another chat's messages.
+- A slow app-state read mark (mark read or unread) no longer holds up messages waiting
+  behind it; receipt read marks stay in order and keep their pacing. A message still
+  queued when its time runs out is never sent late: it fails as definitely not sent,
+  so trying again is safe.
+- When WhatsApp does not confirm a message in time, the bubble says it may have been
+  sent and nothing is retried automatically; Try again stays your choice. The agent
+  tools report the same not-sent or uncertain outcome. Older private builds that fail
+  at their deadline are treated as uncertain.
+- Every helper operation keeps its exact time limit again, including the 2-second total
+  for inline mention lookups. wacli gets a slightly shorter deadline in whole
+  milliseconds, so it can answer first.
+- Private wacli build `omawhatsapp.3`: three reviewable patches on the unchanged wacli
+  0.19.0 base (private input, an exact backport of upstream wacli #456 from v0.20.0,
+  and a small OmaWhatsApp outcomes patch). The builder verifies that every patch
+  applied completely, works in any locale and records each patch digest; Settings →
+  About shows the build label. THIRD_PARTY_NOTICES now says OmaWhatsApp ships patches
+  built locally from pinned upstream source under its MIT License, with no wacli
+  source or binary vendored.
+- Keep test runs from writing into the plugin folder the shell watches. `make test`,
+  the release gate, `scripts/check-wacli-parity`, `scripts/earlier-copies` and the
+  media fixture writer leave no Python bytecode beside the sources, and the QML tests'
+  synthetic media are generated in the gate's temporary folder as a `MediaFixtures`
+  module, so a run in an installed plugin cannot trigger the shell's hot reload
+  (Omarchy #11929/#12859). The gate syntax-checks Python exactly as `py_compile` does
+  and fails when a run leaves any new file in the checkout.
+- Upgrade: update the plugin (`omarchy plugin update io.github.moizibnyousaf.omawhatsapp`)
+  and restart the shell. Rebuild the private wacli with `scripts/build-private-wacli`
+  so it carries all three bundled patches and install it, then run
+  `systemctl --user restart wacli-sync.service` and restart each running
+  `wacli-sync@<account>.service`. Until sync restarts, it keeps the old send queue.
+- Thanks to Zulham Syafrawi (@zulhamsy) for the bytecode fix in #26 and Brunno Vert
+  (@caniswim) for chat positions in #27 and the read-mark and deadline work in #28.
+  The send-queue fix is upstream wacli #456 by Tsavo Knott, with co-authors Peter
+  Steinberger and Claude.
+
 ## 0.18.6 — Source-build evidence, reachable menus and mention names
 
 - Withdraw historical prebuilt installation paths and require the reviewed pinned-source
