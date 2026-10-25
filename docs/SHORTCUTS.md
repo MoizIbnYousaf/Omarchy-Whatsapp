@@ -18,7 +18,7 @@ The following are the defaults. A custom Send message binding takes precedence o
 | Record or stop a voice note | `Ctrl+Shift+V` |
 | Quit OmaWhatsApp | `Ctrl+Q` |
 
-Alt+1–9 opens the corresponding conversation in the current chat list, respecting its order, search, view and account filter. It works while typing and with the sidebar hidden, preserves each chat’s draft, and focuses the selected chat’s composer. A position beyond the list does nothing. Settings, dialogs and the media viewer keep these shortcuts inactive. Each position can be changed or disabled separately in Settings → Shortcuts.
+In the full app, Alt+1–9 opens the corresponding conversation in the current chat list, respecting its order, search, view and account filter. It works while typing and with the sidebar hidden, preserves each chat’s draft, and focuses the selected chat’s composer. If chat details or the media browser covers the conversation, it stays open, as after a click in the chat list; Esc closes it and returns you to the composer. The position is read when you press the keys, so a chat that a new message moves up can take the row you were looking at; the conversation header names the chat that opened. A position beyond the list does nothing. Settings, onboarding, a contact draft, the media viewer and any open dialog or menu keep these shortcuts inactive. Each position can be changed or disabled separately in Settings → Shortcuts.
 
 ## Navigation
 

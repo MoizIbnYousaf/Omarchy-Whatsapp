@@ -465,6 +465,37 @@ TestCase {
     verify(!h.app.selectingMessages, "a switch from another surface ends it")
   }
 
+  // A panel over the conversation stays open for the new chat, as after a
+  // click in the chat list; Esc closes it and lands in that chat's composer.
+  function test_alt_number_under_a_covering_panel_behaves_like_a_rail_click() {
+    var h = createHarness()
+    var composer = findChild(h.app, "composerInput")
+    h.app.chatDetailsOpen = true
+    var panel = findChild(h.app, "chatDetailsPanel")
+    tryVerify(function() { return panel.visible })
+    verify(!h.app.chatDetailsBeside)
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, otherChat.jid)
+    verify(h.app.chatDetailsOpen, "the details stay open for the new chat")
+    verify(!composer.activeFocus, "the covered composer cannot take focus")
+    mouseClick(chatPreviewRow(h.app, 0))
+    compare(h.service.selectedChatJid, workChat.jid)
+    verify(h.app.chatDetailsOpen, "a click in the chat list keeps them open too")
+    keyClick(Qt.Key_Escape)
+    verify(!h.app.chatDetailsOpen)
+    tryVerify(function() { return composer.activeFocus }, 1000, "Esc lands in the composer")
+    h.app.openMediaBrowser("media")
+    var browser = findChild(h.app, "mediaBrowser")
+    tryVerify(function() { return browser.visible })
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, otherChat.jid)
+    verify(h.app.mediaBrowserOpen)
+    verify(!composer.activeFocus)
+    keyClick(Qt.Key_Escape)
+    verify(!h.app.mediaBrowserOpen)
+    tryVerify(function() { return composer.activeFocus }, 1000, "Esc lands in the new chat's composer")
+  }
+
   function test_custom_window_shortcut_replaces_default_and_settings_capture_isolated() {
     var h = createHarness({shortcuts: {sidebar: ["Alt+B"]}})
     var composer = findChild(h.app, "composerInput")

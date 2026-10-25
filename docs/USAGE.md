@@ -66,7 +66,8 @@ them keeps the chat list warm in the resident service.
 - **Forward to many at once.** Pick messages in the conversation, then send
   them to several chats, or to a number with no chat yet, with an optional
   note.
-- **Pick several messages** to forward, star or delete them together.
+- **Pick several messages** to forward, star or delete them together. Opening
+  another chat ends the selection.
 - **New chat** with `Ctrl+N`: search people by name or number, or type a
   number with its country code; WhatsApp confirms the number first.
 - A contact card's Message button opens a draft chat with that person.
@@ -175,6 +176,7 @@ them keeps the chat list warm in the resident service.
 |---|---|
 | `Ctrl+N` | New chat |
 | `Ctrl+K` | Go to a chat by name |
+| `Alt+1` … `Alt+9` | Open that position in the current chat list (search, view and account filter respected) |
 | `Ctrl+F` | Find in this conversation |
 | `Ctrl+B` | Hide or show the chat list (bold on a selection) |
 | `Tab` · `Shift+Tab` | From the sidebar, cycle All → Unread → To reply → Groups → chats (reverse with Shift); Archived joins when present. Focus activates each filter. |
