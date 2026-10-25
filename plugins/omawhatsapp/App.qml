@@ -2400,7 +2400,14 @@ Item {
         onActivated: root.openQuickSwitcher()
       }
 
+      // Qt already ignores window shortcuts while a modal or Esc-closable
+      // popup is open. Every dialog and menu here is one (only the passive
+      // format bar over a selection is not), so the popup clauses below are
+      // defence in depth, like !forwardPicker.opened above. Onboarding, a
+      // contact draft, Settings and the media viewer are plain items Qt cannot
+      // see: their clauses are the ones that keep Alt+N inert.
       Instantiator {
+        objectName: "chatPositionShortcuts"
         model: 9
         delegate: Shortcut {
           required property int index

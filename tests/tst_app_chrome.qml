@@ -36,6 +36,7 @@ TestCase {
       property bool railReady: true
       property bool offlineMode: false
       property bool syncActive: true
+      property bool needsOnboarding: false
       property bool notificationsEnabled: true
       property bool notificationsPreview: false
       property bool notifyAvailable: true
@@ -391,6 +392,55 @@ TestCase {
     compare(h.service.selectedChatJid, otherChat.jid, "other positions keep their defaults")
   }
 
+  // Onboarding and a contact draft are plain items, not popups, so Qt's own
+  // popup check does not cover them.
+  function test_alt_number_is_inert_during_onboarding_and_a_contact_draft() {
+    var h = createHarness({needsOnboarding: true})
+    verify(h.app.onboarding)
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, workChat.jid, "onboarding keeps the positions inactive")
+    h.service.needsOnboarding = false
+    h.app.focusComposer()
+    verify(h.app.openContactChat({ name: "Nobody Synthetic", digits: "15550009999", jid: "", has_chat: false },
+      { id: "card-message", sender: "Sam Rivera", from_me: false }))
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, workChat.jid, "a contact draft keeps the positions inactive")
+    verify(h.app.contactDraft !== null, "the draft stays open")
+    h.app.closeContactDraft()
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, otherChat.jid, "control: Alt+2 works once both are gone")
+  }
+
+  function test_alt_number_waits_for_any_popup_does_not_repeat_and_scrolls_to_the_row() {
+    var chats = []
+    for (var n = 0; n < 40; n++)
+      chats.push({account: "work", jid: "synthetic-" + n + "@example",
+        name: "Synthetic chat " + n, kind: "dm", unread: 0})
+    var h = createHarness({chats: chats})
+    h.service.selectChat(chats[20])
+    // A menu the Shortcut's own gate does not name: Qt's popup check holds it.
+    var menu = findChild(h.app, "chatContextMenu")
+    h.app.openChatContextMenu(chats[5], 10, 10)
+    tryCompare(menu, "opened", true)
+    keyClick(Qt.Key_2, Qt.AltModifier)
+    compare(h.service.selectedChatJid, chats[20].jid)
+    menu.close()
+    tryCompare(menu, "opened", false)
+    var positions = findChild(h.app, "chatPositionShortcuts")
+    compare(positions.count, 9)
+    for (var i = 0; i < 9; i++)
+      verify(!positions.objectAt(i).autoRepeat, "holding Alt+N opens one chat, once")
+    var list = chatListView(h.app)
+    list.positionViewAtEnd()
+    tryVerify(function() { return list.contentY > list.height })
+    keyClick(Qt.Key_3, Qt.AltModifier)
+    compare(h.service.selectedChatJid, chats[2].jid)
+    tryVerify(function() {
+      var row = list.itemAtIndex(2)
+      return row !== null && row.y >= list.contentY && row.y + row.height <= list.contentY + list.height
+    }, 1000, "the opened row scrolls into view")
+  }
+
   function test_switching_chats_by_any_path_ends_message_selection() {
     var third = {account: "work", jid: "third@example", name: "Synthetic third", kind: "dm", unread: 0}
     var picked = {id: "synthetic-picked", text: "Synthetic picked", sender: "Synthetic",
@@ -485,7 +535,7 @@ TestCase {
     compare(dialog.pending, null)
   }
 
-  function chatPreviewRow(app, index) {
+  function chatListView(app) {
     var list = null
     var queue = [app]
     while (queue.length > 0 && list === null) {
@@ -496,6 +546,11 @@ TestCase {
       if (item.contentItem) queue.push(item.contentItem)
     }
     verify(list !== null, "chat list")
+    return list
+  }
+
+  function chatPreviewRow(app, index) {
+    var list = chatListView(app)
     tryVerify(function() { return list.itemAtIndex(index) !== null })
     return list.itemAtIndex(index)
   }
