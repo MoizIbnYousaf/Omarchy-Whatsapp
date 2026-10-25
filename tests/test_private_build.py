@@ -120,9 +120,11 @@ class PrivateBuildTests(unittest.TestCase):
         return text
 
     def install_stand_ins(self) -> None:
-        """git answers for the pinned commit but applies for real; go and cc never compile."""
+        """git answers for the pinned commit but applies for real; go and cc never
+        compile, but go refuses a tree that lacks any patch's sentinel."""
         bin_dir = self.root / "bin"
         bin_dir.mkdir()
+        sentinels = [sentinel for *_, patch_sentinels in self.constants["PATCHES"] for sentinel in patch_sentinels]
         capability = json.dumps({"protocol": 1, "max_bytes": 65536, "build": self.constants["EXTENSION"]})
         binary = f"#!/bin/sh\necho '{capability}'\n"
         write_executable(bin_dir / "git", f"""#!{sys.executable}
@@ -146,6 +148,9 @@ args = sys.argv[1:]
 if args == ["version"]:
     print("go version synthetic")
 elif args[:1] == ["build"]:
+    for path, text in {sentinels!r}:
+        if not Path(path).is_file() or text not in Path(path).read_text():
+            sys.exit("unpatched tree: " + path)
     output = Path(args[args.index("-o") + 1])
     output.write_text({binary!r})
     output.chmod(0o755)
