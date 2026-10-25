@@ -370,31 +370,47 @@ SHORTCUT_SEQUENCE = re.compile(
     r"Backspace|Delete|Up|Down|Left|Right|PageUp|PageDown|Home|End|Insert|F(?:[1-9]|[12][0-9]|3[0-5]))")
 
 
-def valid_shortcuts(value: Any) -> bool:
-    if not isinstance(value, dict) or len(value) > len(SHORTCUT_ACTIONS):
+def valid_shortcut_binding(name: str, sequences: Any) -> bool:
+    if name not in SHORTCUT_ACTIONS or not isinstance(sequences, list) or len(sequences) > 3:
         return False
-    for name, sequences in value.items():
-        if name not in SHORTCUT_ACTIONS or not isinstance(sequences, list) or len(sequences) > 3:
+    if any(not isinstance(seq, str) or len(seq) > 64 or not SHORTCUT_SEQUENCE.fullmatch(seq)
+           for seq in sequences) or len(set(sequences)) != len(sequences):
+        return False
+    for seq in sequences:
+        key_name = re.sub(r"^(?:(?:Ctrl|Alt|Shift|Meta)\+)*", "", seq)
+        if len(key_name) == 1 and key_name.islower():
             return False
-        if any(not isinstance(seq, str) or len(seq) > 64 or not SHORTCUT_SEQUENCE.fullmatch(seq)
-               for seq in sequences) or len(set(sequences)) != len(sequences):
+        parts = [part for part in re.match(r"(?:(?:Ctrl|Alt|Shift|Meta)\+)*", seq).group(0).split("+") if part]
+        if len(set(parts)) != len(parts) or parts != sorted(parts, key=lambda x: ["Ctrl", "Alt", "Shift", "Meta"].index(x)):
             return False
-        for seq in sequences:
-            key_name = re.sub(r"^(?:(?:Ctrl|Alt|Shift|Meta)\+)*", "", seq)
-            if len(key_name) == 1 and key_name.islower():
-                return False
-            parts = [part for part in re.match(r"(?:(?:Ctrl|Alt|Shift|Meta)\+)*", seq).group(0).split("+") if part]
-            if len(set(parts)) != len(parts) or parts != sorted(parts, key=lambda x: ["Ctrl", "Alt", "Shift", "Meta"].index(x)):
-                return False
-            if seq in {"Ctrl+A", "Ctrl+C", "Ctrl+X", "Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+Y"}:
-                return False
-            if seq == "Escape" and name not in {"back", "viewerClose"}:
-                return False
-            if SHORTCUT_ACTIONS[name]["scope"] in {"window", "composer", "forward"} and not (
-                    re.search(r"(?:Ctrl|Alt|Meta)\+", seq) or re.search(r"(?:^|\+)F[0-9]+$", seq)
-                    or (name == "send" and seq == "Enter")):
-                return False
+        if seq in {"Ctrl+A", "Ctrl+C", "Ctrl+X", "Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+Y"}:
+            return False
+        if seq == "Escape" and name not in {"back", "viewerClose"}:
+            return False
+        if SHORTCUT_ACTIONS[name]["scope"] in {"window", "composer", "forward"} and not (
+                re.search(r"(?:Ctrl|Alt|Meta)\+", seq) or re.search(r"(?:^|\+)F[0-9]+$", seq)
+                or (name == "send" and seq == "Enter")):
+            return False
     return True
+
+
+def valid_shortcuts(value: Any) -> bool:
+    return isinstance(value, dict) and len(value) <= len(SHORTCUT_ACTIONS) and all(
+        valid_shortcut_binding(name, sequences) for name, sequences in value.items())
+
+
+def saved_shortcuts(value: Any) -> dict[str, list[str]]:
+    """The saved bindings this release can use.
+
+    Writes stay strict, but a map left by another release can name actions
+    this one lacks or keys it does not accept. Dropping just those entries
+    keeps every binding that is still valid here through a rollback or an
+    upgrade; a dropped action inherits its default like any absent one.
+    """
+    if not isinstance(value, dict):
+        return {}
+    return {name: sequences for name, sequences in value.items()
+            if valid_shortcut_binding(name, sequences)}
 
 
 def shortcut_bindings(value: dict[str, Any], item: dict[str, Any], enter_sends: bool = True) -> list[str]:
@@ -1979,8 +1995,8 @@ class Backend:
         # rest of this normalization, the result is stored by the next
         # preferences write, after which an adopted [] is an ordinary saved
         # choice, as Settings would save it with the whole published map.
-        shortcuts = value.get("shortcuts", {}) if valid_shortcuts(value.get("shortcuts", {})) else {}
-        shortcuts = adopt_shortcut_defaults(shortcuts, ui_preference(value, "enter_sends"))
+        shortcuts = adopt_shortcut_defaults(saved_shortcuts(value.get("shortcuts")),
+                                            ui_preference(value, "enter_sends"))
         return {
             "version": PREFERENCES_VERSION,
             "show_unread_count": value.get("show_unread_count") is not False,

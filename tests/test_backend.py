@@ -2364,6 +2364,38 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(backend_module.adopt_shortcut_defaults({"back": ["Enter"]}, False),
                          {"back": ["Enter"], "openChat": []})
 
+    def test_reading_a_map_from_another_release_keeps_every_valid_binding(self) -> None:
+        # Rolling back from, or forward to, a release with other actions or keys.
+        target = self._saved_preferences({"shortcuts": {
+            "find": ["Ctrl+Alt+F"], "chat2": ["Alt+G"],
+            "futureAction": ["Ctrl+Alt+X"], **{f"later{n}": [] for n in range(60)},
+            "newChat": "Ctrl+N", "quit": ["Ctrl+Q", "Ctrl+Q"], "documents": ["Hyper+O"],
+            "photos": ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4"], "paste": ["Ctrl+C"],
+            # Typing-safe rules still hold: a bare key never reaches a window action.
+            "switchChat": ["K"],
+            # Its default would collide with a kept binding, so it is unbound.
+            "record": ["Escape"], "italic": ["Ctrl+Shift+V"],
+        }})
+        published = {"find": ["Ctrl+Alt+F"], "chat2": ["Alt+G"],
+                     "italic": ["Ctrl+Shift+V"], "record": []}
+        self.assertEqual(self.backend.settings()["shortcuts"], published)
+        self.assertEqual(self.backend.status()["shortcuts"], published)
+        self.assertEqual(backend_module.shortcut_conflict(published, True), "")
+        self.backend.settings({"enter_sends": False})
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["shortcuts"], published)
+        for raw in (None, [], "Ctrl+F", 7, {"find": None}, {"": ["Ctrl+F"]}):
+            with self.subTest(raw=raw):
+                self._saved_preferences({"shortcuts": raw})
+                self.assertEqual(self.backend.settings()["shortcuts"], {})
+        # Writes stay strict: one unknown or invalid entry refuses the whole map.
+        self._saved_preferences({"shortcuts": {"find": ["Ctrl+Alt+F"]}})
+        for value in ({"find": ["Ctrl+Alt+G"], "futureAction": ["Ctrl+Alt+X"]},
+                      {"find": ["Ctrl+Alt+G"], "newChat": "Ctrl+N"}):
+            with self.subTest(value=value):
+                with self.assertRaises(backend_module.OmaWhatsAppError):
+                    self.backend.settings({"shortcuts": value})
+                self.assertEqual(self.backend.settings()["shortcuts"], {"find": ["Ctrl+Alt+F"]})
+
     def test_sender_receipts_require_separate_opt_in(self) -> None:
         completed = subprocess.CompletedProcess([], 0, '{"success":true}', "")
         self.assertFalse(self.backend.settings()["sender_read_receipts"])

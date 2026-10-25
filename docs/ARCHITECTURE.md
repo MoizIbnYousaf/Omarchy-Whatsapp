@@ -227,6 +227,9 @@ three agree. Only known action IDs and up to three canonical key strings per
 action are accepted. There are no command strings or executable passthroughs.
 The helper validates the complete map, rejects conflicts in overlapping contexts,
 and saves it through the existing locked, atomic private preferences path.
+Reading is tolerant per entry: an unknown action ID or an entry this release
+would not accept, as left by another release, is dropped on its own, so a
+rollback or upgrade keeps every other saved binding.
 Absent entries inherit defaults; an empty list disables a binding. A saved
 binding wins over a default added after it: when an absent action's default
 keys would conflict with a saved binding, the helper publishes that action as
