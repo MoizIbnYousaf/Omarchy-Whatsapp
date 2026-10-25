@@ -65,4 +65,15 @@ class PrivateTransportTests(unittest.TestCase):
    self.assertFalse(backend._private_transport_supported())
    binary.write_text('#!/bin/sh\necho \'{"protocol":1,"max_bytes":65536}\'\n');os.utime(binary,ns=(1,10**18))
    self.assertTrue(backend._private_transport_supported(),'a replaced binary is probed again')
+ def test_build_label_is_shown_and_older_private_builds_stay_supported(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp);binary=root/'wacli'
+   backend=core.Backend(store_dir=root/'store',state_dir=root/'state',wacli=binary,account_config=root/'none')
+   cases=[('{"protocol":1,"max_bytes":65536}',''),
+          ('{"protocol":1,"max_bytes":65536,"build":"omawhatsapp.3"}','omawhatsapp.3'),
+          ('{"protocol":1,"max_bytes":65536,"build":"<synthetic label>"}','')]
+   for index,(capability,label) in enumerate(cases):
+    binary.write_text("#!/bin/sh\necho '"+capability+"'\n");binary.chmod(0o700);os.utime(binary,ns=(1,10**18+index))
+    self.assertTrue(backend._private_transport_supported(),capability)
+    self.assertEqual(backend._private_transport_build(),label)
 if __name__=='__main__':unittest.main()
