@@ -1,6 +1,7 @@
 import QtQml
 import QtQuick
 import QtTest
+import MediaFixtures
 import QtMultimedia
 import "../plugins/omawhatsapp" as Oma
 import "../plugins/omawhatsapp/MediaModel.js" as MediaModel
@@ -123,7 +124,7 @@ TestCase {
   }
 
   function fixturePath(name) {
-    var url = String(Qt.resolvedUrl(".generated-media/" + name))
+    var url = String(MediaFixtures.url(name))
     return decodeURIComponent(url.slice(7))
   }
 

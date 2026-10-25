@@ -28,8 +28,9 @@ interactive restrictions, bounded parallel account probes, compensating
 service rollback, and a fake-wacli end-to-end JSON invocation. The release script
 also runs an isolated, read-only install preflight—including the bundled agent
 skill safety contract—and compares the shipped registry with the installed
-wacli help tree. Offscreen QML coverage uses generated MP4, GIF, and WebP
-fixtures and exercises cross-window playback leasing, account-identical JIDs,
+wacli help tree. Offscreen QML coverage uses MP4, GIF, and WebP fixtures,
+generated in the gate's temporary folder as the `MediaFixtures` QML module,
+and exercises cross-window playback leasing, account-identical JIDs,
 account-filter purity, private local avatars, missing-video transitions, and
 file-picker/action interleavings. Setup tests run the first-run setup in an
 isolated home: links into the checkout, rendered units with the found wacli,
@@ -40,6 +41,17 @@ check that `bin/earlier-copies.json` is exactly what `scripts/earlier-copies`
 derives from it. The gate also copies only the distributed files into
 an empty home's plugins folder, as `omarchy plugin add` would, validates it,
 and checks that its helper finds itself there.
+
+To run one of the media QML tests on its own, generate that module first:
+
+```bash
+fixtures=$(mktemp -d)
+python3 tests/write_media_fixtures.py "$fixtures"
+QT_QPA_PLATFORM=offscreen WAYLAND_DISPLAY=/nonexistent/omawhatsapp-test \
+  /usr/lib/qt6/bin/qmltestrunner -input tests/tst_safe_animation.qml \
+  -import "$(./scripts/build-inputs)" -import "$fixtures" \
+  -import tests/imports -import plugins/omawhatsapp -o -,txt
+```
 
 ## Live local verification
 

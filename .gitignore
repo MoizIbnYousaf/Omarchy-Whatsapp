@@ -18,5 +18,6 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 
-# Synthetic test fixtures are generated for each verification run.
+# Earlier release gates generated synthetic media here; keep a leftover copy
+# out of commits and plugin copies.
 tests/.generated-media/

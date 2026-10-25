@@ -26,20 +26,15 @@ qml_test_runner=/usr/lib/qt6/bin/qmltestrunner
   exit 1
 }
 
-media_fixture_root="$repo_root/tests/.generated-media"
-[[ ! -e $media_fixture_root ]] || {
-  echo "test: generated media path already exists: $media_fixture_root" >&2
-  exit 1
-}
-mkdir -- "$media_fixture_root"
 plugin_home=$(mktemp -d)
 cleanup_test_fixtures() {
-  find "$media_fixture_root" -maxdepth 1 -type f -delete
-  rmdir -- "$media_fixture_root"
   rm -rf -- "$plugin_home"
 }
 trap cleanup_test_fixtures EXIT
-python3 tests/write_media_fixtures.py "$media_fixture_root"
+# The QML tests' synthetic media, as the MediaFixtures module in this
+# temporary folder rather than the checkout the shell may be watching.
+media_import_root="$plugin_home/media-imports"
+python3 tests/write_media_fixtures.py "$media_import_root"
 
 inputs_import_root=$(./scripts/build-inputs)
 export QML_IMPORT_PATH="$inputs_import_root${QML_IMPORT_PATH:+:$QML_IMPORT_PATH}"
@@ -67,7 +62,6 @@ QT_QPA_PLATFORM=offscreen "$plugin_home/paste-reader"
 checkout="$plugin_home/.config/omarchy/plugins/io.github.moizibnyousaf.omawhatsapp"
 mkdir -p -- "$checkout"
 git ls-files -z --cached --others --exclude-standard \
-  | grep -zv '^tests/\.generated-media/' \
   | while IFS= read -r -d '' file; do
       # Regular files only: a nested checkout (CI keeps Omarchy's source in
       # .omarchy/) is listed as a directory and is not part of the plugin.
@@ -95,6 +89,7 @@ while IFS= read -r -d '' qml_test; do
   QT_QPA_PLATFORM=offscreen WAYLAND_DISPLAY=/nonexistent/omawhatsapp-test "$qml_test_runner" \
     -input "$qml_test" \
     -import "$inputs_import_root" \
+    -import "$media_import_root" \
     -import "$repo_root/tests/imports" \
     -import "$repo_root/plugins/omawhatsapp" \
     -o -,txt
