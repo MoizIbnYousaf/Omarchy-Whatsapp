@@ -215,6 +215,12 @@ patched dependency with read-only dispatch and no account store or network
 access. It checks the `omawhatsapp.3` build label and, through a synthetic sync
 delegate (a held lock and socket in an empty temporary store), the fixed
 not-sent, outcome-unknown and generic private-mode messages.
+`test_private_build.py` runs a copy of the builder against generated patches and
+stand-ins for the source checkout, Go and the compiler, with only `git apply`
+real. Under a translated locale (German or Brazilian Portuguese; skipped where git
+has no message catalogs, as in a minimal container) and inside an enclosing git
+repository, every patch must still apply and be recorded, and a patch that does
+not apply must fail with git's untranslated report.
 The CI private-transport job builds the three bundled patches against the exact
 audited upstream commit, runs plain/FTS dependency tests, a `-race` run of the
 queue, read-mark and outcome tests and vet, and publishes every patch digest.

@@ -63,11 +63,12 @@ The builder refuses a different upstream HEAD and exports only committed source
 (ignoring working-tree edits). It reads each patch once, records the SHA256 of
 exactly those bytes, and applies them in order through `git apply` on stdin with
 no enclosing repository, failing if any file is skipped or a patch's sentinel is
-missing. It then runs plain/FTS tests, a `-race` run of the queue, read-mark and
-outcome tests and Go vet, builds locally, and checks the protocol and build label
-before producing the output. It does not install anything or start WhatsApp.
-Installation happens only in the final explicit commands after a successful
-build. No account relinking or store migration is needed.
+missing. It reads git's report untranslated (`LC_ALL=C`), so the build works the
+same in every locale. It then runs plain/FTS tests, a `-race` run of the queue,
+read-mark and outcome tests and Go vet, builds locally, and checks the protocol
+and build label before producing the output. It does not install anything or
+start WhatsApp. Installation happens only in the final explicit commands after a
+successful build. No account relinking or store migration is needed.
 
 ## Verify the upstream backport
 

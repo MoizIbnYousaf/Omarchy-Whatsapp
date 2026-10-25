@@ -46,8 +46,9 @@ with tempfile.TemporaryDirectory(prefix="omawhatsapp-wacli-") as temp:
  source_digest=hashlib.sha256(archive.read_bytes()).hexdigest()
  archive.unlink()
  # Never let git find an enclosing repository: it would silently skip paths.
- git_env={k:v for k,v in os.environ.items() if k not in ("GIT_DIR","GIT_WORK_TREE","GIT_INDEX_FILE")}
- git_env["GIT_CEILING_DIRECTORIES"]=str(root.parent)
+ # Its report is checked below, so keep its messages untranslated.
+ git_env={k:v for k,v in os.environ.items() if k not in ("GIT_DIR","GIT_WORK_TREE","GIT_INDEX_FILE","LANGUAGE")}
+ git_env["GIT_CEILING_DIRECTORIES"]=str(root.parent);git_env["LC_ALL"]="C"
  for key,name,flags,sentinels,data in patches:
   files={line.split()[-1].split("/",1)[1] for line in data.decode().splitlines() if line.startswith("diff --git ")}
   result=subprocess.run(["git","apply","--verbose",*flags,"-"],input=data,cwd=root,env=git_env,capture_output=True)
