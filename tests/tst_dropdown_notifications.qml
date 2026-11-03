@@ -49,9 +49,13 @@ TestCase {
       property string helperPath: "/synthetic/bin/omawhatsapp"
       property bool zenityAvailable: true
       property var savedMedia: null
+      property bool saveAccepts: true
+      property string errorText: ""
+      signal writeFailed(string message, var chatRef, var details, string owner)
+      signal writeCompleted(string kind, var chatRef, var request, string owner)
       function saveMedia(target, item, path, owner) {
         savedMedia = { target: target, item: item, path: path, owner: owner }
-        return true
+        return saveAccepts
       }
     }
   }
@@ -303,6 +307,30 @@ TestCase {
     compare(h.service.savedMedia.target.jid, "original@example")
     compare(h.service.savedMedia.item.id, "photo")
     compare(h.service.savedMedia.path, "/synthetic/trip.jpg")
+    h.dropdown.close()
+  }
+
+  function test_save_refusal_and_late_failure_keep_visible_review_without_retry() {
+    var h = saveHarness()
+    finishSavePicker(h, "/synthetic/trip.jpg", 0)
+    h.service.saveAccepts = false
+    h.service.errorText = "Another operation is running"
+    verify(!h.dropdown.confirmSave())
+    verify(h.dropdown.saveConfirmOpen)
+    compare(h.dropdown.pendingSave.path, "/synthetic/trip.jpg")
+    verify(h.dropdown.saveErrorText.indexOf("Another operation") >= 0)
+    h.service.saveAccepts = true
+    verify(h.dropdown.confirmSave())
+    verify(!h.dropdown.saveConfirmOpen)
+    verify(!h.dropdown.saveMediaAs({id: "second"}), "wait for the active save result")
+    h.dropdown.close()
+    h.service.writeFailed("Destination is read-only", h.service.savedMedia.target,
+      {kind: "save-media"}, "dropdown")
+    verify(h.dropdown.opened)
+    verify(h.dropdown.saveConfirmOpen)
+    compare(h.dropdown.pendingSave.path, "/synthetic/trip.jpg")
+    compare(h.dropdown.saveErrorText, "Destination is read-only")
+    h.dropdown.cancelSave()
     h.dropdown.close()
   }
 

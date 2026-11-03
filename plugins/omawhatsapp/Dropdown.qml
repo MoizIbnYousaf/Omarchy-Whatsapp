@@ -55,6 +55,8 @@ Panel {
   property bool clearConfirmOpen: false
   property bool saveConfirmOpen: false
   property var pendingSave: null
+  property var activeSave: null
+  property string saveErrorText: ""
   property bool demoNotificationsCleared: false
   property string demoPlaybackId: ""
   property int composerMaxLines: service ? service.composerMaxLines : 6
@@ -638,7 +640,7 @@ Panel {
   // copies the attachment (downloading it first when it is not local yet).
   // Saving stays available even if the mini client closes meanwhile.
   function saveMediaAs(item) {
-    if (!item || !item.id || savePickerProcess.running || saveConfirmOpen) return false
+    if (!item || !item.id || savePickerProcess.running || saveConfirmOpen || activeSave !== null) return false
     var origin = currentChatRef()
     if (origin.jid === "" || demoMode || !service) return false
     if (!zenityReady()) return false
@@ -651,21 +653,41 @@ Panel {
     return true
   }
 
+  function showSaveConfirmation(action, error) {
+    pendingSave = action
+    saveErrorText = String(error || "")
+    saveConfirmOpen = true
+    if (!opened && service) {
+      service.dropdownOpen = true
+      controller.show()
+    }
+    Qt.callLater(function() { if (root.opened) saveConfirmKeys.forceActiveFocus() })
+  }
+
   function confirmSave() {
     var action = pendingSave
+    if (!action || !service) return false
+    // Refusals can be synchronous. Keep the captured destination and consent
+    // visible, and never retry automatically or replace an active operation.
+    activeSave = action
+    var started = service.saveMedia(action.target, action.item, action.path, "dropdown")
+    if (!started) {
+      activeSave = null
+      showSaveConfirmation(action, service.errorText || "Saving could not start. Finish the current operation and try again.")
+      return false
+    }
     pendingSave = null
     saveConfirmOpen = false
-    if (!action || !service) return false
-    // A refusal sets the real reason through writeFailed; don't bury it.
-    var started = service.saveMedia(action.target, action.item, action.path, "dropdown")
-    if (started) errorText = ""
+    saveErrorText = ""
+    errorText = ""
     Qt.callLater(function() { if (root.opened) keyCatcher.forceActiveFocus() })
-    return started
+    return true
   }
 
   function cancelSave() {
     pendingSave = null
     saveConfirmOpen = false
+    saveErrorText = ""
     Qt.callLater(function() { if (root.opened) keyCatcher.forceActiveFocus() })
   }
 
@@ -847,6 +869,11 @@ Panel {
     }
     function onWriteCompleted(kind, chatRef, request, owner) {
       if (!ComposerModel.ownsOperation(owner, "dropdown")) return
+      if (kind === "save-media" && root.activeSave
+          && AccountModel.sameRef(chatRef, root.activeSave.target)) {
+        root.activeSave = null
+        return
+      }
       var intent = root.pendingWriteIntent
       if (ComposerModel.validWriteIntent(intent)) {
         if (!ComposerModel.writeIntentMatches(intent, chatRef, kind)) return
@@ -876,6 +903,13 @@ Panel {
     }
     function onWriteFailed(message, chatRef, details, owner) {
       if (!ComposerModel.ownsOperation(owner, "dropdown")) return
+      if (root.activeSave && AccountModel.sameRef(chatRef, root.activeSave.target)
+          && details && details.kind === "save-media") {
+        var action = root.activeSave
+        root.activeSave = null
+        root.showSaveConfirmation(action, message || "Attachment could not be saved.")
+        return
+      }
       var intent = root.pendingWriteIntent
       if (ComposerModel.validWriteIntent(intent)) {
         if (!ComposerModel.writeIntentMatches(intent, chatRef,
@@ -979,15 +1013,8 @@ Panel {
       if (exitCode !== 0 || chosen.charAt(0) !== "/" || !root.service) return
       // Ask before replacing an existing file, exactly as the full app does,
       // then hand the exact destination to the helper.
-      root.pendingSave = { target: target, item: attachment, path: chosen }
-      root.saveConfirmOpen = true
-      // A native picker takes focus and may dismiss the bar panel. Show the
-      // exact pending confirmation without openFor() resetting its state.
-      if (!root.opened) {
-        root.service.dropdownOpen = true
-        controller.show()
-      }
-      Qt.callLater(function() { if (root.opened) saveConfirmKeys.forceActiveFocus() })
+      // The native picker can dismiss the bar; restore only this review.
+      root.showSaveConfirmation({target: target, item: attachment, path: chosen}, "")
     }
   }
 
@@ -2503,7 +2530,8 @@ Panel {
             objectName: "dropdownSaveConfirm"
             anchors.fill: parent
             opened: root.saveConfirmOpen
-            message: "Any existing file at this location will be replaced.\n\n"
+            message: (root.saveErrorText !== "" ? root.saveErrorText + "\n\n" : "")
+              + "Any existing file at this location will be replaced.\n\n"
               + String(root.pendingSave ? root.pendingSave.path : "")
             confirmText: "Save"
             background: root.background
