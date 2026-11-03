@@ -1408,7 +1408,8 @@ Item {
     savePickerProcess.originRef = AccountModel.chatRef(origin.account, origin.jid)
     savePickerProcess.command = ["/usr/bin/zenity", "--file-selection", "--save",
       "--title=Save attachment",
-      "--filename=" + String(Quickshell.env("HOME") || "") + "/Downloads/attachment"]
+      "--filename=" + String(Quickshell.env("HOME") || "") + "/Downloads/"
+        + AccountModel.saveNameFor(item)]
     savePickerProcess.running = true
     return true
   }

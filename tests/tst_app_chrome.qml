@@ -1373,7 +1373,17 @@ TestCase {
     verify(process.command.indexOf("--save") >= 0)
     verify(process.command.indexOf("--confirm-overwrite") < 0, "the app confirms the exact destination separately")
     verify(process.command.filter(function(arg) {
-      return arg.indexOf("--filename=") === 0 && arg.endsWith("/Downloads/attachment") }).length === 1)
+      return arg.indexOf("--filename=") === 0 && arg.endsWith("/Downloads/trip.jpg") }).length === 1)
+  }
+
+  function test_save_as_falls_back_to_an_extension_when_the_name_is_missing() {
+    var harness = createHarness()
+    var app = harness.app
+    verify(app.saveMediaAs({ id: "photo", media_type: "image", mime_type: "image/jpeg" }))
+    var process = findChild(app, "savePickerProcess")
+    verify(process.running)
+    verify(process.command.filter(function(arg) {
+      return arg.indexOf("--filename=") === 0 && arg.endsWith("/Downloads/photo.jpg") }).length === 1)
   }
 
   function test_app_reports_when_the_conversation_is_on_screen() {

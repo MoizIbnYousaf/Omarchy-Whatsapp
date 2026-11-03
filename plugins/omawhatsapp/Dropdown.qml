@@ -53,6 +53,8 @@ Panel {
   property string errorText: ""
   property bool copiedVisible: false
   property bool clearConfirmOpen: false
+  property bool saveConfirmOpen: false
+  property var pendingSave: null
   property bool demoNotificationsCleared: false
   property string demoPlaybackId: ""
   property int composerMaxLines: service ? service.composerMaxLines : 6
@@ -271,6 +273,8 @@ Panel {
     if (!demoMode && service) service.discardStages(pendingAttachments)
     demoMode = realData === false
     clearConfirmOpen = false
+    saveConfirmOpen = false
+    pendingSave = null
     demoNotificationsCleared = false
     searchText = ""
     selectedIndex = 0
@@ -321,6 +325,8 @@ Panel {
     searchField.focus = false
     composer.focus = false
     clearConfirmOpen = false
+    saveConfirmOpen = false
+    pendingSave = null
     stopPlayback()
     if (!demoMode && service) service.stopVoiceForSurfaceClose()
     if (!demoMode && service) service.dropdownOpen = false
@@ -619,6 +625,51 @@ Panel {
     filePickerProcess.running = true
   }
 
+  function zenityReady() {
+    if (demoMode || !service) return false
+    if (service.zenityAvailable === false) {
+      errorText = "Saving needs zenity (omarchy pkg add zenity)."
+      return false
+    }
+    return true
+  }
+
+  // Save as…: the same zenity save dialog as the full app, then the helper
+  // copies the attachment (downloading it first when it is not local yet).
+  // Saving stays available even if the mini client closes meanwhile.
+  function saveMediaAs(item) {
+    if (!item || !item.id || savePickerProcess.running) return false
+    var origin = currentChatRef()
+    if (origin.jid === "" || demoMode || !service) return false
+    if (!zenityReady()) return false
+    savePickerProcess.item = item
+    savePickerProcess.originRef = AccountModel.chatRef(origin.account, origin.jid)
+    savePickerProcess.command = ["/usr/bin/zenity", "--file-selection", "--save",
+      "--title=Save attachment",
+      "--filename=" + String(Quickshell.env("HOME") || "") + "/Downloads/"
+        + AccountModel.saveNameFor(item)]
+    savePickerProcess.running = true
+    return true
+  }
+
+  function confirmSave() {
+    var action = pendingSave
+    pendingSave = null
+    saveConfirmOpen = false
+    if (!action || !service) return false
+    // A refusal sets the real reason through writeFailed; don't bury it.
+    var started = service.saveMedia(action.target, action.item, action.path, "dropdown")
+    if (started) errorText = ""
+    Qt.callLater(function() { if (root.opened) keyCatcher.forceActiveFocus() })
+    return started
+  }
+
+  function cancelSave() {
+    pendingSave = null
+    saveConfirmOpen = false
+    Qt.callLater(function() { if (root.opened) keyCatcher.forceActiveFocus() })
+  }
+
   function sendDraft() {
     var text = String(composer.text || "").trim()
     if (text === "" && pendingAttachments.length === 0) return
@@ -904,6 +955,25 @@ Panel {
     }
   }
 
+  Process {
+    id: savePickerProcess
+    objectName: "dropdownSavePicker"
+    property var item: null
+    property var originRef: AccountModel.chatRef("", "")
+    command: []
+    stdout: StdioCollector { id: dropdownSavePickerOutput }
+    onExited: function(exitCode) {
+      var target = originRef
+      var chosen = String(dropdownSavePickerOutput.text || "").trim()
+      originRef = AccountModel.chatRef("", "")
+      if (exitCode !== 0 || chosen.charAt(0) !== "/" || !root.service) return
+      // Ask before replacing an existing file, exactly as the full app does,
+      // then hand the exact destination to the helper.
+      root.pendingSave = { target: target, item: item, path: chosen }
+      root.saveConfirmOpen = true
+    }
+  }
+
   Timer {
     id: copiedTimer
     interval: 1600
@@ -926,7 +996,7 @@ Panel {
       shortcuts: root.shortcutOverrides
       anchors.fill: parent
       blocked: searchField.activeFocus || composer.activeFocus
-        || root.clearConfirmOpen
+        || root.clearConfirmOpen || root.saveConfirmOpen
       onMoveRequested: function(dx, dy) {
         if (dy !== 0) root.moveSelection(dy)
         else if (dx !== 0 && root.viewMode === "chats") root.switchPanel(dx)
@@ -1789,6 +1859,7 @@ Panel {
               }
               MessageBubble {
                 id: compactMessage
+                objectName: "compactMessage"
                 anchors.top: compactUnread.bottom
                 timeFormat: root.timeFormat
                 width: parent.width
@@ -1837,6 +1908,7 @@ Panel {
                 }
                 onForwardRequested: root.forwardInFullApp(modelData)
                 onCopyRequested: function(text) { root.copyText(text) }
+                onSaveRequested: root.saveMediaAs(modelData)
                 onPollVoteRequested: function(options) {
                   if (!root.demoMode && root.service)
                     root.service.votePoll(root.currentChatRef(), modelData, options, "dropdown")
@@ -2393,6 +2465,38 @@ Panel {
               onCanceled: root.cancelClearNotifications()
               onConfirmed: root.confirmClearNotifications()
             }
+          }
+        }
+
+        // Saving lives on both views (a bubble is in the conversation), so the
+        // confirmation sits above them rather than inside one branch.
+        Item {
+          id: saveConfirmKeys
+          anchors.fill: parent
+          visible: root.saveConfirmOpen
+          focus: visible
+          z: 30
+          Keys.priority: Keys.BeforeItem
+          Keys.onPressed: function(event) {
+            if (saveConfirm.handleKey(event)) event.accepted = true
+          }
+
+          ConfirmDialog {
+            id: saveConfirm
+            objectName: "dropdownSaveConfirm"
+            anchors.fill: parent
+            opened: root.saveConfirmOpen
+            message: "Any existing file at this location will be replaced.\n\n"
+              + String(root.pendingSave ? root.pendingSave.path : "")
+            confirmText: "Save"
+            background: root.background
+            foreground: root.foreground
+            selectedBackground: root.selected
+            selectedText: root.accent
+            fontFamily: root.fontFamily
+            cornerRadius: Style.cornerRadius
+            onCanceled: root.cancelSave()
+            onConfirmed: root.confirmSave()
           }
         }
       }

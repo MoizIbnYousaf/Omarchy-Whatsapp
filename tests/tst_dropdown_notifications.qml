@@ -46,6 +46,12 @@ TestCase {
         return true
       }
       function pasteClipboard(ref, owner) { pastes += 1; return true }
+      property bool zenityAvailable: true
+      property var savedMedia: null
+      function saveMedia(target, item, path, owner) {
+        savedMedia = { target: target, item: item, path: path, owner: owner }
+        return true
+      }
     }
   }
 
@@ -260,5 +266,51 @@ TestCase {
     compare(handed.jid, "x@s.whatsapp.net")
     compare(handed.contact.digits, "15550009999")
     compare(handed.contact.shared_by, "Sam")
+  }
+
+  function test_save_as_from_the_bubble_opens_a_dialog_named_for_the_attachment() {
+    // The owner's report: "Save as…" in the mini client did nothing at all.
+    var service = createTemporaryObject(serviceStub, testCase)
+    service.writing = false
+    service.messages = [{ id: "photo", media_type: "image", mime_type: "image/jpeg",
+      filename: "trip.jpg", local_path: "", from_me: false, text: "" }]
+    var dropdown = createTemporaryObject(dropdownComponent, testCase,
+      { demoMode: false, service: service })
+    dropdown.open()
+    dropdown.openConversation({ account: "work", jid: "x@s.whatsapp.net", name: "X" })
+
+    var bubble = null
+    tryVerify(function() {
+      bubble = findChild(dropdown, "compactMessage")
+      return bubble !== null
+    })
+    bubble.runMenuAction("save")
+
+    var picker = findChild(dropdown, "dropdownSavePicker")
+    verify(picker !== null)
+    verify(picker.running)
+    verify(picker.command.indexOf("--save") >= 0)
+    verify(picker.command.filter(function(arg) {
+      return arg.indexOf("--filename=") === 0 && arg.endsWith("/Downloads/trip.jpg") }).length === 1)
+    dropdown.close()
+  }
+
+  function test_the_confirmed_destination_is_saved_through_the_helper() {
+    var service = createTemporaryObject(serviceStub, testCase)
+    service.writing = false
+    var dropdown = createTemporaryObject(dropdownComponent, testCase,
+      { demoMode: false, service: service })
+    dropdown.open()
+    dropdown.openConversation({ account: "work", jid: "x@s.whatsapp.net", name: "X" })
+
+    var item = { id: "photo", media_type: "image", filename: "trip.jpg" }
+    dropdown.pendingSave = { target: dropdown.currentChatRef(), item: item,
+      path: "/home/synthetic/Downloads/trip.jpg" }
+    dropdown.saveConfirmOpen = true
+    verify(dropdown.confirmSave())
+    compare(service.savedMedia.path, "/home/synthetic/Downloads/trip.jpg")
+    compare(service.savedMedia.owner, "dropdown")
+    compare(dropdown.saveConfirmOpen, false)
+    dropdown.close()
   }
 }

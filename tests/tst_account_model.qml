@@ -193,6 +193,24 @@ TestCase {
     compare(AccountModel.viewCount(chats, "", "archived"), 1)
   }
 
+  function test_save_as_suggests_the_attachment_name_not_a_placeholder() {
+    // The owner's report: "Save as…" always suggested "attachment", losing the
+    // original name and its extension.
+    compare(AccountModel.saveNameFor({ filename: "trip.jpg" }), "trip.jpg")
+    compare(AccountModel.saveNameFor({ local_path: "/private/media/trip.jpg" }), "trip.jpg")
+    compare(AccountModel.saveNameFor({ filename: "../../etc/passwd" }), "passwd")
+    compare(AccountModel.saveNameFor({ filename: "Rapport été.pdf" }), "Rapport été.pdf")
+    // A name without an extension gets one from the media type.
+    compare(AccountModel.saveNameFor({
+      filename: "IMG-20240101-WA0001", media_type: "image", mime_type: "image/jpeg"
+    }), "IMG-20240101-WA0001.jpg")
+    // No name at all: the message id plus the type's extension.
+    compare(AccountModel.saveNameFor({
+      id: "3EB0ABCD", media_type: "video", mime_type: "video/mp4"
+    }), "3EB0ABCD.mp4")
+    compare(AccountModel.saveNameFor({}), "attachment")
+  }
+
   function test_the_to_reply_view_keeps_people_whose_message_is_last() {
     var chats = [
       { account: "work", jid: "a", name: "Waiting", kind: "dm", timestamp: 10, last_from_me: false },

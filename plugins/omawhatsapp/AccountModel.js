@@ -321,3 +321,51 @@ function previewKindGlyph(kind) {
   return ({ photo: "󰄀", video: "󰕧", gif: "󰵸", sticker: "󰞅", voice: "󰍬",
     document: "󰈙", location: "󰍎" })[String(kind || "")] || ""
 }
+
+// The extensions a media type falls back to when an attachment carries no
+// name of its own, mirroring the helper's mimetypes guess.
+var MEDIA_EXTENSIONS = {
+  "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png",
+  "image/webp": ".webp", "image/gif": ".gif", "image/bmp": ".bmp",
+  "image/heic": ".heic", "image/heif": ".heif", "image/tiff": ".tiff",
+  "video/mp4": ".mp4", "video/3gpp": ".3gp", "video/quicktime": ".mov",
+  "video/webm": ".webm", "video/x-matroska": ".mkv",
+  "audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/aac": ".aac",
+  "audio/ogg": ".ogg", "audio/opus": ".opus", "audio/wav": ".wav",
+  "audio/x-wav": ".wav", "audio/flac": ".flac", "application/pdf": ".pdf"
+}
+
+function lastPathSegment(value) {
+  var parts = String(value || "").replace(/\\/g, "/").split("/")
+  return parts[parts.length - 1] || ""
+}
+
+function safeMediaName(value) {
+  return String(value || "").replace(/[^\p{L}\p{N}._\- ()]+/gu, "_")
+    .replace(/^[ .]+/, "").replace(/[ .]+$/, "").slice(0, 120)
+}
+
+function mediaExtension(item) {
+  var mime = String(item && item.mime_type || "").toLowerCase().split(";")[0].trim()
+  if (MEDIA_EXTENSIONS[mime]) return MEDIA_EXTENSIONS[mime]
+  var type = String(item && item.media_type || "").toLowerCase()
+  if (type === "image") return ".jpg"
+  if (type === "video") return ".mp4"
+  if (type === "audio") return ".ogg"
+  return ""
+}
+
+// The default name "Save as…" offers: the attachment's own name when it has
+// one, else its stored path, else the message id plus the media type's
+// extension. The full app and the mini client both use it.
+function saveNameFor(item) {
+  var name = safeMediaName(lastPathSegment(item && item.filename))
+  if (name === "") name = safeMediaName(lastPathSegment(item && item.local_path))
+  if (name === "") {
+    var stem = String(item && item.id || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 32)
+    name = safeMediaName(stem + mediaExtension(item))
+  } else if (name.indexOf(".") < 0) {
+    name = safeMediaName(name + mediaExtension(item))
+  }
+  return name || "attachment"
+}
