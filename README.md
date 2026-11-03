@@ -249,3 +249,8 @@ existing filesystem paths, systemd unit identities, or commands explicitly
 entered into a user's shell. The selected external file viewer necessarily
 receives the path of the file the user asked it to open. Avoid placing private
 values in manually entered process arguments or exported environment variables.
+
+Attachment **Save as…** works in the full app and bar dropdown. Its native GTK 4
+picker (the runtime installed with zenity) receives the suggested filename via
+stdin. A separate confirmation names the exact destination before replacement;
+canceling never exports a file. Long Unicode filenames retain their extension.

@@ -634,20 +634,19 @@ Panel {
     return true
   }
 
-  // Save as…: the same zenity save dialog as the full app, then the helper
+  // Save as…: the same private native save dialog as the full app, then the helper
   // copies the attachment (downloading it first when it is not local yet).
   // Saving stays available even if the mini client closes meanwhile.
   function saveMediaAs(item) {
-    if (!item || !item.id || savePickerProcess.running) return false
+    if (!item || !item.id || savePickerProcess.running || saveConfirmOpen) return false
     var origin = currentChatRef()
     if (origin.jid === "" || demoMode || !service) return false
     if (!zenityReady()) return false
     savePickerProcess.item = item
     savePickerProcess.originRef = AccountModel.chatRef(origin.account, origin.jid)
-    savePickerProcess.command = ["/usr/bin/zenity", "--file-selection", "--save",
-      "--title=Save attachment",
-      "--filename=" + String(Quickshell.env("HOME") || "") + "/Downloads/"
-        + AccountModel.saveNameFor(item)]
+    savePickerProcess.payload = JSON.stringify({name: AccountModel.saveNameFor(item)})
+    savePickerProcess.command = [decodeURIComponent(String(Qt.resolvedUrl("../../bin/omawhatsapp-save-picker")).replace(/^file:\/\//, ""))]
+    savePickerProcess.stdinEnabled = true
     savePickerProcess.running = true
     return true
   }
@@ -960,17 +959,35 @@ Panel {
     objectName: "dropdownSavePicker"
     property var item: null
     property var originRef: AccountModel.chatRef("", "")
+    property string payload: ""
+    onStarted: {
+      write(payload + "\n")
+      payload = ""
+      stdinEnabled = false
+    }
     command: []
     stdout: StdioCollector { id: dropdownSavePickerOutput }
     onExited: function(exitCode) {
       var target = originRef
-      var chosen = String(dropdownSavePickerOutput.text || "").trim()
+      var attachment = item
+      var chosen = ""
+      try { chosen = String(JSON.parse(dropdownSavePickerOutput.text).path || "") } catch (error) {}
       originRef = AccountModel.chatRef("", "")
+      item = null
+      payload = ""
+      if (exitCode > 1) root.errorText = "Save dialog unavailable. Check the GTK 4 runtime and desktop session."
       if (exitCode !== 0 || chosen.charAt(0) !== "/" || !root.service) return
       // Ask before replacing an existing file, exactly as the full app does,
       // then hand the exact destination to the helper.
-      root.pendingSave = { target: target, item: item, path: chosen }
+      root.pendingSave = { target: target, item: attachment, path: chosen }
       root.saveConfirmOpen = true
+      // A native picker takes focus and may dismiss the bar panel. Show the
+      // exact pending confirmation without openFor() resetting its state.
+      if (!root.opened) {
+        root.service.dropdownOpen = true
+        controller.show()
+      }
+      Qt.callLater(function() { if (root.opened) saveConfirmKeys.forceActiveFocus() })
     }
   }
 

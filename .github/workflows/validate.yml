@@ -31,7 +31,7 @@ jobs:
           pacman -Syu --noconfirm
           bash coreutils curl ffmpeg findutils gcc git inotify-tools jq make pkgconf python
           qt6-declarative qt6-imageformats kimageformats qt6-multimedia ripgrep systemd tar
-          util-linux wl-clipboard xdg-utils zenity
+          util-linux wl-clipboard xdg-utils zenity gtk4
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

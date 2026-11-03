@@ -1370,10 +1370,45 @@ TestCase {
     verify(app.saveMediaAs({ id: "photo", filename: "trip.jpg", media_type: "image" }))
     var process = findChild(app, "savePickerProcess")
     verify(process.running)
-    verify(process.command.indexOf("--save") >= 0)
+    verify(process.command[0].endsWith("omawhatsapp-save-picker"))
     verify(process.command.indexOf("--confirm-overwrite") < 0, "the app confirms the exact destination separately")
-    verify(process.command.filter(function(arg) {
-      return arg.indexOf("--filename=") === 0 && arg.endsWith("/Downloads/trip.jpg") }).length === 1)
+    compare(JSON.parse(process.payload).name, "trip.jpg")
+    verify(process.command.join(" ").indexOf("trip.jpg") < 0, "private name stays out of argv")
+  }
+
+  function test_native_save_picker_completion_keeps_target_and_exact_path() {
+    var h = createHarness()
+    verify(h.app.saveMediaAs({id: "photo", filename: "trip.jpg"}))
+    var picker = findChild(h.app, "savePickerProcess")
+    h.service.selectChat(otherChat)
+    picker.stdout.text = JSON.stringify({path: "/synthetic/ ends with space "})
+    picker.running = false
+    picker.exited(0)
+    var dialog = findChild(h.app, "outputConfirm")
+    tryCompare(dialog, "opened", true)
+    compare(h.service.savedOutput, null)
+    verify(!h.app.saveMediaAs({id: "another"}), "pending consent cannot be replaced")
+    dialog.accept()
+    compare(h.service.savedOutput.target.account, "work")
+    compare(h.service.savedOutput.target.jid, workChat.jid)
+    compare(h.service.savedOutput.path, "/synthetic/ ends with space ")
+    compare(picker.item, null)
+    compare(picker.payload, "")
+  }
+
+  function test_native_save_picker_cancel_and_malformed_output_never_export() {
+    var h = createHarness()
+    var picker = findChild(h.app, "savePickerProcess")
+    var dialog = findChild(h.app, "outputConfirm")
+    for (var result of [{code: 1, text: ""}, {code: 0, text: "not json"},
+                        {code: 0, text: JSON.stringify({path: "relative.pdf"})}]) {
+      verify(h.app.saveMediaAs({id: "photo", filename: "trip.jpg"}))
+      picker.stdout.text = result.text
+      picker.running = false
+      picker.exited(result.code)
+      verify(!dialog.opened)
+      compare(h.service.savedOutput, null)
+    }
   }
 
   function test_save_as_falls_back_to_an_extension_when_the_name_is_missing() {
@@ -1382,8 +1417,8 @@ TestCase {
     verify(app.saveMediaAs({ id: "photo", media_type: "image", mime_type: "image/jpeg" }))
     var process = findChild(app, "savePickerProcess")
     verify(process.running)
-    verify(process.command.filter(function(arg) {
-      return arg.indexOf("--filename=") === 0 && arg.endsWith("/Downloads/photo.jpg") }).length === 1)
+    compare(JSON.parse(process.payload).name, "photo.jpg")
+    verify(process.command.join(" ").indexOf("photo.jpg") < 0, "private name stays out of argv")
   }
 
   function test_app_reports_when_the_conversation_is_on_screen() {

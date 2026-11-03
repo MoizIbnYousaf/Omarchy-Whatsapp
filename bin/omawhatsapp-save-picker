@@ -1,0 +1,100 @@
+#!/usr/bin/python3
+"""Native save dialog. Private suggested names arrive only through stdin.
+
+Uses the GTK 4 runtime already required by zenity; no shell, arguments carrying
+attachment names, temporary files or additional Python packages. This process
+only selects a destination. The app separately obtains overwrite consent.
+"""
+import ctypes as C
+import json
+from pathlib import Path
+import sys
+
+
+def request(stream):
+    raw = stream.read(4097)
+    if len(raw) > 4096:
+        raise ValueError("request too large")
+    value = json.loads(raw)
+    name = value.get("name") if isinstance(value, dict) else None
+    if (not isinstance(name, str) or not name or name in (".", "..")
+            or any(ord(c) < 32 or c in "/\\" for c in name)
+            or len(name.encode("utf-8")) > 240):
+        raise ValueError("invalid suggested name")
+    return name
+
+
+def bind(lib, name, result, *args):
+    fn = getattr(lib, name)
+    fn.restype = result
+    fn.argtypes = list(args)
+    return fn
+
+
+def choose(name):
+    gtk = C.CDLL("libgtk-4.so.1")
+    glib = C.CDLL("libglib-2.0.so.0")
+    obj = C.CDLL("libgobject-2.0.so.0")
+    gio = C.CDLL("libgio-2.0.so.0")
+    ptr = C.c_void_p
+    if not bind(gtk, "gtk_init_check", C.c_int)():
+        raise RuntimeError("display unavailable")
+    new = bind(gtk, "gtk_file_chooser_native_new", ptr,
+               C.c_char_p, ptr, C.c_int, C.c_char_p, C.c_char_p)
+    dialog = new(b"Save attachment", None, 1, b"Select", b"Cancel")
+    if not dialog:
+        raise RuntimeError("dialog unavailable")
+    loop = bind(glib, "g_main_loop_new", ptr, ptr, C.c_int)(None, 0)
+    quit_loop = bind(glib, "g_main_loop_quit", None, ptr)
+    unref = bind(obj, "g_object_unref", None, ptr)
+    free = bind(glib, "g_free", None, ptr)
+    result = []
+    callback_type = C.CFUNCTYPE(None, ptr, C.c_int, ptr)
+
+    @callback_type
+    def response(_dialog, code, _data):
+        if code == -3:  # GTK_RESPONSE_ACCEPT
+            file = bind(gtk, "gtk_file_chooser_get_file", ptr, ptr)(dialog)
+            if file:
+                path = bind(gio, "g_file_get_path", ptr, ptr)(file)
+                if path:
+                    result.append(C.string_at(path).decode("utf-8", errors="replace"))
+                    free(path)
+                unref(file)
+        quit_loop(loop)
+
+    bind(obj, "g_signal_connect_data", C.c_ulong,
+         ptr, C.c_char_p, callback_type, ptr, ptr, C.c_int)(
+             dialog, b"response", response, None, None, 0)
+    bind(gtk, "gtk_file_chooser_set_current_name", None, ptr, C.c_char_p)(
+        dialog, name.encode("utf-8"))
+    folder = Path.home() / "Downloads"
+    if folder.is_dir():
+        file = bind(gio, "g_file_new_for_path", ptr, C.c_char_p)(str(folder).encode())
+        bind(gtk, "gtk_file_chooser_set_current_folder", C.c_int, ptr, ptr, ptr)(
+            dialog, file, None)
+        unref(file)
+    try:
+        bind(gtk, "gtk_native_dialog_show", None, ptr)(dialog)
+        bind(glib, "g_main_loop_run", None, ptr)(loop)
+    finally:
+        bind(gtk, "gtk_native_dialog_destroy", None, ptr)(dialog)
+        unref(dialog)
+        bind(glib, "g_main_loop_unref", None, ptr)(loop)
+    return result[0] if result else None
+
+
+def main():
+    try:
+        path = choose(request(sys.stdin.buffer))
+        if path is None:
+            return 1
+        print(json.dumps({"path": path}, ensure_ascii=True))
+        return 0
+    except (ValueError, OSError, AttributeError, RuntimeError):
+        print("Save dialog unavailable; check the GTK 4 runtime and desktop session.", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

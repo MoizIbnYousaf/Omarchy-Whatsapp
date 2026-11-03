@@ -193,6 +193,15 @@ TestCase {
     compare(AccountModel.viewCount(chats, "", "archived"), 1)
   }
 
+  function test_save_name_preserves_extension_and_bounds_utf8() {
+    var longAscii = "a".repeat(180)
+    compare(AccountModel.saveNameFor({ filename: longAscii + ".pdf" }).slice(-4), ".pdf")
+    var unicode = AccountModel.saveNameFor({ filename: "界".repeat(120) + ".pdf" })
+    verify(unicode.endsWith(".pdf"))
+    verify(encodeURIComponent(unicode).replace(/%[A-F0-9]{2}/g, "x").length <= 240)
+    compare(AccountModel.saveNameFor({filename: "..."}), "attachment")
+  }
+
   function test_save_as_suggests_the_attachment_name_not_a_placeholder() {
     // The owner's report: "Save as…" always suggested "attachment", losing the
     // original name and its extension.

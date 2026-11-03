@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.19.1 — Reliable attachment saves
+
+- Make Save as work from the bar dropdown as well as the full app. Keep the
+  original account, chat and attachment throughout selection and confirmation.
+- Suggest the attachment filename with a media-type fallback; preserve extensions
+  and bound Unicode names by characters and UTF-8 bytes.
+- Pass suggested names privately through stdin to a GTK 4 native save picker,
+  keeping attachment names out of process arguments and environment.
+- Show the confirmation after the native picker dismisses the dropdown; require
+  explicit overwrite consent and prevent another save from replacing it.
+- Cover picker completion, cancellation, account switches and long filenames;
+  correct a timezone-dependent test assertion. Thanks to @zulhamsy for #29.
+
 ## 0.19.0 — Chats by position, clear send outcomes and quiet test runs
 
 - Open a chat by its position in the full app with Alt+1–Alt+9, following the current

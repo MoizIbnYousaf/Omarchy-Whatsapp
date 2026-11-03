@@ -25,7 +25,7 @@ test:
 	# Compile-check without writing .pyc beside the sources. The shell watches
 	# this folder and hot-reloads on any write, which can crash it (Omarchy
 	# #11929 / #12859); the launcher's bytecode belongs in the user cache.
-	python3 -c "$$python_syntax_check" bin/omawhatsapp bin/omawhatsapp_core.py bin/omawhatsapp_assets.py bin/omawhatsapp-mcp
+	python3 -c "$$python_syntax_check" bin/omawhatsapp bin/omawhatsapp_core.py bin/omawhatsapp_assets.py bin/omawhatsapp-mcp bin/omawhatsapp-save-picker
 	OMAW_SCRIPT="$(CURDIR)/bin/omawhatsapp_core.py" python3 -B -m unittest discover -s tests -v
 	jq empty manifest.json
 

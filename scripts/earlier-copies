@@ -53,7 +53,7 @@ def generate() -> str:
     skills: set[str] = set()
     for commit in git("rev-list", SOURCE).decode("ascii").split():
         skill: list[tuple[str, bytes]] = []
-        for entry in git("ls-tree", "-r", "-z", commit).split(b"\0"):
+        for entry in git("ls-tree", "--full-tree", "-r", "-z", commit).split(b"\0"):
             if not entry:
                 continue
             meta, raw_path = entry.split(b"\t", 1)

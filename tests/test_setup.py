@@ -699,7 +699,7 @@ class EarlierCopiesTests(unittest.TestCase):
                 (home / name).write_bytes(self.git("show", f"{self.SOURCE}:bin/{name}"))
                 self.assertTrue(backend_module.Backend._is_earlier_copy(home / name), name)
             skill = home / "skills" / "omawhatsapp"
-            listing = self.git("ls-tree", "-r", "--name-only", self.SOURCE, "skills/omawhatsapp/")
+            listing = self.git("ls-tree", "--full-tree", "-r", "--name-only", self.SOURCE, "skills/omawhatsapp/")
             for path in listing.decode("utf-8").split():
                 copy = skill / path.removeprefix("skills/omawhatsapp/")
                 copy.parent.mkdir(parents=True, exist_ok=True)

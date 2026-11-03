@@ -1397,19 +1397,18 @@ Item {
     filePickerProcess.running = true
   }
 
-  // Save as…: a zenity save dialog, then the helper copies the attachment
+  // Save as…: a private native save dialog, then the helper copies the attachment
   // (downloading it first, without pausing sync, when it is not local yet).
   function saveMediaAs(item) {
-    if (!item || !item.id || savePickerProcess.running) return false
+    if (!item || !item.id || savePickerProcess.running || outputConfirm.opened) return false
     var origin = currentChatRef()
     if (origin.jid === "" || root.demoMode || !root.service) return false
     if (!zenityReady()) return false
     savePickerProcess.item = item
     savePickerProcess.originRef = AccountModel.chatRef(origin.account, origin.jid)
-    savePickerProcess.command = ["/usr/bin/zenity", "--file-selection", "--save",
-      "--title=Save attachment",
-      "--filename=" + String(Quickshell.env("HOME") || "") + "/Downloads/"
-        + AccountModel.saveNameFor(item)]
+    savePickerProcess.payload = JSON.stringify({name: AccountModel.saveNameFor(item)})
+    savePickerProcess.command = [decodeURIComponent(String(Qt.resolvedUrl("../../bin/omawhatsapp-save-picker")).replace(/^file:\/\//, ""))]
+    savePickerProcess.stdinEnabled = true
     savePickerProcess.running = true
     return true
   }
@@ -2488,14 +2487,25 @@ Item {
         objectName: "savePickerProcess"
         property var item: null
         property var originRef: AccountModel.chatRef("", "")
+        property string payload: ""
+        onStarted: {
+          write(payload + "\n")
+          payload = ""
+          stdinEnabled = false
+        }
         command: []
         stdout: StdioCollector { id: savePickerOutput }
         onExited: function(exitCode) {
           var target = originRef
-          var chosen = String(savePickerOutput.text || "").trim()
+          var attachment = item
+          item = null
+          payload = ""
+          var chosen = ""
+          try { chosen = String(JSON.parse(savePickerOutput.text).path || "") } catch (error) {}
           originRef = AccountModel.chatRef("", "")
+          if (exitCode > 1) root.showToast("Save dialog unavailable. Check the GTK 4 runtime and desktop session.")
           if (exitCode !== 0 || chosen.charAt(0) !== "/" || !root.service) return
-          outputConfirm.pending = {kind: "media", target: target, item: item, path: chosen}
+          outputConfirm.pending = {kind: "media", target: target, item: attachment, path: chosen}
           outputConfirm.open()
         }
       }

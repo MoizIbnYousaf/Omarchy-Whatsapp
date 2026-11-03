@@ -46,6 +46,7 @@ TestCase {
         return true
       }
       function pasteClipboard(ref, owner) { pastes += 1; return true }
+      property string helperPath: "/synthetic/bin/omawhatsapp"
       property bool zenityAvailable: true
       property var savedMedia: null
       function saveMedia(target, item, path, owner) {
@@ -268,6 +269,74 @@ TestCase {
     compare(handed.contact.shared_by, "Sam")
   }
 
+  function saveHarness() {
+    var service = createTemporaryObject(serviceStub, testCase, { writing: false })
+    var dropdown = createTemporaryObject(dropdownComponent, testCase,
+      { demoMode: false, service: service })
+    dropdown.open()
+    dropdown.openConversation({account: "work", jid: "original@example", name: "Synthetic"})
+    verify(dropdown.saveMediaAs({id: "photo", filename: "trip.jpg"}))
+    return {dropdown: dropdown, service: service,
+      picker: findChild(dropdown, "dropdownSavePicker")}
+  }
+
+  function finishSavePicker(h, path, exitCode) {
+    h.picker.stdout.text = JSON.stringify({path: path.replace(/\n$/, "")})
+    h.picker.running = false
+    h.picker.exited(exitCode)
+  }
+
+  function test_picker_completion_reopens_closed_dropdown_and_keeps_exact_target() {
+    var h = saveHarness()
+    h.dropdown.close() // A real native picker can dismiss the bar panel.
+    h.dropdown.open()
+    h.dropdown.openConversation({account: "personal", jid: "other@example", name: "Other"})
+    h.dropdown.close()
+    finishSavePicker(h, "/synthetic/trip.jpg\n", 0)
+    verify(h.dropdown.opened, "the save confirmation must be visible")
+    verify(h.dropdown.saveConfirmOpen)
+    compare(h.service.savedMedia, null, "picker completion never grants overwrite consent")
+    var confirm = findChild(h.dropdown, "dropdownSaveConfirm")
+    verify(confirm.visible)
+    verify(confirm.handleKey({key: Qt.Key_Return}))
+    compare(h.service.savedMedia.target.account, "work")
+    compare(h.service.savedMedia.target.jid, "original@example")
+    compare(h.service.savedMedia.item.id, "photo")
+    compare(h.service.savedMedia.path, "/synthetic/trip.jpg")
+    h.dropdown.close()
+  }
+
+  function test_picker_confirmation_is_visible_above_the_chat_list() {
+    var h = saveHarness()
+    h.dropdown.close()
+    h.dropdown.open()
+    compare(h.dropdown.viewMode, "chats")
+    finishSavePicker(h, "/synthetic/trip.jpg", 0)
+    verify(findChild(h.dropdown, "dropdownSaveConfirm").visible)
+    h.dropdown.cancelSave()
+    compare(h.service.savedMedia, null)
+    h.dropdown.close()
+  }
+
+  function test_save_cancel_and_picker_failure_never_write() {
+    var h = saveHarness()
+    h.dropdown.close()
+    finishSavePicker(h, "", 1)
+    verify(!h.dropdown.opened)
+    verify(!h.dropdown.saveConfirmOpen)
+    compare(h.service.savedMedia, null)
+    h.dropdown.open()
+    h.dropdown.openConversation({account: "work", jid: "original@example", name: "Synthetic"})
+    verify(h.dropdown.saveMediaAs({id: "second", filename: "two.pdf"}))
+    finishSavePicker(h, "/synthetic/two.pdf\n", 0)
+    verify(!h.dropdown.saveMediaAs({id: "third"}), "do not replace pending consent")
+    var confirm = findChild(h.dropdown, "dropdownSaveConfirm")
+    verify(confirm.handleKey({key: Qt.Key_Escape}))
+    compare(h.service.savedMedia, null)
+    compare(h.dropdown.pendingSave, null)
+    h.dropdown.close()
+  }
+
   function test_save_as_from_the_bubble_opens_a_dialog_named_for_the_attachment() {
     // The owner's report: "Save as…" in the mini client did nothing at all.
     var service = createTemporaryObject(serviceStub, testCase)
@@ -289,9 +358,9 @@ TestCase {
     var picker = findChild(dropdown, "dropdownSavePicker")
     verify(picker !== null)
     verify(picker.running)
-    verify(picker.command.indexOf("--save") >= 0)
-    verify(picker.command.filter(function(arg) {
-      return arg.indexOf("--filename=") === 0 && arg.endsWith("/Downloads/trip.jpg") }).length === 1)
+    verify(picker.command[0].endsWith("omawhatsapp-save-picker"))
+    compare(JSON.parse(picker.payload).name, "trip.jpg")
+    verify(picker.command.join(" ").indexOf("trip.jpg") < 0, "private name stays out of argv")
     dropdown.close()
   }
 

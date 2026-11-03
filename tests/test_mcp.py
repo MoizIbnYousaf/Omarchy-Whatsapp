@@ -219,7 +219,8 @@ class ProtocolTests(ToolCase):
     def test_times_are_local_and_dates_parse_in_local_time(self) -> None:
         self.assertEqual(mcp.local_time(0), "")
         self.assertEqual(mcp.local_time(1790000000), mcp.local_time(1790000000000))
-        self.assertTrue(mcp.local_time("2026-09-23T18:37:41Z").startswith("2026-09-23"))
+        self.assertEqual(mcp.local_time("2026-09-23T18:37:41Z"),
+                         mcp.local_time(int(mcp.datetime.fromisoformat("2026-09-23T18:37:41+00:00").timestamp())))
         self.assertEqual(mcp.epoch("2026-09-24", "after"),
                          int(mcp.datetime(2026, 9, 24).timestamp()))
         with self.assertRaises(mcp.ToolError):

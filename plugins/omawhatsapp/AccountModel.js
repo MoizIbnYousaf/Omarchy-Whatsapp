@@ -342,7 +342,7 @@ function lastPathSegment(value) {
 
 function safeMediaName(value) {
   return String(value || "").replace(/[^\p{L}\p{N}._\- ()]+/gu, "_")
-    .replace(/^[ .]+/, "").replace(/[ .]+$/, "").slice(0, 120)
+    .replace(/^[ .]+/, "").replace(/[ .]+$/, "")
 }
 
 function mediaExtension(item) {
@@ -358,14 +358,35 @@ function mediaExtension(item) {
 // The default name "Save as…" offers: the attachment's own name when it has
 // one, else its stored path, else the message id plus the media type's
 // extension. The full app and the mini client both use it.
+// Bound both characters and UTF-8 bytes; Linux NAME_MAX counts bytes. Keep a
+// short existing extension outside the truncation budget and never split a
+// surrogate pair. The final name leaves room below the usual 255-byte limit.
+function boundedMediaName(name) {
+  var match = name.match(/(\.[A-Za-z0-9]{1,16})$/)
+  var extension = match ? match[1] : ""
+  var stem = extension ? name.slice(0, -extension.length) : name
+  var result = ""
+  var bytes = extension.length
+  var count = extension.length
+  for (var character of stem) {
+    var point = character.codePointAt(0)
+    var size = point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4
+    if (bytes + size > 240 || count >= 120) break
+    result += character
+    bytes += size
+    count += 1
+  }
+  return result + extension
+}
+
 function saveNameFor(item) {
   var name = safeMediaName(lastPathSegment(item && item.filename))
   if (name === "") name = safeMediaName(lastPathSegment(item && item.local_path))
   if (name === "") {
     var stem = String(item && item.id || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 32)
-    name = safeMediaName(stem + mediaExtension(item))
+    name = stem ? stem + mediaExtension(item) : "attachment" + mediaExtension(item)
   } else if (name.indexOf(".") < 0) {
-    name = safeMediaName(name + mediaExtension(item))
+    name += mediaExtension(item)
   }
-  return name || "attachment"
+  return boundedMediaName(name) || "attachment"
 }
