@@ -19,6 +19,7 @@ TestCase {
       property bool railReady: true
       property bool inputsReady: true
       property bool showUnreadCount: true
+      property bool barIconStatus: true
       property bool notificationsMuted: false
       property int dropdownRows: 7
       property string statusMessage: ""
@@ -105,5 +106,29 @@ TestCase {
     verify(!h.service.closed)
     h.button.pressed(Qt.LeftButton)
     compare(h.service.launches, 1, "an open one just toggles its dropdown")
+  }
+
+  function test_status_colors_off_keeps_a_plain_icon() {
+    var h = createWidget(false)
+    verify(h.button.active, "unread chats tint the icon by default")
+    h.service.barIconStatus = false
+    verify(!h.button.active, "no unread tint")
+    compare(h.button.text, "󰖣 3", "the count still follows its own setting")
+    h.button.pressed(Qt.RightButton)
+    compare(h.service.toggles, 1, "right click still mutes")
+    compare(h.button.text, "󰖣 3", "no crossed bell")
+    verify(!h.button.dimmed, "muted is not dimmed")
+    h.service.closed = true
+    verify(!h.button.dimmed, "closed is not dimmed")
+    h.service.barIconStatus = true
+    verify(h.button.dimmed)
+    compare(h.button.text, "󰖣 3 󰂛")
+  }
+
+  function test_status_colors_off_keeps_the_logo_on_a_vertical_bar() {
+    var h = createWidget(true)
+    h.service.barIconStatus = false
+    h.service.notificationsMuted = true
+    compare(h.button.text, "󰖣")
   }
 }

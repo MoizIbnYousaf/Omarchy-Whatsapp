@@ -17,6 +17,11 @@ BarWidget {
     root.oma ? root.oma.showUnreadCount !== false : true
 
   readonly property bool muted: !!oma && oma.notificationsMuted === true
+  // Off: a plain icon like the rest of the bar, with no unread tint, no
+  // dimming and no crossed bell. Right-click still mutes.
+  readonly property bool showStatus:
+    root.oma ? root.oma.barIconStatus !== false : true
+  readonly property bool showMuted: root.showStatus && root.muted
 
   function refresh() { if (oma) oma.refresh() }
   function dismissNotifications() { if (oma) oma.dismissNotifications("") }
@@ -104,13 +109,13 @@ BarWidget {
     // Muted shows a crossed bell next to the count; a vertical bar has room
     // for one glyph, so the bell replaces the logo there.
     text: root.vertical
-      ? (root.muted ? "󰂛" : "󰖣")
+      ? (root.showMuted ? "󰂛" : "󰖣")
       : "󰖣" + (root.available && root.showUnreadCount && root.unreadCount > 0
         ? " " + (root.unreadCount > 99 ? "99+" : root.unreadCount) : "")
-        + (root.muted ? " 󰂛" : "")
-    active: root.available && root.unreadCount > 0
+        + (root.showMuted ? " 󰂛" : "")
+    active: root.showStatus && root.available && root.unreadCount > 0
     // Closed: grey until it opens again.
-    dimmed: root.muted || (!!root.oma && root.oma.closed === true)
+    dimmed: root.showStatus && (root.muted || (!!root.oma && root.oma.closed === true))
     horizontalMargin: 8
     tooltipText: root.oma ? root.oma.barTooltipWithMute : "OmaWhatsApp · reconnecting"
 

@@ -163,7 +163,8 @@ The supported setting keys are `send_read_receipts` (mark the open chat read;
 per account), `sender_read_receipts` (request sender-facing receipts on every
 mark-read; default `false`, per account, requires wacli 0.19.0+), `read_on_reply`,
 `enter_sends`, `show_avatars`, `auto_refresh_avatars`, `rail_density`
-(`comfortable` or `compact`), `show_unread_count`, `dropdown_rows` (`5`, `7`, or `9`), and
+(`comfortable` or `compact`), `show_unread_count`, `bar_icon_status` (unread tint,
+dimming and muted bell on the bar icon; default `true`), `dropdown_rows` (`5`, `7`, or `9`), and
 `composer_max_lines` (`4`, `6`, `8`, or `10`, default `6`), and `time_format`
 (`auto`, `12h`, or `24h`, default `auto`). Time format is global; `auto` follows
 the system locale in chat previews, messages, and the media viewer. Change them only

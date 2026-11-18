@@ -2817,23 +2817,25 @@ class BackendTests(unittest.TestCase):
         defaults = self.backend.settings()
         self.assertEqual(
             {name: defaults[name] for name in backend_module.UI_PREFERENCES},
-            {"read_on_reply": False, "show_online": False, "notify_reply": True, "enter_sends": True,
+            {"read_on_reply": False, "show_online": False, "notify_reply": True,
+             "bar_icon_status": True, "enter_sends": True,
              "show_avatars": True, "auto_refresh_avatars": False,
              "rail_density": "comfortable", "rail_width": 0},
         )
         updated = self.backend.settings({
             "read_on_reply": False, "enter_sends": False,
             "show_avatars": False, "auto_refresh_avatars": False,
-            "rail_density": "compact",
+            "rail_density": "compact", "bar_icon_status": False,
         })
         self.assertFalse(updated["read_on_reply"])
         self.assertEqual(updated["rail_density"], "compact")
         status = self.backend.status()
         self.assertFalse(status["enter_sends"])
         self.assertFalse(status["show_avatars"])
+        self.assertFalse(status["bar_icon_status"])
         self.assertEqual(status["rail_density"], "compact")
         for bad in ({"read_on_reply": "yes"}, {"rail_density": "tiny"},
-                    {"enter_sends": 1}):
+                    {"enter_sends": 1}, {"bar_icon_status": "off"}):
             with self.assertRaisesRegex(backend_module.OmaWhatsAppError, "unsupported value"):
                 self.backend.settings(bad)
         self.assertFalse(self.backend.settings()["read_on_reply"],

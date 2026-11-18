@@ -331,6 +331,8 @@ Item {
   property string lastAutoReadKey: ""
   property double lastAutoReadAt: 0
   property bool showUnreadCount: true
+  // Off keeps the bar icon plain: no unread tint, no dimming, no muted bell.
+  property bool barIconStatus: true
   property bool checkUpdatesOnLaunch: false
   property int dropdownRows: 7
   property int composerMaxLines: 6
@@ -1805,6 +1807,7 @@ Item {
     root.readOnReply = payload.read_on_reply === true
     root.showOnline = payload.show_online === true
     root.notifyReply = payload.notify_reply !== false
+    root.barIconStatus = payload.bar_icon_status !== false
     root.enterSends = payload.enter_sends !== false
     root.showAvatars = payload.show_avatars !== false
     root.autoRefreshAvatars = payload.auto_refresh_avatars !== false
