@@ -814,6 +814,9 @@ UI_PREFERENCES: dict[str, tuple[Any, Any]] = {
     # Clicking a message popup opens a small reply view by the bar; off, it
     # opens the full app on that chat.
     "notify_reply": (bool, True),
+    # The bar icon tints for unread chats and dims with a crossed bell while
+    # muted or closed; off, it stays plain like the rest of the bar.
+    "bar_icon_status": (bool, True),
     "enter_sends": (bool, True),
     "show_avatars": (bool, True),
     # Off by default: every photo batch pauses sync, and whatever arrives in

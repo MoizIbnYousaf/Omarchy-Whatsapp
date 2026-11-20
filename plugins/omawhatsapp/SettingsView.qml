@@ -146,6 +146,9 @@ Rectangle {
       { kind: "toggle", key: "show_unread_count", title: "Unread count in the bar",
         subtitle: "A local badge on the bar icon.",
         checked: value("showUnreadCount", true), busy: busy },
+      { kind: "toggle", key: "bar_icon_status", title: "Status colors on the bar icon",
+        subtitle: "Tint the icon for unread chats, and dim it with a crossed bell while muted or closed. Turn off for a plain icon like the rest of the bar.",
+        checked: value("barIconStatus", true), busy: busy },
       { kind: "choice", key: "dropdown_rows", title: "Recent chats in the bar dropdown",
         current: value("dropdownRows", 7), prefix: "settingChoice-dropdown_rows-",
         options: [{ value: 5, label: "5" }, { value: 7, label: "7" }, { value: 9, label: "9" }] }

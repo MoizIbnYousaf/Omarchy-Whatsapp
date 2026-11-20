@@ -120,6 +120,9 @@ them keeps the chat list warm in the resident service.
 - The bar badge counts unread chats, not messages; its tooltip gives both.
   Middle-click clears the current batch; right-click mutes every notification
   and shows a crossed bell until you right-click again.
+- Settings → Notifications → Status colors on the bar icon: turn it off for a
+  plain icon that matches the rest of the bar, with no unread tint, no dimming
+  and no crossed bell. Right-click still mutes.
 - Notifications need `notify-send` from libnotify.
 
 ## Several accounts

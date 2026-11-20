@@ -35,6 +35,7 @@ TestCase {
       property bool notificationsSound: true
       property bool notifyAvailable: true
       property bool showUnreadCount: true
+      property bool barIconStatus: true
       property int dropdownRows: 7
       property string railDensity: "comfortable"
       property var accounts: [{ account: "", label: "primary", authenticated: true, online: true, sync_active: true }]
@@ -122,6 +123,7 @@ TestCase {
       ["notifications", "notify", "setNotifications", [false, null, null]],
       ["notifications", "notify_sound", "setNotifications", [null, null, false]],
       ["notifications", "show_unread_count", "setPreference", ["show_unread_count", false]],
+      ["notifications", "bar_icon_status", "setPreference", ["bar_icon_status", false]],
       ["chats", "enter_sends", "setPreference", ["enter_sends", false]],
       ["chats", "show_avatars", "setPreference", ["show_avatars", false]],
       ["media", "auto_download_media", "setAutoDownloadMedia", [false]],
