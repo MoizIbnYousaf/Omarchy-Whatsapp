@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.0 — Optional plain bar icon
+
+- Turn off status styling in Settings → Notifications to keep the WhatsApp icon plain. The unread count and mute controls still work independently. Thanks to @hgtesta for PR #31.
+
 ## 0.19.1 — Reliable attachment saves
 
 - Make Save as work from the bar dropdown as well as the full app. Keep the
