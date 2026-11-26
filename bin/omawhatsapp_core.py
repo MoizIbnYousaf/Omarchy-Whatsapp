@@ -7923,22 +7923,33 @@ class Backend:
             self._validate_transport_targets(args, path)
         if policy == "sync" and not self.online(scoped):
             raise OmaWhatsAppError("Offline mode is on. Go online before syncing WhatsApp.")
-        # The sync to pause is the one holding the lock this command needs.
-        holder = scoped if unit and path in {("auth",), ("sync",)} else None
+        # The syncs to pause are those holding the lock this command needs.
+        holders = [scoped] if unit and path in {("auth",), ("sync",)} else []
         if path == ("accounts", "add"):
             # wacli locks its account config's directory, the root store,
             # whichever account is named.
             root_store = self.account_config.parent.resolve(strict=False)
-            holder = next((candidate for candidate in self.accounts()
-                           if candidate.store_dir == root_store and candidate.unit), None)
+            owner = next((candidate for candidate in self.accounts()
+                          if candidate.store_dir == root_store and candidate.unit), None)
+            if owner is not None:
+                holders = [owner]
+            if owner is not None and owner.unit != SYNC_UNIT:
+                # The original unit syncs the root store even once it is named.
+                holders.append(Account(
+                    LEGACY_ACCOUNT_NAME, owner.store_dir, selector="store"
+                ))
 
-        with self._state_lock(self._lifecycle_lock_name(holder or scoped)):
+        # Every holder shares one store, so one lifecycle lock covers them.
+        with self._state_lock(self._lifecycle_lock_name(holders[0] if holders else scoped)):
             if policy == "sync" and not self.online(scoped):
                 raise OmaWhatsAppError("Offline mode is on. Go online before syncing WhatsApp.")
-            active = holder is not None and self._yield_active_sync(holder)
+            yielded: list[Account] = []
             operation_error: BaseException | None = None
             returncode: int | None = None
             try:
+                for holder in holders:
+                    if self._yield_active_sync(holder):
+                        yielded.append(holder)
                 self._require_private_transport()
                 encoded = json.dumps([*global_args, *args], ensure_ascii=False).encode("utf-8")
                 if len(encoded) > 65536:
@@ -7955,24 +7966,29 @@ class Backend:
                 operation_error = exc
             if path == ("auth",):
                 self._invalidate_doctor_cache(scoped)
-            if active and path == ("auth",) \
+            if yielded and path == ("auth",) \
                     and isinstance(operation_error, OmaWhatsAppAuthRejected):
                 # A known revoked link must not be restarted by crash recovery.
                 # A rejected new account leaves the root store's link intact.
                 self._clear_lifecycle_recovery(scoped.unit)
-            elif active and holder is not None:
+                yielded = []
+            restore_error: tuple[Account, OmaWhatsAppError] | None = None
+            for holder in reversed(yielded):
                 try:
-                    self._restore_yielded_sync(holder, active)
+                    self._restore_yielded_sync(holder, True)
                 except OmaWhatsAppError as exc:
-                    if returncode == 0:
-                        raise OmaWhatsAppPartialError(
-                            "The terminal command completed, but background sync could not restart.",
-                            {"kind": "lifecycle", "committed": True,
-                             "account": holder.name},
-                        ) from exc
-                    raise OmaWhatsAppError(
-                        "Background sync could not be restored after the terminal command."
+                    restore_error = restore_error or (holder, exc)
+            if restore_error is not None:
+                holder, exc = restore_error
+                if returncode == 0:
+                    raise OmaWhatsAppPartialError(
+                        "The terminal command completed, but background sync could not restart.",
+                        {"kind": "lifecycle", "committed": True,
+                         "account": holder.name},
                     ) from exc
+                raise OmaWhatsAppError(
+                    "Background sync could not be restored after the terminal command."
+                ) from exc
             if operation_error is not None:
                 if isinstance(operation_error, OSError):
                     raise OmaWhatsAppError(
