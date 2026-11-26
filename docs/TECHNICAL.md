@@ -238,7 +238,5 @@ logs. An explicit logout fails pairing even if wacli exits zero and leaves
 local credentials behind; a known rejected link is not restarted by recovery.
 Pairing pauses the sync holding the store lock it needs: re-pairing pauses that
 account's own sync, while adding an account pauses the root store's sync,
-because `wacli accounts add` locks the directory of its account config. When
-the root store is registered under a name, this includes `wacli-sync.service`,
-which always syncs the root store. These syncs restart afterwards even if the
-new account is rejected.
+because `wacli accounts add` locks the directory of its account config. That
+sync restarts afterwards even if the new account is rejected.
