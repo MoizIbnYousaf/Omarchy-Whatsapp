@@ -1131,7 +1131,9 @@ class AccountLifecycleTests(unittest.TestCase):
         self.assertEqual(observed_intent, ["wacli-sync@home.service"])
         self.assertEqual(self.backend._lifecycle_recovery_units(), [])
 
-    def _add_account_in_terminal(self, outcome: object) -> list[object]:
+    def _add_account_in_terminal(
+        self, outcome: object, active_units: object = None
+    ) -> list[object]:
         """Run `accounts add` through the real transport; return the call order."""
         completed = subprocess.CompletedProcess([], 0, "", "")
         calls: list[object] = []
@@ -1146,7 +1148,10 @@ class AccountLifecycleTests(unittest.TestCase):
                 raise outcome
             return subprocess.CompletedProcess(command, outcome)
 
-        with mock.patch.object(self.backend, "_unit_active", return_value=True), \
+        def unit_active(unit):
+            return active_units is None or unit in active_units
+
+        with mock.patch.object(self.backend, "_unit_active", side_effect=unit_active), \
                 mock.patch.object(
                     self.backend, "_systemctl_user", side_effect=systemctl
                 ), mock.patch.object(
@@ -1163,22 +1168,29 @@ class AccountLifecycleTests(unittest.TestCase):
     def test_adding_an_account_pauses_the_sync_holding_the_root_store(self) -> None:
         # wacli locks the directory of its account config, the root store,
         # whichever account the new one is added beside.
+        # A root store registered under a name may still be synced by the
+        # original unit, which always syncs the root store.
         root_store = self.backend.account_config.parent
-        owners = (
-            backend_module.Account(
+        legacy, named = "wacli-sync.service", "wacli-sync@main.service"
+        scenarios = (
+            (backend_module.Account(
                 backend_module.LEGACY_ACCOUNT_NAME, root_store, selector="store"
-            ),
-            backend_module.Account("main", root_store, True),
+            ), None, [legacy]),
+            (backend_module.Account("main", root_store, True), {named}, [named]),
+            (backend_module.Account("main", root_store, True), {legacy}, [legacy]),
+            (backend_module.Account("main", root_store, True), None, [named, legacy]),
         )
         outcomes = (0, 1, backend_module.OmaWhatsAppAuthRejected("new link rejected"))
-        for owner in owners:
+        for owner, active_units, paused in scenarios:
             for outcome in outcomes:
-                with self.subTest(owner=owner.name, outcome=outcome):
+                with self.subTest(owner=owner.name, active=active_units, outcome=outcome):
                     self.backend._accounts = [owner, self.home]
                     self.backend._active = None
-                    self.assertEqual(self._add_account_in_terminal(outcome), [
-                        ["stop", owner.unit], "wacli", ["start", owner.unit],
-                    ])
+                    self.assertEqual(
+                        self._add_account_in_terminal(outcome, active_units),
+                        [["stop", unit] for unit in paused] + ["wacli"]
+                        + [["start", unit] for unit in reversed(paused)],
+                    )
                     self.assertEqual(self.backend._lifecycle_recovery_units(), [])
 
     def test_adding_an_account_leaves_syncs_of_other_stores_running(self) -> None:
