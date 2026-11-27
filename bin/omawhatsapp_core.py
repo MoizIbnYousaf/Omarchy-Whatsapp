@@ -7923,12 +7923,19 @@ class Backend:
             self._validate_transport_targets(args, path)
         if policy == "sync" and not self.online(scoped):
             raise OmaWhatsAppError("Offline mode is on. Go online before syncing WhatsApp.")
+        # The sync to pause is the one holding the lock this command needs.
+        holder = scoped if unit and path in {("auth",), ("sync",)} else None
+        if path == ("accounts", "add"):
+            # wacli locks its account config's directory, the root store,
+            # whichever account is named.
+            root_store = self.account_config.parent.resolve(strict=False)
+            holder = next((candidate for candidate in self.accounts()
+                           if candidate.store_dir == root_store and candidate.unit), None)
 
-        with self._state_lock(self._lifecycle_lock_name(scoped)):
+        with self._state_lock(self._lifecycle_lock_name(holder or scoped)):
             if policy == "sync" and not self.online(scoped):
                 raise OmaWhatsAppError("Offline mode is on. Go online before syncing WhatsApp.")
-            active = bool(unit) and path in {("auth",), ("sync",)} \
-                and self._yield_active_sync(scoped)
+            active = holder is not None and self._yield_active_sync(holder)
             operation_error: BaseException | None = None
             returncode: int | None = None
             try:
@@ -7948,18 +7955,20 @@ class Backend:
                 operation_error = exc
             if path == ("auth",):
                 self._invalidate_doctor_cache(scoped)
-            if active and isinstance(operation_error, OmaWhatsAppAuthRejected):
+            if active and path == ("auth",) \
+                    and isinstance(operation_error, OmaWhatsAppAuthRejected):
                 # A known revoked link must not be restarted by crash recovery.
+                # A rejected new account leaves the root store's link intact.
                 self._clear_lifecycle_recovery(scoped.unit)
-            elif active:
+            elif active and holder is not None:
                 try:
-                    self._restore_yielded_sync(scoped, active)
+                    self._restore_yielded_sync(holder, active)
                 except OmaWhatsAppError as exc:
                     if returncode == 0:
                         raise OmaWhatsAppPartialError(
                             "The terminal command completed, but background sync could not restart.",
                             {"kind": "lifecycle", "committed": True,
-                             "account": scoped.name},
+                             "account": holder.name},
                         ) from exc
                     raise OmaWhatsAppError(
                         "Background sync could not be restored after the terminal command."
