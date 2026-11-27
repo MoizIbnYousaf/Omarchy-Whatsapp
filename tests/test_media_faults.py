@@ -9,6 +9,41 @@ import unittest
 ROOT=Path(__file__).resolve().parents[1]
 
 class MediaFaults(unittest.TestCase):
+    def test_worker_never_receives_a_gl_vendor_selection(self):
+        """Issue #32: a GL vendor library loads before the worker's main()."""
+        imports=Path(subprocess.check_output([str(ROOT/'scripts/build-inputs')],text=True).strip())
+        with tempfile.TemporaryDirectory() as directory:
+            temp=Path(directory)
+            module=temp/'OmaWhatsApp/Inputs';module.mkdir(parents=True)
+            for name in ('libomainputs.so','qmldir'):
+                shutil.copyfile(imports/'OmaWhatsApp/Inputs'/name,module/name)
+            worker=module/'omawa-media-worker'
+            # Fails unless the selectors are gone and the rest of the environment is not.
+            worker.write_text('''#!/usr/bin/python3
+import json,os,sys
+json.load(sys.stdin)
+gl=[k for k in os.environ if k.startswith(('__GLX_','__EGL_')) or k in ('LIBGL_DRIVERS_PATH','MESA_LOADER_DRIVER_OVERRIDE')]
+if gl or os.environ.get('OMAW_KEEP')!='kept': sys.exit(1)
+sys.stdout.buffer.write(json.dumps({'w':1,'h':1,'sw':1,'sh':1,'count':1,'index':0,'delay':100}).encode()+b'\\n'+b'\\0'*4)
+''');worker.chmod(0o755)
+            qml=temp/'tst_environment.qml'
+            qml.write_text('''import QtQuick
+import QtTest
+import OmaWhatsApp.Inputs as Native
+TestCase {
+ id: root; name: "WorkerEnvironment"; when: windowShown; visible:true;width:100;height:100
+ Component { id: image; Native.AnimatedImage {width:50;height:50} }
+ function test_gl_selectors_are_removed(){
+   var a=createTemporaryObject(image,root,{source:"file:///synthetic/photo"})
+   tryCompare(a,"status",Image.Ready,5000)
+ }
+}
+''')
+            env=os.environ.copy();env.update(QT_QPA_PLATFORM='offscreen',QT_QUICK_BACKEND='software',QML_IMPORT_PATH=str(temp),WAYLAND_DISPLAY='/nonexistent/omaw-test',
+                __GLX_VENDOR_LIBRARY_NAME='mesa',__EGL_VENDOR_LIBRARY_FILENAMES='/nonexistent/egl.json',LIBGL_DRIVERS_PATH='/nonexistent',MESA_LOADER_DRIVER_OVERRIDE='zink',OMAW_KEEP='kept')
+            result=subprocess.run(['/usr/lib/qt6/bin/qmltestrunner','-input',str(qml),'-o','-,txt'],env=env,text=True,capture_output=True,timeout=60)
+            self.assertEqual(result.returncode,0,result.stdout+'\n'+result.stderr)
+
     def test_parent_survives_untrusted_responses_timeouts_and_budget_pressure(self):
         imports=Path(subprocess.check_output([str(ROOT/'scripts/build-inputs')],text=True).strip())
         with tempfile.TemporaryDirectory() as directory:

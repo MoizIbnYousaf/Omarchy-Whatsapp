@@ -28,6 +28,17 @@ inline QString workerPath() {
          "/omawa-media-worker";
 }
 void pump();
+// libglvnd's libGLX, which the worker links through QtGui, loads the vendor
+// library named by __GLX_VENDOR_LIBRARY_NAME from its constructor, before
+// main() can drop anything. Omarchy sets it on NVIDIA machines and hybrid
+// laptops often set mesa, which maps libgallium and libLLVM: over 200 MiB,
+// enough to break the image worker's 384-MiB address-space budget before it
+// decodes a pixel (issue #32). The worker never renders, so no GL vendor
+// selection reaches it; the parent has to remove it.
+inline bool glVendorSelector(const QString &key) {
+  return key.startsWith("__GLX_") || key.startsWith("__EGL_") ||
+         key == "LIBGL_DRIVERS_PATH" || key == "MESA_LOADER_DRIVER_OVERRIDE";
+}
 class Job : public QObject {
 public:
   QProcess process;
@@ -118,7 +129,8 @@ public:
     (av ? mediaJobs : imageJobs)++;
     auto env = QProcessEnvironment::systemEnvironment();
     for (auto key : env.keys())
-      if (key.startsWith("QT_") || key.startsWith("QML"))
+      if (key.startsWith("QT_") || key.startsWith("QML") ||
+          glVendorSelector(key))
         env.remove(key);
     process.setProcessEnvironment(env);
     process.setProgram(workerPath());
