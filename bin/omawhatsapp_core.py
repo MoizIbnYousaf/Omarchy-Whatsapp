@@ -3164,6 +3164,18 @@ class Backend:
         except OmaWhatsAppError:
             return False
 
+    def _root_store_holder(self) -> Account | None:
+        """The account whose sync holds the lock of the account config's directory.
+
+        wacli takes that lock, the root store's, for ``accounts add``, ``use``
+        and ``remove``, whichever account they name (``withAccountsConfigLock``
+        in cmd/wacli/accounts.go). It is the implicit root account, or a named
+        account registered with the root store.
+        """
+        root_store = self.account_config.parent.resolve(strict=False)
+        return next((candidate for candidate in self.accounts()
+                     if candidate.store_dir == root_store and candidate.unit), None)
+
     def _yield_active_sync(self, account: Account) -> bool:
         """Stop an active unit under its lifecycle lock, leaving crash intent."""
         if not self._sync_active(account):
@@ -3219,8 +3231,11 @@ class Backend:
         stderr_limit: int = MAX_PROCESS_ERROR,
         account: Any = ACTIVE_ACCOUNT,
         private_args: bool = True,
+        lock_holder: Account | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        lifecycle_account = (
+        # lock_holder: the account whose sync holds the lock this command
+        # needs, when that is not the account it runs as.
+        lifecycle_account = lock_holder or (
             self.active if account is ACTIVE_ACCOUNT or account is None else account
         )
         if not isinstance(lifecycle_account, Account):
@@ -4818,11 +4833,22 @@ class Backend:
             if result.returncode != 0:
                 raise OmaWhatsAppError(clean_error(result.stderr or result.stdout,
                     "WhatsApp did not accept the logout; the account stays linked."))
-            removed = False
+        removed = False
+        try:
             if account.selector not in {"implicit", "store"}:
-                removal = self._run(["--json", "accounts", "remove", account.name], timeout=30, account=None)
+                # The entry lives in the root store's config, which wacli locks
+                # while that store's sync runs: pause that sync if it is in the
+                # way. Outside the lock above, which may be the same lock.
+                removal_args = ["--json", "accounts", "remove", account.name]
+                holder = self._root_store_holder()
+                removal = self._run(removal_args, timeout=30, account=None) \
+                    if holder is None else self._mutate(
+                        removal_args, timeout=30, require_online=False,
+                        account=None, lock_holder=holder,
+                    )
                 removed = removal.returncode == 0
-        self._refresh_account_registry()
+        finally:
+            self._refresh_account_registry()
         return {"ok": True, "kind": "unlink", "account": account.name,
                 "removed": removed, "archive_kept": True}
 
@@ -7827,6 +7853,10 @@ class Backend:
                         stdout_limit=output_limit,
                         stderr_limit=output_limit if include_events else MAX_PROCESS_ERROR,
                         account=None,
+                        # These lock the root store, like accounts add.
+                        lock_holder=self._root_store_holder() if path in {
+                            ("accounts", "use"), ("accounts", "remove")
+                        } else None,
                     )
                 except OmaWhatsAppTimeout as exc:
                     if policy not in {"whatsapp-write", "destructive"}:
@@ -7928,9 +7958,7 @@ class Backend:
         if path == ("accounts", "add"):
             # wacli locks its account config's directory, the root store,
             # whichever account is named.
-            root_store = self.account_config.parent.resolve(strict=False)
-            holder = next((candidate for candidate in self.accounts()
-                           if candidate.store_dir == root_store and candidate.unit), None)
+            holder = self._root_store_holder()
 
         with self._state_lock(self._lifecycle_lock_name(holder or scoped)):
             if policy == "sync" and not self.online(scoped):

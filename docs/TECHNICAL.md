@@ -239,7 +239,11 @@ local credentials behind; a known rejected link is not restarted by recovery.
 Pairing pauses the sync holding the store lock it needs: re-pairing pauses that
 account's own sync, while adding an account pauses the root store's sync,
 because `wacli accounts add` locks the directory of its account config. That
-sync restarts afterwards even if the new account is rejected. Known limitation:
+sync restarts afterwards even if the new account is rejected. `accounts use` and
+`accounts remove` take the same lock, so Unlink's removal of the config entry
+and the agent gateway's `accounts use` and `accounts remove` pause and restore
+the root store's sync too when it is in the way, and never pause another
+account's sync on a guess. Known limitation:
 adding an account can still fail with "store is locked" while a leftover
 `wacli-sync.service` runs against a root store that is registered under a name
 or overridden with `WACLI_STORE_DIR`, since that unit is not paused.
