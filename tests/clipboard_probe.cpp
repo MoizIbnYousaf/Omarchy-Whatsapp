@@ -8,6 +8,8 @@
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QDebug>
+#include <QLibraryInfo>
+#include <QVersionNumber>
 class Offer final : public QMimeData {
 public:
  static int reads;
@@ -22,12 +24,28 @@ int main(int argc, char **argv) {
  QGuiApplication app(argc, argv);
  QQmlEngine engine;
  engine.addImportPath(QString::fromLocal8Bit(argv[1])+"/tests/imports");
+ // The counter must observe an explicit read, whatever Qt does implicitly.
+ QGuiApplication::clipboard()->setMimeData(new Offer);
+ (void)QGuiApplication::clipboard()->mimeData()->text();
+ if (Offer::reads == 0) { qCritical()<<"The probe cannot observe clipboard reads"; return 1; }
+ // Positive control. Through Qt 6.12.0 a stock editor acquired the payload
+ // whenever the clipboard changed: canPaste was hasText() && !text().isEmpty().
+ // Qt 6.12.1 checks hasText() only, which reads no payload, so the stock
+ // editor is no longer eager there and the control is informational. The
+ // native editors below must perform zero reads on every Qt version.
+ Offer::reads=0;
  QQmlComponent control(&engine);
  control.setData("import QtQuick\nTextInput {}", QUrl());
  QScopedPointer<QObject> baseline(control.create());
+ if (!baseline) { qCritical()<<control.errors(); return 1; }
  QGuiApplication::clipboard()->setMimeData(new Offer);
  QCoreApplication::processEvents();
- if (!baseline || Offer::reads == 0) return 1;
+ (void)baseline->property("canPaste");
+ const bool stockEager=Offer::reads>0;
+ if (!stockEager && QLibraryInfo::version()<QVersionNumber(6,12,1)) {
+   qCritical()<<"The stock control no longer reproduces the eager read on Qt"<<QLibraryInfo::version().toString();
+   return 1;
+ }
  baseline.reset();
  // Prove the service's runtime bootstrap registers the module before the
  // application files are loaded, without modifying the engine import path.
@@ -61,5 +79,6 @@ int main(int argc, char **argv) {
    }
    if (Offer::reads!=0) { qCritical()<<"Unexpected clipboard read"<<type<<Offer::reads; return 5; }
  }
- qInfo()<<"All native editor classes: zero implicit clipboard reads; read-only transitions and IME pass.";
+ qInfo()<<"All native editor classes: zero implicit clipboard reads; read-only transitions and IME pass."
+        <<(stockEager ? "The stock control read eagerly." : "This Qt's stock editor no longer reads eagerly.");
 }
