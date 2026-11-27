@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.20.1 — Connection status, second accounts and image previews
+
+- Show a connected account as connected again. On systemd 262, journalctl lists
+  search results newest first, so a connected account stayed on connecting.
+  Thanks to @ricardofelixb for #33.
+- Add a second account while the main account is syncing. Linking used to open
+  and close the terminal at once with "store is locked". Thanks to
+  @ricardofelixb for #34. Unlink and the agent gateway's `accounts use` and
+  `accounts remove` take the same lock and now get the same fix: Unlink used to
+  log the account out but leave it listed.
+- Preview images on NVIDIA and hybrid-graphics machines. The graphics-driver
+  choice that Omarchy sets on NVIDIA systems loaded hundreds of megabytes into
+  the image worker before it could decode anything. Thanks to @MatthieuGanush
+  for #32, with the diagnosis and the fix.
+- Say plainly that the agent host, not OmaWhatsApp, decides whether you are
+  asked before an agent changes WhatsApp. Reported in marketplace review.
+- Keep the release gate meaningful on Qt 6.12.1, which no longer reads the
+  clipboard to decide whether Paste is possible.
+
 ## 0.20.0 — Optional plain bar icon
 
 - Turn off status styling in Settings → Notifications to keep the WhatsApp icon plain. The unread count and mute controls still work independently. Thanks to @hgtesta for PR #31.
