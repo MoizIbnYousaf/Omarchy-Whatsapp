@@ -3116,21 +3116,21 @@ class Backend:
                  "_SYSTEMD_INVOCATION_ID=" + invocation,
                  "--grep", r"(?m)^\s*(?:Connected\.|Disconnected\.)\s*$|"
                  r"Logged out of WhatsApp|Stopping sync \(logged out\)|not authenticated",
-                 "--case-sensitive=yes", "--no-pager", "-o", "cat", "-n", "12"], timeout=2,
-                stdout_limit=32768, stderr_limit=1024,
+                 "--case-sensitive=yes", "--no-pager", "-o", "cat", "--reverse", "-n", "12"],
+                timeout=2, stdout_limit=32768, stderr_limit=1024,
             )
             if result.returncode != 0:
                 return "unknown"
-            state = "unknown"
+            # Newest first: some systemd versions imply --reverse for --grep -n, so ask for it.
             for line in result.stdout.splitlines():
                 if "Logged out of WhatsApp" in line or "Stopping sync (logged out)" in line \
                         or "not authenticated" in line.lower():
-                    state = "relink-required"
-                elif line.strip() == "Connected.":
-                    state = "connected"
-                elif line.strip() == "Disconnected.":
-                    state = "unknown"
-            return state
+                    return "relink-required"
+                if line.strip() == "Connected.":
+                    return "connected"
+                if line.strip() == "Disconnected.":
+                    return "unknown"
+            return "unknown"
         except (OSError, subprocess.TimeoutExpired, ProcessOutputLimitExceeded):
             return "unknown"
 

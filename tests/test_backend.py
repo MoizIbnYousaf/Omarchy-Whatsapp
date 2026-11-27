@@ -179,7 +179,7 @@ class BackendTests(unittest.TestCase):
         invocation = "a" * 32
         results = [subprocess.CompletedProcess([], 0, invocation + "\n", ""),
                    subprocess.CompletedProcess([], 0,
-                       "Connected.\nLogged out of WhatsApp (401: logged out from another device). Stopping sync.\n", "")]
+                       "Logged out of WhatsApp (401: logged out from another device). Stopping sync.\nConnected.\n", "")]
         with mock.patch.object(backend_module, "run_bounded", side_effect=results) as run:
             self.assertEqual(self.backend._sync_health(self.backend.active), "relink-required")
         self.assertIn("_SYSTEMD_INVOCATION_ID=" + invocation, run.call_args.args[0])
@@ -255,12 +255,15 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(run.call_count, 1)
 
     def test_sync_health_tracks_disconnect_and_reconnect(self) -> None:
-        for logs, expected in [("Connected.\nDisconnected.\n", "unknown"),
-                               ("Disconnected.\nConnected.\n", "connected")]:
+        # journalctl --grep -n lists newest first (systemd 262 implies --reverse).
+        for logs, expected in [("Disconnected.\nConnected.\n", "unknown"),
+                               ("Connected.\nDisconnected.\nConnected.\n", "connected")]:
             with self.subTest(logs=logs), mock.patch.object(backend_module, "run_bounded", side_effect=[
                     subprocess.CompletedProcess([], 0, "b" * 32, ""),
-                    subprocess.CompletedProcess([], 0, logs, "")]):
+                    subprocess.CompletedProcess([], 0, logs, "")]) as run:
                 self.assertEqual(self.backend._sync_health(self.backend.active), expected)
+                self.assertIn("--reverse", run.call_args.args[0],
+                              "the newest-first order must not depend on the systemd version")
 
     def test_revoked_link_keeps_archive_ready_without_claiming_authentication(self) -> None:
         with mock.patch.object(self.backend, "_doctor_cached", return_value={"authenticated": True}), \
