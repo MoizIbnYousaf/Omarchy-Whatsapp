@@ -70,8 +70,11 @@ An agent connected through `omawhatsapp-mcp` reads what its tools return:
 chat names, message text, contacts, and attachment paths. That content goes
 wherever the agent sends its prompts, which for a hosted model means the
 model provider. Nothing is read until the agent calls a tool for a request,
-the server keeps no copy, and every tool that changes WhatsApp is marked so the
-host asks first. An export writes one private file where the user asked,
+the server keeps no copy, and every tool that changes WhatsApp is marked as a
+write in its MCP annotations. The server asks nothing itself: confirmation is
+the agent host's permission prompt, so a host configured to allow writes
+without asking can change WhatsApp without one. An export writes one private
+file where the user asked,
 refused inside a repository unless separately authorized. A file sent from
 `/tmp` is copied to the mode-`0700` `~/.local/state/omawhatsapp/outgoing`
 folder, because the sandboxed sync service cannot see `/tmp`, and the copy is

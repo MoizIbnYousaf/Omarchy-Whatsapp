@@ -53,8 +53,8 @@ requests receipts with wacli 0.19.0+; WhatsApp privacy settings still apply. Scr
 only. See [privacy](docs/PRIVACY.md).
 
 **Ready for your agent.** An agent skill and an MCP server with 46 tools let
-Claude Code and other agents read and act on WhatsApp for you, asking before
-anything that changes WhatsApp.
+Claude Code and other agents read and act on WhatsApp for you. Tools that
+change WhatsApp are marked so your agent host can ask you before they run.
 
 ## A closer look
 
@@ -166,8 +166,11 @@ closed tomorrow".
 Both are fail-closed. Each of wacli's 104 operations is classified as a local
 read, remote read, local write, sync, WhatsApp write, destructive or
 interactive action; local reads run read-only, and everything else needs your
-request. Tools that change WhatsApp are marked so the client asks you first
-and shows the recipient and the text. Neither ever writes to WhatsApp's
+request. Tools that change WhatsApp are marked as writes in their MCP
+annotations, and a host that honors them asks you first and shows the
+recipient and the text. OmaWhatsApp adds no prompt of its own: whether you are
+asked is the host's permission setting, so a host set to allow writes without
+asking can change WhatsApp without asking. Neither ever writes to WhatsApp's
 database directly, invents a recipient or retries a send that may have gone
 through. Details in the
 [agent gateway reference](skills/omawhatsapp/references/wacli-parity.md).
